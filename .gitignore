@@ -1,0 +1,64 @@
+# =========================================================================
+# SECRETS - never commit these. Recreate on each machine from the examples.
+# =========================================================================
+.env
+.env.*
+!.env.example
+# config_ai.py holds a live API key; copy it manually per machine
+config_ai.py
+*.pem
+*.key
+secrets.*
+credentials*.json
+
+# =========================================================================
+# Database dumps / data (may contain real user data)
+# Every .sql is ignored EXCEPT the schema migrations, which are safe to track.
+# =========================================================================
+*.sql
+!migrations/*.sql
+*.dump
+*.db
+*.sqlite
+*.sqlite3
+PG/
+archive/
+data_export/
+instance/
+deploy/initdb/*.sql
+
+# =========================================================================
+# Backups / archives
+# =========================================================================
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.bak
+backup_*/
+
+# =========================================================================
+# Python
+# =========================================================================
+venv/
+env/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+
+# =========================================================================
+# Flask runtime
+# =========================================================================
+flask_session/
+
+# =========================================================================
+# Logs / OS / editor cruft
+# =========================================================================
+*.log
+.DS_Store
+Thumbs.db
+*.swp

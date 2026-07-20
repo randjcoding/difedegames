@@ -1,0 +1,610 @@
+{% extends "base.html" %}
+
+{% block title %}{{ game.name }}{% endblock %}
+
+{% block styles %}
+<style>
+  .gl-hero {
+    background: var(--df-card-header);
+    border-radius: 14px;
+    overflow: hidden;
+    color: var(--df-dt-header-text);
+    margin-bottom: 2rem;
+  }
+  .gl-hero-inner {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    padding: 2rem;
+  }
+  .gl-hero-img {
+    width: 180px;
+    height: 180px;
+    border-radius: 12px;
+    object-fit: cover;
+    flex-shrink: 0;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  }
+  .gl-hero-placeholder {
+    width: 180px;
+    height: 180px;
+    border-radius: 12px;
+    flex-shrink: 0;
+    background: rgba(255,255,255,0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 4rem;
+    color: var(--df-accent);
+  }
+  .gl-hero-text h1 {
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+    font-size: 2rem;
+  }
+  .gl-hero-text p {
+    opacity: 0.85;
+    font-size: 1.05rem;
+    margin-bottom: 0.75rem;
+  }
+  .gl-hero-meta {
+    display: flex;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+    font-size: 0.9rem;
+    opacity: 0.75;
+  }
+  .gl-hero-meta i {
+    color: var(--df-accent);
+    margin-right: 0.3rem;
+  }
+
+  .gl-stat-card {
+    background: var(--df-card);
+    border-radius: 12px;
+    padding: 1.5rem;
+    text-align: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    border-top: 4px solid var(--df-accent);
+  }
+  .gl-stat-card .stat-value {
+    font-size: 2.25rem;
+    font-weight: 800;
+    color: var(--df-text-card);
+    line-height: 1;
+  }
+  .gl-stat-card .stat-label {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-top: 0.35rem;
+    font-weight: 600;
+  }
+
+  .gl-section {
+    margin-bottom: 2rem;
+  }
+  .gl-section-title {
+    font-weight: 700;
+    font-size: 1.2rem;
+    color: var(--df-text);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .gl-section-title i {
+    color: var(--df-accent);
+  }
+
+  .gl-game-row {
+    background: var(--df-card);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.75rem;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    color: var(--df-text-card);
+  }
+  .gl-game-row .game-info {
+    flex: 1;
+    min-width: 200px;
+  }
+  .gl-game-row .game-info .players-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .gl-game-row .game-info .started-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+  }
+
+  .gl-rules-card {
+    background: var(--df-card);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+  .gl-rules-header {
+    background: var(--df-card-header);
+    color: var(--df-dt-header-text);
+    padding: 0.75rem 1.25rem;
+    font-weight: 700;
+    border-bottom: 2px solid var(--df-accent);
+  }
+  .gl-rules-body {
+    padding: 1.25rem;
+    color: var(--df-text-card);
+    font-size: 0.95rem;
+    line-height: 1.7;
+  }
+
+  .btn-start-game {
+    background: var(--df-accent-gradient);
+    border: none;
+    color: var(--df-btn-primary-text);
+    font-weight: 700;
+    font-size: 1.1rem;
+    padding: 0.75rem 2rem;
+    border-radius: 10px;
+    transition: filter 0.2s, transform 0.2s;
+  }
+  .btn-start-game:hover {
+    filter: brightness(1.1);
+    transform: translateY(-2px);
+    color: var(--df-btn-primary-text);
+  }
+
+  .btn-gl-toggle {
+    border: 2px solid var(--df-accent);
+    color: var(--df-accent);
+    background: transparent;
+    font-weight: 600;
+  }
+  .btn-gl-toggle:hover,
+  .btn-gl-toggle.active,
+  .btn-check:checked + .btn-gl-toggle {
+    background: var(--df-accent);
+    border-color: var(--df-accent);
+    color: var(--df-btn-primary-text, #fff);
+  }
+
+  .btn-resume {
+    background: var(--df-accent-gradient);
+    border: none;
+    color: var(--df-btn-primary-text);
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 0.4rem 1rem;
+    font-size: 0.85rem;
+  }
+  .btn-resume:hover {
+    filter: brightness(1.1);
+    color: var(--df-btn-primary-text);
+  }
+
+  @media (max-width: 768px) {
+    .gl-hero-inner {
+      flex-direction: column;
+      text-align: center;
+      padding: 1.5rem;
+      gap: 1rem;
+    }
+    .gl-hero-img, .gl-hero-placeholder {
+      width: 120px;
+      height: 120px;
+      font-size: 3rem;
+    }
+    .gl-hero-text h1 {
+      font-size: 1.5rem;
+    }
+    .gl-hero-meta {
+      justify-content: center;
+    }
+    .gl-stat-card .stat-value {
+      font-size: 1.75rem;
+    }
+    .gl-game-row {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-3">
+  <!-- Hero Section -->
+  <div class="gl-hero">
+    <div class="gl-hero-inner">
+      {% if game.image_url %}
+        <img src="{{ game.image_url }}" alt="{{ game.name }}" class="gl-hero-img">
+      {% else %}
+        <div class="gl-hero-placeholder"><i class="fas fa-dice"></i></div>
+      {% endif %}
+      <div class="gl-hero-text">
+        <h1>{{ game.name }}</h1>
+        <p>{{ game.description or 'A fun card game for the whole family!' }}</p>
+        <div class="gl-hero-meta">
+          <span><i class="fas fa-users"></i> {{ game.min_players }}–{{ game.max_players }} players</span>
+          <span><i class="fas fa-chart-line"></i> {{ game.scoring_direction or 'low' }} score wins</span>
+          {% if game.has_rounds %}
+          <span><i class="fas fa-sync-alt"></i> Round-based</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats Row -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="gl-stat-card">
+        <div class="stat-value">{{ total_games }}</div>
+        <div class="stat-label">Total Games Played</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="gl-stat-card">
+        <div class="stat-value">{{ family_games }}</div>
+        <div class="stat-label">Your Family's Games</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="gl-stat-card">
+        <div class="stat-value">{{ active_games|length }}</div>
+        <div class="stat-label">Active / Paused</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="gl-stat-card">
+        <div class="stat-value">{{ game.min_players }}–{{ game.max_players }}</div>
+        <div class="stat-label">Players</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active / Paused Games -->
+  {% if active_games %}
+  <div class="gl-section">
+    <div class="gl-section-title">
+      <i class="fas fa-play-circle"></i> Your Active &amp; Paused Games
+    </div>
+    {% for ag in active_games %}
+    <div class="gl-game-row">
+      <div class="game-info">
+        <div class="players-label">
+          {% if ag.is_paused %}
+            <span class="badge bg-warning text-dark me-1">Paused</span>
+          {% else %}
+            <span class="badge bg-success me-1">Active</span>
+          {% endif %}
+          {{ ag.player_names }}
+        </div>
+        <div class="started-label">
+          <i class="fas fa-clock me-1"></i>Started {{ ag.start_time.strftime('%b %d, %Y at %I:%M %p') if ag.start_time else 'Unknown' }}
+          &middot; {{ ag.player_count }} player{{ 's' if ag.player_count != 1 else '' }}
+        </div>
+      </div>
+      <a href="{{ game_url }}?game_id={{ ag.id }}" class="btn btn-resume">
+        <i class="fas fa-play me-1"></i> Resume
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Start New Game Section -->
+  <div class="gl-section">
+    <div class="gl-section-title">
+      <i class="fas fa-plus-circle"></i> Start New Game
+    </div>
+    <div class="gl-rules-card">
+      <div class="gl-rules-header">
+        <i class="fas fa-gamepad me-2"></i>New {{ game.name }} Game
+      </div>
+      <div class="gl-rules-body">
+        <form id="glNewGameForm">
+          <div class="mb-3">
+            <label for="glPlayerCount" class="form-label fw-bold">
+              Number of Players ({{ game.min_players }}–{{ game.max_players }})
+            </label>
+            <select class="form-select" id="glPlayerCount" required>
+              {% for i in range(game.min_players, game.max_players + 1) %}
+              <option value="{{ i }}">{{ i }} Players</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div id="glPlayerSelections"></div>
+          {% if slug != 'five-crowns' %}
+          <hr style="border-color:var(--df-border,#ddd);margin:1rem 0;">
+          <h6 class="fw-bold mb-3" style="color:var(--df-accent);"><i class="fas fa-cog me-1"></i> Game Settings</h6>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Who Wins?</label>
+            <div class="btn-group d-flex" role="group">
+              <input type="radio" class="btn-check" name="glScoringDir" id="glSdHigh" value="high_wins"
+                {% if game.scoring_direction == 'high_wins' %}checked{% endif %} autocomplete="off">
+              <label class="btn btn-gl-toggle" for="glSdHigh"><i class="fas fa-arrow-up me-1"></i>Highest Score</label>
+              <input type="radio" class="btn-check" name="glScoringDir" id="glSdLow" value="low_wins"
+                {% if game.scoring_direction == 'low_wins' %}checked{% endif %} autocomplete="off">
+              <label class="btn btn-gl-toggle" for="glSdLow"><i class="fas fa-arrow-down me-1"></i>Lowest Score</label>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Play Until</label>
+            <div class="btn-group d-flex mb-2" role="group">
+              <button type="button" class="btn btn-gl-toggle gl-target-preset" data-target="100">100</button>
+              <button type="button" class="btn btn-gl-toggle gl-target-preset" data-target="200">200</button>
+              <button type="button" class="btn btn-gl-toggle gl-target-preset active" data-target="500">500</button>
+              <button type="button" class="btn btn-gl-toggle gl-target-preset" data-target="custom">Custom</button>
+            </div>
+            <input type="number" class="form-control d-none" id="glCustomTarget" placeholder="Enter custom target score" min="1">
+            <input type="hidden" id="glTargetScore" value="{{ game.default_target_score or 500 }}">
+          </div>
+          {% endif %}
+          <div class="alert mt-3 mb-3" style="background:var(--df-surface,#f0f0f0);color:var(--df-text,#333);border:1px solid var(--df-border,#ddd);font-size:0.88rem;">
+            <i class="fas fa-info-circle me-1" style="color:var(--df-accent);"></i>
+            <strong>Dealer Order:</strong> The order in which you select players determines the dealing order. Player 1 deals first.
+          </div>
+          <button type="submit" class="btn btn-start-game w-100">
+            <i class="fas fa-play me-2"></i>Start Game
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rules Section -->
+  {% if rules %}
+  <div class="gl-section">
+    <div class="gl-section-title">
+      <i class="fas fa-book"></i> Rules &amp; Details
+    </div>
+    {% for rule in rules %}
+    <div class="gl-rules-card mb-3">
+      <div class="gl-rules-header">
+        <i class="fas fa-scroll me-2"></i>{{ game.name }} Rules
+      </div>
+      <div class="gl-rules-body">
+        {% if rule.get('description_long') %}
+          <div class="mb-3">{{ rule.description_long | safe }}</div>
+        {% endif %}
+        {% if rule.get('rules') %}
+          <div class="mb-3">{{ rule.rules | safe }}</div>
+        {% endif %}
+        {% if rule.get('notes') %}
+          <div>{{ rule.notes | safe }}</div>
+        {% endif %}
+        {% if rule.get('min_players') %}
+        <div class="mt-3 pt-3 border-top">
+          <div class="row text-center">
+            <div class="col-4">
+              <small class="text-muted d-block">Players</small>
+              <strong>{{ rule.min_players }}–{{ rule.max_players }}</strong>
+            </div>
+            {% if rule.get('estimated_duration_minutes') %}
+            <div class="col-4">
+              <small class="text-muted d-block">Duration</small>
+              <strong>~{{ rule.estimated_duration_minutes }} min</strong>
+            </div>
+            {% endif %}
+            {% if rule.get('difficulty_level') %}
+            <div class="col-4">
+              <small class="text-muted d-block">Difficulty</small>
+              <strong>{{ rule.difficulty_level }}</strong>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="text-center my-3 pb-3">
+    <a href="{{ url_for('main.games') }}" class="btn btn-outline-secondary" style="border-radius:10px; padding:0.6rem 1.5rem; font-weight:600;">
+      <i class="fas fa-arrow-left me-1"></i>Back to Games
+    </a>
+  </div>
+  <!-- Add Player Modal -->
+  <div class="modal fade" id="glAddPlayerModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content" style="background:var(--df-surface,#fff);color:var(--df-text,#333);">
+        <div class="modal-header" style="background:var(--df-card-header);color:var(--df-dt-header-text);">
+          <h5 class="modal-title"><i class="fas fa-user-plus me-2"></i>Add New Player</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="glAddPlayerForm">
+            <div class="mb-3">
+              <label class="form-label">First Name</label>
+              <input type="text" class="form-control" id="glFirstName" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Last Name</label>
+              <input type="text" class="form-control" id="glLastName" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Display Name</label>
+              <input type="text" class="form-control" id="glDisplayName" required>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn" id="glSavePlayer" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Save Player</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  const SLUG = "{{ slug }}";
+  const GAME_ID = {{ game.id }};
+  const GAME_URL = "{{ game_url }}";
+  const MIN_P = {{ game.min_players }};
+  const MAX_P = {{ game.max_players }};
+  let players = [];
+  let currentPlayerSelect = null;
+
+  function loadPlayers() {
+    $.get("/api/players", function(data) {
+      players = data;
+      updatePlayerSelections();
+    });
+  }
+
+  function playerLabel(p) {
+    return p.display_name + (p.has_duplicate ? ` (${p.first_name} ${p.last_name})` : '');
+  }
+
+  function updatePlayerSelections() {
+    const count = parseInt($("#glPlayerCount").val());
+    const container = $("#glPlayerSelections");
+    container.empty();
+
+    for (let i = 1; i <= count; i++) {
+      const div = $("<div>").addClass("mb-3");
+      div.append($("<label>").addClass("form-label fw-semibold").text(`Player ${i}`));
+
+      const select = $("<select>")
+        .addClass("form-select gl-player-select")
+        .attr("required", true)
+        .attr("data-player-num", i);
+
+      select.append($("<option>").val("").text("Select Player"));
+      select.append($("<option>").val("new").text("+ Add New Player"));
+
+      const familyPlayers = players.filter(p => !p.is_guest);
+      const crewPlayers = players.filter(p => p.is_guest);
+      const crewGroups = {};
+      crewPlayers.forEach(p => {
+        const gn = p.guest_family_name || 'Other';
+        if (!crewGroups[gn]) crewGroups[gn] = [];
+        crewGroups[gn].push(p);
+      });
+
+      if (familyPlayers.length) {
+        const grp = $('<optgroup>').attr('label', 'Your Family');
+        familyPlayers.forEach(p => grp.append($('<option>').val(p.id).text(playerLabel(p))));
+        select.append(grp);
+      }
+      Object.keys(crewGroups).sort().forEach(name => {
+        const grp = $('<optgroup>').attr('label', 'Crew - ' + name);
+        crewGroups[name].forEach(p => grp.append($('<option>').val(p.id).text(playerLabel(p))));
+        select.append(grp);
+      });
+
+      div.append(select);
+      container.append(div);
+    }
+
+    $(".gl-player-select").change(function() {
+      if ($(this).val() === "new") {
+        currentPlayerSelect = $(this);
+        $("#glAddPlayerForm")[0].reset();
+        new bootstrap.Modal($("#glAddPlayerModal")).show();
+        $(this).val("");
+      }
+    });
+  }
+
+  $("#glPlayerCount").change(updatePlayerSelections);
+  loadPlayers();
+
+  $("#glSavePlayer").click(function() {
+    const firstName = $("#glFirstName").val();
+    const lastName = $("#glLastName").val();
+    const displayName = $("#glDisplayName").val();
+    if (!firstName || !lastName || !displayName) return;
+
+    $.ajax({
+      url: "/api/players",
+      method: "POST",
+      contentType: "application/json",
+      data: JSON.stringify({ first_name: firstName, last_name: lastName, display_name: displayName }),
+      success: function(resp) {
+        bootstrap.Modal.getInstance($("#glAddPlayerModal")).hide();
+        players.push(resp);
+        updatePlayerSelections();
+        if (currentPlayerSelect) {
+          currentPlayerSelect.val(resp.id);
+        }
+      },
+      error: function(xhr) {
+        alert(xhr.responseJSON?.error || "Failed to add player");
+      }
+    });
+  });
+
+  $("#glNewGameForm").submit(function(e) {
+    e.preventDefault();
+    const playerIds = $(".gl-player-select").map(function() { return $(this).val(); }).get();
+
+    if (playerIds.some(id => !id)) {
+      if (typeof AppModal !== 'undefined') AppModal.warning('Missing Players', 'Please select all players.');
+      else alert('Please select all players.');
+      return;
+    }
+    const uniqueIds = new Set(playerIds);
+    if (uniqueIds.size !== playerIds.length) {
+      if (typeof AppModal !== 'undefined') AppModal.warning('Duplicate Player', 'Each player can only be selected once!');
+      else alert('Each player can only be selected once!');
+      return;
+    }
+
+    let url, payload;
+    if (SLUG === "five-crowns") {
+      url = "/api/games/five-crowns/new";
+      payload = { player_ids: playerIds };
+    } else {
+      url = "/api/games/new";
+      payload = {
+        game_id: GAME_ID,
+        player_ids: playerIds,
+        scoring_direction: $("input[name='glScoringDir']:checked").val(),
+        target_score: parseInt($("#glTargetScore").val()) || 500
+      };
+    }
+
+    $.ajax({
+      url: url,
+      method: "POST",
+      contentType: "application/json",
+      data: JSON.stringify(payload),
+      success: function(resp) {
+        window.location.href = GAME_URL + "?game_id=" + resp.id;
+      },
+      error: function(xhr) {
+        if (typeof AppModal !== 'undefined') AppModal.error('Error', xhr.responseJSON?.error || 'Failed to create game');
+        else alert(xhr.responseJSON?.error || 'Failed to create game');
+      }
+    });
+  });
+
+  $(".gl-target-preset").click(function() {
+    $(".gl-target-preset").removeClass("active");
+    $(this).addClass("active");
+    var t = $(this).data("target");
+    if (t === "custom") {
+      $("#glCustomTarget").removeClass("d-none").focus();
+    } else {
+      $("#glCustomTarget").addClass("d-none");
+      $("#glTargetScore").val(t);
+    }
+  });
+  $("#glCustomTarget").on("input", function() {
+    $("#glTargetScore").val($(this).val());
+  });
+})();
+</script>
+{% endblock %}

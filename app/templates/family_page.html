@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% block title %}{{ family.name }} Family{% endblock %}
+
+{% block styles %}
+<style>
+  .family-hero {
+    background: var(--df-card-header);
+    border-radius: 12px;
+    color: var(--df-dt-header-text);
+    padding: 1.5rem 2rem;
+    margin-bottom: 1.5rem;
+    position: relative;
+  }
+  .family-hero h1 { font-weight: 700; margin-bottom: 0.25rem; }
+  .family-hero .badge-role {
+    background: var(--df-accent-gradient);
+    color: var(--df-btn-primary-text);
+    font-size: 0.75rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+  }
+
+  .stat-card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    text-align: center;
+    padding: 1.25rem 1rem;
+    background: var(--df-surface, #fff);
+    color: var(--df-text, #333);
+  }
+  .stat-card .stat-num {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--df-accent);
+    line-height: 1;
+  }
+  .stat-card .stat-label {
+    font-size: 0.8rem;
+    color: var(--df-muted, #999);
+    margin-top: 0.25rem;
+  }
+
+  .member-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid var(--df-border, #eee);
+  }
+  .member-card:last-child { border-bottom: none; }
+  .member-avatar {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    background: var(--df-accent-gradient);
+    color: var(--df-btn-primary-text, #fff);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+  }
+  .member-name { font-weight: 600; font-size: 0.9rem; color: var(--df-text, #333); }
+  .member-sub { font-size: 0.75rem; color: var(--df-muted, #999); }
+
+  .leaderboard-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--df-border, #eee);
+  }
+  .leaderboard-row:last-child { border-bottom: none; }
+  .lb-rank {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--df-border, #f0f0f0);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.8rem;
+    color: var(--df-text, #333);
+    flex-shrink: 0;
+  }
+  .lb-rank-1 { background: #FFD700; color: #333; }
+  .lb-rank-2 { background: #C0C0C0; color: #333; }
+  .lb-rank-3 { background: #CD7F32; color: #fff; }
+
+  .game-stat-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+  }
+  .game-stat-bar .bar {
+    flex: 1;
+    height: 8px;
+    background: var(--df-border, #e0e0e0);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .game-stat-bar .bar-fill {
+    height: 100%;
+    background: var(--df-accent-gradient);
+    border-radius: 4px;
+  }
+
+  .section-card {
+    border: none;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    margin-bottom: 1rem;
+    background: var(--df-surface, #fff);
+    color: var(--df-text, #333);
+  }
+  .section-card .card-header {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text);
+    font-weight: 700;
+    padding: 0.65rem 1rem;
+    border-bottom: 2px solid var(--df-accent);
+  }
+
+  @media (max-width: 768px) {
+    .family-hero { padding: 1rem; }
+    .family-hero h1 { font-size: 1.3rem; }
+    .stat-card .stat-num { font-size: 1.5rem; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-3" style="max-width: 900px;">
+
+  <div class="family-hero">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+      <div>
+        <h1><i class="fas fa-house-user me-2"></i>{{ family.name }}</h1>
+        {% if leader %}
+        <p class="mb-0" style="opacity:0.85;">
+          <i class="fas fa-crown me-1" style="color:#FFD700;"></i>
+          Led by <strong>{{ leader.first_name }} {{ leader.last_name }}</strong>
+          <span class="badge-role ms-2">{{ leader.role | replace('_', ' ') | title }}</span>
+        </p>
+        {% endif %}
+      </div>
+      <div>
+        {% if is_own_family %}
+        <span class="badge bg-success px-3 py-2"><i class="fas fa-home me-1"></i>Your Family</span>
+        {% elif is_allied %}
+        <span class="badge px-3 py-2" style="background:var(--df-accent);color:var(--df-btn-primary-text);"><i class="fas fa-handshake me-1"></i>Crew'd Up</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats Row -->
+  <div class="row mb-3 g-3">
+    <div class="col-4">
+      <div class="stat-card">
+        <div class="stat-num">{{ members|length }}</div>
+        <div class="stat-label">Players</div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="stat-card">
+        <div class="stat-num">{{ total_games }}</div>
+        <div class="stat-label">Games Played</div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="stat-card">
+        <div class="stat-num">{{ stats|length }}</div>
+        <div class="stat-label">Game Types</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <!-- Members -->
+    <div class="col-md-6">
+      <div class="section-card">
+        <div class="card-header">
+          <i class="fas fa-users me-2"></i>Members ({{ members|length }})
+        </div>
+        <div class="card-body p-0">
+          {% for m in members %}
+          <div class="member-card">
+            <div class="member-avatar">{{ m.display_name[0] | upper }}</div>
+            <div>
+              <div class="member-name">{{ m.display_name }}</div>
+              <div class="member-sub">{{ m.first_name }} {{ m.last_name }}{% if m.user_id %} <i class="fas fa-user-check text-success" title="Has login account"></i>{% endif %}</div>
+            </div>
+          </div>
+          {% endfor %}
+          {% if not members %}
+          <div class="text-center py-3 text-muted">No players yet</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Leaderboard -->
+    <div class="col-md-6">
+      <div class="section-card">
+        <div class="card-header">
+          <i class="fas fa-trophy me-2"></i>Family Leaderboard
+        </div>
+        <div class="card-body p-0">
+          {% for p in top_players %}
+          <div class="leaderboard-row">
+            <div class="lb-rank {% if loop.index == 1 %}lb-rank-1{% elif loop.index == 2 %}lb-rank-2{% elif loop.index == 3 %}lb-rank-3{% endif %}">{{ loop.index }}</div>
+            <div class="flex-grow-1">
+              <div style="font-weight:600;font-size:0.9rem;color:var(--df-text,#333);">{{ p.display_name }}</div>
+              <div style="font-size:0.75rem;color:var(--df-muted,#999);">{{ p.wins }} win{{ 's' if p.wins != 1 }} / {{ p.total_games }} game{{ 's' if p.total_games != 1 }}</div>
+            </div>
+            <div style="font-weight:700;color:var(--df-accent);">
+              {% if p.total_games > 0 %}{{ ((p.wins / p.total_games) * 100) | round(0) | int }}%{% else %}--{% endif %}
+            </div>
+          </div>
+          {% endfor %}
+          {% if not top_players %}
+          <div class="text-center py-3 text-muted">No games played yet</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Games Breakdown -->
+      {% if stats %}
+      <div class="section-card">
+        <div class="card-header">
+          <i class="fas fa-chart-bar me-2"></i>Games Breakdown
+        </div>
+        <div class="card-body">
+          {% set max_games = stats[0].games_played if stats else 1 %}
+          {% for s in stats %}
+          <div class="game-stat-bar">
+            <span style="width:100px;font-size:0.85rem;font-weight:600;color:var(--df-text,#333);">{{ s.game_name }}</span>
+            <div class="bar">
+              <div class="bar-fill" style="width: {{ (s.games_played / max_games * 100) | round(0) }}%"></div>
+            </div>
+            <span style="font-weight:700;font-size:0.85rem;color:var(--df-accent);">{{ s.games_played }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="text-center mt-3 mb-4">
+    <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">
+      <i class="fas fa-arrow-left me-1"></i>Back to Dashboard
+    </a>
+  </div>
+
+</div>
+{% endblock %}

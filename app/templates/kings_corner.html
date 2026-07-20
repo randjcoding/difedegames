@@ -1,0 +1,523 @@
+{% extends "base.html" %} {% block title %}Kings in the Corner{% endblock %} {% block
+content %}
+<div class="kings-container">
+  {% if not active_game %}
+  <div class="new-game-section">
+    <h2>Kings in the Corner</h2>
+
+    {% if paused_games %}
+    <div class="paused-games mb-4">
+      <h3>Paused Games</h3>
+      <div class="list-group">
+        {% for game in paused_games %}
+        <div class="list-group-item d-flex justify-content-between align-items-center py-2">
+          <div class="small">
+            <h6 class="mb-1">Game #{{ game.id }}</h6>
+            <p class="mb-1 text-muted">Players: {{ game.player_names }}</p>
+            <small>Started: {{ game.start_time }}</small>
+          </div>
+          <div>
+            <button class="btn btn-sm resume-game me-2" style="background:#C9A02C;color:#1a1a1a;font-weight:600;" data-game-id="{{ game.id }}">Resume</button>
+            <button class="btn btn-sm complete-paused-game" style="background:#b22234;color:white;" data-game-id="{{ game.id }}">End Game</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if completed_games %}
+    <div class="completed-games mb-4">
+      <div class="d-flex justify-content-between align-items-center">
+        <h3>Recent Completed Games</h3>
+        <button id="clearCompletedGames" class="btn btn-sm" style="background:#1a5c2e;color:white;">Clear History</button>
+      </div>
+      <div class="list-group">
+        {% for game in completed_games %}
+        <div class="list-group-item py-2">
+          <div class="small">
+            <h6 class="mb-1">Game #{{ game.game_number or game.id }}</h6>
+            <p class="mb-1">Players: {{ game.player_names }}</p>
+            {% if game.winner and game.winning_score %}
+            <p class="mb-1 text-success"><strong>Winner: {{ game.winner }} (Score: {{ game.winning_score }})</strong></p>
+            {% else %}
+            <p class="mb-1 text-muted"><em>Game incomplete</em></p>
+            {% endif %}
+            <small class="text-muted">Completed: {{ game.start_time.strftime('%Y-%m-%d %H:%M') if game.start_time else 'Unknown' }}</small>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="new-game-section">
+      <h3>Start New Game</h3>
+      <form id="newGameForm" class="mt-4">
+        <div class="mb-3">
+          <label for="playerCount" class="form-label">Number of Players ({{ game_def.min_players }}-{{ game_def.max_players }})</label>
+          <select class="form-select" id="playerCount" required>
+            {% for i in range(game_def.min_players, game_def.max_players + 1) %}
+            <option value="{{ i }}">{{ i }} Players</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div id="playerSelections"></div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Game Mode</label>
+          <div class="mode-toggle">
+            <button type="button" class="mode-btn active" data-mode="multi"><i class="fas fa-layer-group me-1"></i>Multi-Round</button>
+            <button type="button" class="mode-btn" data-mode="single"><i class="fas fa-trophy me-1"></i>Single Round</button>
+          </div>
+          <small class="text-muted mt-1 d-block" id="modeDescription">Play multiple rounds. Lowest cumulative penalty score wins.</small>
+        </div>
+        <input type="hidden" id="gameMode" value="multi">
+        <button type="submit" class="btn mt-3 w-100 py-2" style="background:linear-gradient(135deg,#1a5c2e,#2d8a4e);color:white;font-weight:600;"><i class="fas fa-play me-2"></i>Start Game</button>
+      </form>
+    </div>
+  </div>
+
+  {% else %}
+  <div class="game-board kings-board" data-game-id="{{ active_game.id }}" data-mode="{{ active_game.scoring_direction }}">
+    <div class="game-header-container position-relative mb-3">
+      <h2 class="game-title text-center mb-0">Kings in the Corner - Active Game</h2>
+      <button type="button" class="btn btn-link p-1 game-info-btn position-absolute" style="border:none;background:none;top:0;right:0;z-index:10;color:#C9A02C;" data-game-id="kings-corner" data-bs-toggle="tooltip" data-bs-placement="top" title="View game rules and information">
+        <i class="fas fa-info-circle fa-lg"></i>
+      </button>
+    </div>
+
+    {% if active_game.scoring_direction == 'single_round' %}
+    <div class="players-display">
+      <h4 class="text-center mb-3" style="color:#C9A02C;">Players</h4>
+      <div class="d-flex flex-wrap justify-content-center gap-3 mb-4">
+        {% for player in game_players %}
+        <div class="player-card text-center">
+          <div class="player-peg"><i class="fas fa-crown" style="color:#C9A02C;font-size:1.5rem;"></i></div>
+          <div class="player-name-label">{{ player.display_name }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="text-center mb-4"><p style="color:#ccc;font-size:0.9rem;">Play your round, then record the results when finished.</p></div>
+    <div class="results-section" id="resultsSection" style="display:none;">
+      <div class="results-card">
+        <h4 class="text-center mb-3">Record Results</h4>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Who Won?</label>
+          <select class="form-select" id="winnerSelect" required>
+            <option value="">Select Winner</option>
+            {% for player in game_players %}
+            <option value="{{ player.id }}" data-name="{{ player.display_name }}">{{ player.display_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div id="loserPenaltyEntries"></div>
+        <div class="sow-summary mt-3 p-3" id="sowSummary" style="display:none;">
+          <h5 class="text-center mb-2" style="color:#C9A02C;"><span class="sow-clickable" title="Strength of Win">SOW</span> Breakdown</h5>
+          <div id="sowDetails"></div>
+          <div class="text-center mt-2"><strong style="font-size:1.2rem;color:#C9A02C;">Total: <span id="sowTotal">0</span> pts</strong></div>
+        </div>
+        <button id="submitSingleResults" class="btn w-100 mt-3 py-2" style="background:linear-gradient(135deg,#1a5c2e,#2d8a4e);color:white;font-weight:600;" disabled><i class="fas fa-check me-2"></i>Complete Game</button>
+      </div>
+    </div>
+    <div class="text-center mt-3 d-flex flex-wrap justify-content-center gap-2">
+      <button id="recordResults" class="btn btn-lg" style="background:#C9A02C;color:#1a1a1a;font-weight:700;"><i class="fas fa-flag-checkered me-2"></i>Game Over - Record Results</button>
+      <a href="{{ url_for('main.kings_corner', new='1') }}" class="btn btn-outline-info btn-sm"><i class="fas fa-plus-circle"></i> New Game</a>
+      <button id="deleteGame" class="btn btn-outline-danger btn-sm" data-game-id="{{ active_game.id }}"><i class="fas fa-trash"></i> Delete</button>
+    </div>
+
+    {% else %}
+    <div class="score-sheet">
+      <div class="table-responsive">
+        <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
+          <thead>
+            <tr class="kings-header">
+              <th class="round-header">Hand</th>
+              {% for player in game_players %}
+              <th class="player-header"><span class="player-name">{{ player.display_name }}</span></th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% set round_numbers = [] %}
+            {% for key, val in scores.items() %}
+              {% if key[1] not in round_numbers %}
+                {% if round_numbers.append(key[1]) %}{% endif %}
+              {% endif %}
+            {% endfor %}
+            {% for round_num in round_numbers|sort %}
+            <tr>
+              <td class="round-cell">{{ round_num }}</td>
+              {% for player in game_players %}
+              <td class="score-cell" data-player="{{ player.id }}" data-round="{{ round_num }}">{{ scores.get((player.id, round_num), '') }}</td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+            <tr class="total-row">
+              <td>Total</td>
+              {% for player in game_players %}
+              <td class="total-cell" data-player="{{ player.id }}">0</td>
+              {% endfor %}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="game-actions">
+      <button id="addHand" class="btn btn-sm" style="background:#C9A02C;color:#1a1a1a;font-weight:600;"><i class="fas fa-plus me-1"></i>Add Hand</button>
+      <button id="pauseGame" class="btn btn-sm" style="background:#b22234;color:white;font-weight:600;">Pause</button>
+      <button id="completeGame" class="btn btn-sm" style="background:linear-gradient(135deg,#1a5c2e,#2d8a4e);color:white;font-weight:600;">Complete</button>
+      <a href="{{ url_for('main.kings_corner', new='1') }}" class="btn btn-outline-info btn-sm"><i class="fas fa-plus-circle"></i> New Game</a>
+      <button id="deleteGame" class="btn btn-outline-danger btn-sm" data-game-id="{{ active_game.id }}"><i class="fas fa-trash"></i> Delete</button>
+    </div>
+    {% endif %}
+  </div>
+
+  <button id="refPanelToggle" class="ref-panel-fab" title="Card Point Reference"><i class="fas fa-list-ol"></i></button>
+  <div id="refPanel" class="ref-panel">
+    <div class="ref-panel-header">
+      <span><i class="fas fa-crown me-1"></i> Point Values</span>
+      <div>
+        <button type="button" id="refPanelPin" class="ref-panel-close me-1" title="Pin open" style="opacity:0.6;"><i class="fas fa-thumbtack"></i></button>
+        <button type="button" id="refPanelClose" class="ref-panel-close"><i class="fas fa-times"></i></button>
+      </div>
+    </div>
+    <div class="ref-panel-body">
+      <table class="ref-table">
+        <tr><td>King</td><td>10</td></tr>
+        <tr><td>Queen</td><td>10</td></tr>
+        <tr><td>Jack</td><td>10</td></tr>
+        <tr><td>10 - 2</td><td>Face Value</td></tr>
+        <tr><td>Ace</td><td>1</td></tr>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="modal fade" id="addPlayerModal">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Add New Player</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <form id="addPlayerForm">
+          <div class="mb-3"><label for="firstName" class="form-label">First Name</label><input type="text" class="form-control" id="firstName" required /></div>
+          <div class="mb-3"><label for="lastName" class="form-label">Last Name</label><input type="text" class="form-control" id="lastName" required /></div>
+          <div class="mb-3"><label for="displayName" class="form-label">Display Name (Optional)</label><input type="text" class="form-control" id="displayName" /></div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="savePlayer">Save Player</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="gameInfoModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Game Information</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body" id="gameInfoContent"><div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div></div>
+    </div>
+  </div>
+</div>
+
+{% endblock %} {% block styles %}
+<style>
+  .kings-container{background:#0a1a0a;background-image:radial-gradient(circle at 25% 25%,rgba(26,92,46,0.12) 0%,transparent 50%),radial-gradient(circle at 75% 75%,rgba(201,160,44,0.08) 0%,transparent 50%);position:relative;padding:2rem;border-radius:10px;margin:20px auto;max-width:1000px;box-shadow:0 4px 12px rgba(0,0,0,0.4);overflow:visible;border-top:4px solid #1a5c2e;border-bottom:4px solid #C9A02C}
+  .new-game-section,.game-board{position:relative;z-index:2}
+  .score-sheet,.new-game-section{background-color:white;color:#212529;padding:2rem;border-radius:8px;box-shadow:0 4px 8px rgba(0,0,0,0.2);margin-bottom:1rem}
+  .new-game-section h2{color:#1a5c2e;margin-bottom:1.5rem}
+  .new-game-section h3{color:#333}
+  .game-board h2,.game-title{color:white;margin-bottom:1.5rem;text-align:center;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
+  .game-header-container{position:relative;z-index:3}
+  .mode-toggle{display:flex;gap:0;border:2px solid #1a5c2e;border-radius:8px;overflow:hidden}
+  .mode-btn{flex:1;padding:0.6rem 1rem;border:none;background:#f8f9fa;color:#333;font-weight:600;font-size:0.9rem;cursor:pointer;transition:background 0.2s,color 0.2s}
+  .mode-btn.active{background:linear-gradient(135deg,#1a5c2e,#2d8a4e);color:white}
+  .mode-btn:hover:not(.active){background:#e9ecef}
+  .player-card{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:12px;padding:1rem 1.5rem;min-width:100px}
+  .player-peg{width:40px;height:40px;border-radius:50%;margin:0 auto 0.5rem;display:flex;align-items:center;justify-content:center;background:rgba(201,160,44,0.15);border:2px solid rgba(201,160,44,0.4)}
+  .player-name-label{color:#fff;font-weight:600;font-size:0.95rem}
+  .sow-clickable{cursor:pointer;text-decoration:underline dotted}
+  .results-card{background:white;color:#212529;border-radius:12px;padding:1.5rem;box-shadow:0 4px 16px rgba(0,0,0,0.3)}
+  .loser-entry{background:#f8f9fa;border-radius:8px;padding:1rem;margin-bottom:0.75rem;border-left:4px solid #1a5c2e}
+  .loser-entry .loser-name{font-weight:700;color:#333;margin-bottom:0.5rem}
+  .loser-entry .penalty-input{width:80px;text-align:center;font-weight:700;font-size:1.1rem}
+  .sow-summary{background:#0a1a0a;border-radius:8px;border:1px solid #1a5c2e;color:#e0e0e0}
+  .sow-line{display:flex;justify-content:space-between;padding:0.25rem 0;font-size:0.9rem;border-bottom:1px solid rgba(255,255,255,0.08)}
+  .sow-line:last-child{border-bottom:none}
+  #scoreTable{width:100%;margin:0;border-collapse:separate;border-spacing:0;border:2px solid #1a5c2e;table-layout:fixed}
+  #scoreTable th,#scoreTable td{text-align:center;padding:8px 4px;border:1px solid #dee2e6;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis}
+  #scoreTable th:first-child,#scoreTable td:first-child{width:80px;min-width:80px;position:sticky;left:0;z-index:4}
+  #scoreTable th:not(:first-child),#scoreTable td:not(:first-child){min-width:100px}
+  .kings-header th{background:#1a5c2e !important;color:white;font-weight:bold;padding:8px 4px;vertical-align:middle;border:1px solid #145224;position:sticky;top:0;z-index:5}
+  .kings-header th:first-child{z-index:6}
+  .player-name{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+  #scoreTable tbody td{border:1px solid #dee2e6;position:relative;padding:8px 4px}
+  .round-cell{background:linear-gradient(45deg,#1a5c2e,#2d8a4e) !important;color:white;font-weight:bold;text-align:center;border:1px solid #145224 !important}
+  .score-cell{background-color:rgba(26,92,46,0.05);cursor:pointer;text-align:center;vertical-align:middle;color:#212529}
+  .score-cell.editing{padding:0 !important;z-index:3;background-color:rgba(26,92,46,0.1);box-shadow:inset 0 0 0 1px #1a5c2e}
+  .score-cell.editing input{width:100%;height:100%;border:none;padding:0.5rem;text-align:center;outline:2px solid #2d8a4e;background:transparent;box-shadow:none;color:#212529}
+  .total-row td{background:linear-gradient(45deg,#d4edda,#e8f5e9);font-weight:bold;text-align:center;border-top:2px solid #1a5c2e !important;color:#212529}
+  .total-row td:first-child{background:#c8e6c9;color:#000}
+  .game-actions{display:flex;flex-wrap:wrap;gap:0.75rem;justify-content:center;align-items:center;margin-top:1rem}
+  .game-actions .btn{padding:8px 16px;font-size:0.95rem}
+  .modal-content{background-color:white;color:#212529;border-radius:8px;box-shadow:0 4px 6px rgba(0,0,0,0.1)}
+  .ref-panel-fab{position:fixed;bottom:20px;right:20px;width:48px;height:48px;border-radius:50%;background:#1a5c2e;color:#C9A02C;border:none;font-size:1.2rem;box-shadow:0 4px 12px rgba(26,92,46,0.5);z-index:1000;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .ref-panel-fab:hover{transform:scale(1.1)}
+  .ref-panel{position:fixed;bottom:80px;right:20px;width:260px;background:#0a1a0a;border:1px solid #1a5c2e;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:999;display:none;overflow:hidden}
+  .ref-panel.open{display:block}
+  .ref-panel-header{display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#1a5c2e,#2d8a4e);color:#C9A02C;padding:8px 12px;font-weight:700;font-size:0.85rem}
+  .ref-panel-close{background:none;border:none;color:#C9A02C;font-size:1rem;cursor:pointer;padding:0 4px;opacity:0.8}
+  .ref-panel-close:hover{opacity:1}
+  .ref-panel-body{padding:8px}
+  .ref-table{width:100%;border-collapse:collapse;font-size:0.85rem;color:#e0e0e0}
+  .ref-table td{padding:5px 10px;border-bottom:1px solid rgba(255,255,255,0.1)}
+  .ref-table td:last-child{text-align:right;font-weight:700;color:#C9A02C}
+  @media(max-width:768px){
+    .kings-container{padding:0.5rem;margin:0;border-radius:6px;max-width:100%}
+    .game-board{padding:0}
+    .game-title{font-size:1rem;margin-bottom:0.3rem !important}
+    .score-sheet{padding:0;margin:0;border-radius:0;box-shadow:none}
+    .table-responsive{overflow-x:auto;-webkit-overflow-scrolling:touch;border:2px solid #1a5c2e;border-radius:4px}
+    #scoreTable{table-layout:fixed;width:calc(36px + var(--pc,2) * 64px);min-width:100%;margin:0;border:none}
+    #scoreTable th:first-child,#scoreTable td:first-child{width:34px;min-width:34px;max-width:34px;position:sticky;left:0;z-index:4;background:#1a5c2e;color:white;font-size:0.72rem;font-weight:bold;padding:2px 1px;border-right:2px solid #145224;text-align:center}
+    #scoreTable th:not(:first-child),#scoreTable td:not(:first-child){padding:2px 1px;font-size:0.78rem;text-align:center}
+    .kings-header th{background:#1a5c2e !important;color:white;padding:3px 1px;font-size:0.65rem;font-weight:700}
+    .player-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.65rem;max-width:58px;margin:0 auto}
+    .score-cell{min-height:34px;height:34px;background:#fff}
+    .score-cell.editing input{min-height:34px;font-size:0.95rem;border:2px solid #2d8a4e}
+    .total-row td{font-size:0.78rem}
+    .total-row td:first-child{background:#1a5c2e !important;color:#fff;z-index:5}
+    .game-actions{gap:0.25rem;margin-top:0.25rem}
+    .game-actions .btn{padding:4px 8px;font-size:0.72rem}
+    .player-card{min-width:80px;padding:0.75rem 1rem}
+  }
+</style>
+{% endblock %} {% block scripts %}
+<script>
+$(document).ready(function(){
+  var players=[];
+  var GAME_ID={{ game_def.id }};
+  var GAME_PLAYERS=[
+    {% for player in game_players %}
+    {id:{{ player.id }},name:"{{ player.display_name }}"}{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
+  var currentRound=1;
+
+  function loadPlayers(){
+    $.get("/api/players",function(data){players=data;updatePlayerSelections();});
+  }
+
+  function updatePlayerSelections(){
+    var count=parseInt($("#playerCount").val());
+    var container=$("#playerSelections");
+    container.empty();
+    for(var i=1;i<=count;i++){
+      var div=$("<div>").addClass("mb-3");
+      div.append($("<label>").addClass("form-label").text("Player "+i));
+      var select=$("<select>").addClass("form-select player-select").attr("required",true).attr("data-player-num",i);
+      select.append($("<option>").val("").text("Select Player"));
+      select.append($("<option>").val("new").text("+ Add New Player"));
+      var familyP=players.filter(function(p){return !p.is_guest;});
+      var crewP=players.filter(function(p){return p.is_guest;});
+      var crewG={};
+      crewP.forEach(function(p){var gn=p.guest_family_name||"Other";if(!crewG[gn])crewG[gn]=[];crewG[gn].push(p);});
+      function pLabel(p){return p.display_name+(p.has_duplicate?" ("+p.first_name+" "+p.last_name+")":"");}
+      if(familyP.length){var grp=$("<optgroup>").attr("label","Your Family");familyP.forEach(function(p){grp.append($("<option>").val(p.id).text(pLabel(p)));});select.append(grp);}
+      Object.keys(crewG).sort().forEach(function(name){var grp=$("<optgroup>").attr("label","Crew - "+name);crewG[name].forEach(function(p){grp.append($("<option>").val(p.id).text(pLabel(p)));});select.append(grp);});
+      div.append(select);container.append(div);
+    }
+    $(".player-select").change(function(){
+      if($(this).val()==="new"){window.currentPlayerSelect=$(this);$("#addPlayerForm")[0].reset();new bootstrap.Modal($("#addPlayerModal")).show();$(this).val("");}
+    });
+    if(count===2){
+      var kim=players.find(function(p){return p.display_name==="Kim";});
+      var joe=players.find(function(p){return p.display_name==="Joe";});
+      if(kim)$(".player-select[data-player-num='1']").val(kim.id);
+      if(joe)$(".player-select[data-player-num='2']").val(joe.id);
+    }
+  }
+
+  $("#playerCount").change(updatePlayerSelections);
+  loadPlayers();
+
+  $(".mode-btn").click(function(){$(".mode-btn").removeClass("active");$(this).addClass("active");var mode=$(this).data("mode");$("#gameMode").val(mode);$("#modeDescription").text(mode==="multi"?"Play multiple rounds. Lowest cumulative penalty score wins.":"One round. Winner gets Strength of Win (SOW) based on opponents' remaining cards.");});
+
+  $("#savePlayer").click(function(){
+    var fn=$("#firstName").val(),ln=$("#lastName").val(),dn=$("#displayName").val();
+    $.ajax({url:"/api/players",method:"POST",contentType:"application/json",data:JSON.stringify({first_name:fn,last_name:ln,display_name:dn}),
+      success:function(r){bootstrap.Modal.getInstance($("#addPlayerModal")).hide();var t=r.display_name+(r.has_duplicate?" ("+r.first_name+" "+r.last_name+")":"");$(".player-select").each(function(){$(this).find('option[value="new"]').before($("<option>").val(r.id).text(t));});if(window.currentPlayerSelect){window.currentPlayerSelect.val(r.id);window.currentPlayerSelect=null;}},
+      error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to add player");}
+    });
+  });
+
+  $("#newGameForm").submit(function(e){
+    e.preventDefault();
+    var ids=$(".player-select").map(function(){return $(this).val();}).get();
+    if(ids.some(function(id){return !id;})){AppModal.warning("Missing Players","Please select all players before starting.");return;}
+    if(new Set(ids).size!==ids.length){AppModal.warning("Duplicate Players","Each player can only be selected once!");return;}
+    var mode=$("#gameMode").val();
+    var scoringDir=mode==="single"?"single_round":"low_wins";
+    $.ajax({url:"/api/games/new",method:"POST",contentType:"application/json",
+      data:JSON.stringify({game_id:GAME_ID,player_ids:ids,scoring_direction:scoringDir,target_score:null}),
+      success:function(r){window.location.href="{{ url_for('main.kings_corner') }}?game_id="+r.id;},
+      error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to create game");}
+    });
+  });
+
+  // ===== MULTI-ROUND SCORE TABLE =====
+  var pc=$("#scoreTable th").length-1;
+  if(pc>0){$("#scoreTable").addClass("players-"+pc);document.documentElement.style.setProperty("--player-count",pc);}
+
+  var existRounds=[];
+  $("#scoreTable .round-cell").each(function(){var rn=parseInt($(this).text().trim());if(!isNaN(rn))existRounds.push(rn);});
+  currentRound=existRounds.length>0?Math.max.apply(null,existRounds)+1:1;
+
+  $("#addHand").click(function(){
+    var row='<tr><td class="round-cell">'+currentRound+'</td>';
+    GAME_PLAYERS.forEach(function(p){row+='<td class="score-cell" data-player="'+p.id+'" data-round="'+currentRound+'"></td>';});
+    row+='</tr>';
+    $(".total-row").before(row);currentRound++;
+  });
+
+  var updateTimer;
+  function updateScore(cell,nv,ov){
+    var gid=$(".game-board").data("game-id");
+    if(nv!==""&&!isNaN(nv)){
+      $.ajax({url:"/api/scores",method:"POST",contentType:"application/json",data:JSON.stringify({game_id:gid,player_id:cell.data("player"),round_number:cell.data("round"),score:parseInt(nv)}),
+        success:function(){cell.removeClass("editing");cell.text(nv);updateTotals();},
+        error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to save score");cell.removeClass("editing");cell.text(ov||"");}
+      });
+    }else{
+      $.ajax({url:"/api/scores",method:"POST",contentType:"application/json",data:JSON.stringify({game_id:gid,player_id:cell.data("player"),round_number:cell.data("round"),score:null}),
+        success:function(){cell.removeClass("editing");cell.text("");updateTotals();},
+        error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to delete score");cell.removeClass("editing");cell.text(ov||"");}
+      });
+    }
+  }
+
+  $(document).on("click",".score-cell",function(){
+    var cell=$(this);
+    if(!cell.hasClass("editing")){
+      var cv=cell.text().trim();cell.data("original-value",cv);cell.addClass("editing");
+      cell.html('<input type="number" class="form-control form-control-sm border-0" value="'+cv+'" inputmode="numeric" style="width:100%;text-align:center;background:transparent;box-shadow:none;">');
+      var inp=cell.find("input");inp.focus().select();
+      inp.on("blur",function(){updateScore(cell,inp.val(),cv);});
+      inp.on("input",function(){clearTimeout(updateTimer);updateTimer=setTimeout(function(){updateScore(cell,inp.val(),cv);},4000);});
+      inp.on("keypress",function(e){if(e.which===13)updateScore(cell,inp.val(),cv);});
+    }
+  });
+
+  $(document).on("keydown",".score-cell input",function(e){
+    var cell=$(this).closest(".score-cell"),cv=cell.data("original-value"),nv=$(this).val();
+    if(e.which===9){e.preventDefault();updateScore(cell,nv,cv);var nc=e.shiftKey?cell.prev(".score-cell"):cell.next(".score-cell");if(!nc.length&&!e.shiftKey){var nr=cell.parent("tr").next("tr");if(nr.length&&!nr.hasClass("total-row"))nc=nr.find(".score-cell").first();}if(nc&&nc.length)nc.click();}
+    else if(e.which===13){e.preventDefault();updateScore(cell,nv,cv);var dr=cell.parent("tr").next("tr");if(dr.length&&!dr.hasClass("total-row"))dr.find(".score-cell").eq(cell.index()-1).click();}
+  });
+
+  function updateTotals(){
+    $(".total-cell").each(function(){var pid=$(this).data("player"),tot=0;$(".score-cell[data-player='"+pid+"']").each(function(){var s=$(this).text().trim();if(s!==""&&!isNaN(parseInt(s)))tot+=parseInt(s);});$(this).text(tot);});
+  }
+  updateTotals();
+
+  $("#completeGame").click(function(){
+    AppModal.confirm("Complete Game","Are you sure you want to complete this game? This cannot be undone.",function(){
+      var gid=$(".game-board").data("game-id");
+      $.ajax({url:"/api/games/complete/"+gid,method:"POST",
+        success:function(r){
+          if(r.summary){AppModal.show({title:"Game Complete!",body:'<pre class="mb-0" style="white-space:pre-wrap;font-family:inherit;">'+r.summary+'</pre>',type:"success"});var m=document.getElementById("appModal");$(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});}
+          else{window.location.reload();}
+        },
+        error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to complete game");}
+      });
+    });
+  });
+
+  $("#pauseGame").click(function(){
+    var gid=$(".game-board").data("game-id");
+    $.ajax({url:"/api/games/pause/"+gid,method:"POST",
+      success:function(){AppModal.show({title:"Game Paused",body:"<p>Returning to Kings in the Corner...</p>",type:"info"});setTimeout(function(){window.location.href="{{ url_for('main.kings_corner') }}";},1500);},
+      error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to pause game");}
+    });
+  });
+
+  // ===== SINGLE-ROUND SOW =====
+  $("#recordResults").click(function(){$(this).hide();$("#resultsSection").slideDown();});
+
+  $("#winnerSelect").change(function(){
+    var wid=parseInt($(this).val()),c=$("#loserPenaltyEntries");c.empty();
+    if(!wid){$("#sowSummary").hide();$("#submitSingleResults").prop("disabled",true);return;}
+    var losers=GAME_PLAYERS.filter(function(p){return p.id!==wid;});
+    losers.forEach(function(l){
+      c.append('<div class="loser-entry" data-player-id="'+l.id+'" data-player-name="'+l.name+'"><div class="d-flex align-items-center justify-content-between"><div class="loser-name">'+l.name+'</div><div class="d-flex align-items-center gap-2"><label class="mb-0" style="font-size:0.85rem;font-weight:600;color:#555;">Penalty:</label><input type="number" class="form-control form-control-sm penalty-input" min="0" value="0" inputmode="numeric"></div></div></div>');
+    });
+    calculateSOW();
+  });
+
+  $(document).on("input",".penalty-input",function(){calculateSOW();});
+
+  function calculateSOW(){
+    var wid=parseInt($("#winnerSelect").val());if(!wid)return;
+    var tot=0,det='';
+    $(".loser-entry").each(function(){var nm=$(this).find(".loser-name").text(),p=parseInt($(this).find(".penalty-input").val())||0;tot+=p;if(p>0)det+='<div class="sow-line"><span>'+nm+' remaining cards</span><span>+'+p+' pts</span></div>';});
+    if(!det)det='<div class="sow-line"><span>No penalties recorded</span><span>0 pts</span></div>';
+    $("#sowDetails").html(det);$("#sowTotal").text(tot);$("#sowSummary").show();$("#submitSingleResults").prop("disabled",false);
+  }
+
+  $("#submitSingleResults").click(function(){
+    var wid=parseInt($("#winnerSelect").val());if(!wid)return;
+    var gid=$(".game-board").data("game-id"),lps=[];
+    $(".loser-entry").each(function(){lps.push({player_id:parseInt($(this).data("player-id")),name:$(this).data("player-name"),penalty:parseInt($(this).find(".penalty-input").val())||0});});
+    $.ajax({url:"/api/games/kings-corner/complete",method:"POST",contentType:"application/json",
+      data:JSON.stringify({game_id:gid,winner_id:wid,loser_penalties:lps}),
+      success:function(r){
+        if(r.summary){AppModal.show({title:"Game Complete!",body:'<pre class="mb-0" style="white-space:pre-wrap;font-family:inherit;">'+r.summary+'</pre>',type:"success"});var m=document.getElementById("appModal");$(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});}
+        else{window.location.reload();}
+      },
+      error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to complete game");}
+    });
+  });
+
+  // ===== COMMON =====
+  $(".resume-game").click(function(){var gid=$(this).data("game-id");$.ajax({url:"/api/games/resume/"+gid,method:"POST",success:function(){AppModal.show({title:"Game Resumed",body:"<p>Loading game...</p>",type:"success"});setTimeout(function(){window.location.href="{{ url_for('main.kings_corner') }}";},1000);},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to resume game");}});});
+
+  $(".complete-paused-game").click(function(){var gid=$(this).data("game-id");AppModal.confirm("End Game","End this game without recording results?",function(){$.ajax({url:"/api/games/complete/"+gid,method:"POST",success:function(){window.location.reload();},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to end game");}});},{confirmText:"End Game",cancelText:"Cancel"});});
+
+  $("#deleteGame").click(function(){var gid=$(this).data("game-id");AppModal.confirm("Delete Game","Are you sure you want to permanently delete this game?",function(){$.ajax({url:"/api/games/delete/"+gid,method:"POST",success:function(){window.location.href="{{ url_for('main.kings_corner') }}";},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to delete game");}});});});
+
+  $("#clearCompletedGames").click(function(){AppModal.confirm("Clear History","Clear all completed game history?",function(){$.ajax({url:"/api/games/five-crowns/clear-history",method:"POST",contentType:"application/json",data:JSON.stringify({game_id:{{ game_def.id }}}),success:function(){window.location.reload();},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to clear history");}});},{confirmText:"Clear History",cancelText:"Cancel"});});
+
+  // SOW tooltip
+  $(document).on("click",".sow-clickable",function(e){e.preventDefault();AppModal.show({title:"Strength of Win (SOW)",body:"<p><strong>SOW</strong> measures how dominant a victory was in single-round play.</p><p>The winner's SOW equals the <strong>total penalty points</strong> from all opponents' remaining cards:</p><ul><li><strong>King, Queen, Jack:</strong> 10 points each</li><li><strong>10 - 2:</strong> Face value</li><li><strong>Ace:</strong> 1 point</li></ul><p>Higher SOW = the losers had more cards left.</p>",type:"info"});});
+
+  // Ref panel
+  var refPinned=false;
+  $("#refPanelToggle").click(function(){$("#refPanel").toggleClass("open");});
+  $("#refPanelClose").click(function(){$("#refPanel").removeClass("open");refPinned=false;$("#refPanelPin").css("opacity","0.6");});
+  $("#refPanelPin").click(function(){refPinned=!refPinned;$(this).css("opacity",refPinned?"1":"0.6");});
+  $(document).click(function(e){if(!refPinned&&!$(e.target).closest("#refPanel,#refPanelToggle").length)$("#refPanel").removeClass("open");});
+
+  // SocketIO
+  function initSock(){
+    if(typeof io==="undefined"){setTimeout(initSock,100);return;}
+    var sock=io({transports:["websocket"],cors:{origin:"*"}});
+    sock.on("connect",function(){ {% if active_game %}sock.emit('join_game',{game_id:{{ active_game.id }}});{% endif %} });
+    window.addEventListener('beforeunload',function(){ {% if active_game %}sock.emit('leave_game',{game_id:{{ active_game.id }}});{% endif %} });
+    sock.on("score_update",function(d){var c=$(".score-cell[data-player='"+d.player_id+"'][data-round='"+d.round_number+"']");if(!c.hasClass("editing")){c.text(d.score===null||d.score===""?"":d.score);updateTotals();}});
+    sock.on("game_completed",function(d){AppModal.show({title:"Game Complete",body:'<pre style="white-space:pre-wrap;font-family:inherit;">'+d.summary+'</pre>',type:"success"});var m=document.getElementById("appModal");$(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});});
+  }
+  initSock();
+
+  // Game info
+  $(document).on("click",".game-info-btn",function(){
+    var gid=$(this).data("game-id"),modal=new bootstrap.Modal(document.getElementById("gameInfoModal")),ct=document.getElementById("gameInfoContent");
+    ct.innerHTML='<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>';modal.show();
+    fetch("/api/game-details/"+gid).then(function(r){return r.json();}).then(function(d){if(d.success){var h='';if(d.details.rules)h+='<div class="mb-3">'+d.details.rules+'</div>';if(d.details.scoring_system)h+='<hr><div>'+d.details.scoring_system+'</div>';ct.innerHTML=h||"<p>No game information available.</p>";}else{ct.innerHTML='<p class="text-danger">Error loading game information.</p>';}}).catch(function(){ct.innerHTML='<p class="text-danger">Error loading game information.</p>';});
+  });
+
+  if(window.innerWidth>768){[].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(function(el){return new bootstrap.Tooltip(el);});}
+});
+</script>
+{% endblock %}

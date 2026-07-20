@@ -1,0 +1,46 @@
+---
+description: Prevent light text on light backgrounds - the most common recurring UI bug in this project
+alwaysApply: true
+---
+
+# Theme Text Contrast Rules
+
+This app uses dark themes where body gets color: var(--df-text) (a LIGHT color like #e0e0e0). Many sections inside the page have white or light backgrounds. Without an explicit dark text override, inherited light text becomes invisible.
+
+## The Rule
+
+Every element with a white or light background MUST explicitly set dark text color.
+
+BAD - white bg inherits light --df-text from body:
+  .my-section { background-color: white; }
+
+GOOD - explicitly set dark text:
+  .my-section { background-color: white; color: #212529; }
+
+ALSO GOOD - use the theme variable:
+  .my-section { background-color: white; color: var(--df-text-card, #212529); }
+
+## Already-Protected Classes (defined in base.html)
+
+These classes already force dark text globally:
+- .new-game-section, .score-sheet, .completed-games, .paused-games
+- .game-details, .list-group-item, .score-cell
+- .bg-light, .card.bg-light, .card-header.bg-light
+- .modal-content, .modal-body, .modal-footer
+- .df-light-bg (utility class for any custom element)
+
+## When Creating New Game Templates
+
+1. Any white-background card, form section, or results panel MUST have color: #212529
+2. If you override .modal-content background to white, also set color: #212529
+3. .form-label inside light sections needs color: var(--df-text-card, #333) -- global rule covers .new-game-section .form-label etc., but custom containers need their own
+4. Never assume Bootstrap default text color will work -- dark themes override body color globally
+
+## Common Offenders
+
+- Score tables / score sheets with white backgrounds
+- New Game form sections
+- Modal content areas
+- Bootstrap .list-group-item (white bg by default)
+- .bg-light sections
+- Form labels (.form-label uses --df-text globally)

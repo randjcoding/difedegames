@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.git/
+.gitignore
+.cursor/
+flask_session/
+*.tar.gz
+backup_*.sql
+backup_difedeappv2*.sql
+PG/
+archive/
+*.log
+.env
+node_modules/

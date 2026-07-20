@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16
+    container_name: difede-games-db
+    environment:
+      POSTGRES_DB: ${PG_DATABASE:-difedeappv2}
+      POSTGRES_USER: ${PG_USER:-difedeapp}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD in .env}
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      # Any .sql/.sh in this folder runs automatically the FIRST time the DB
+      # is created (empty data dir). Drop your backup here to auto-restore.
+      - ./deploy/initdb:/docker-entrypoint-initdb.d:ro,Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-difedeapp} -d ${PG_DATABASE:-difedeappv2}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  web:
+    build: .
+    container_name: difede-games-web
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_HOST: db
+      PG_PORT: 5432
+      PG_DATABASE: ${PG_DATABASE:-difedeappv2}
+      PG_USER: ${PG_USER:-difedeapp}
+      PG_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD in .env}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      DEBUG: "false"
+      # Optional: Gmail app password for outbound email; leave blank to disable
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD:-}
+    ports:
+      - "5002:5002"
+    volumes:
+      - sessions:/app/flask_session
+    restart: unless-stopped
+
+volumes:
+  dbdata:
+  sessions:

@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="difede-dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}DiFede Games{% endblock %}</title>
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <!-- DataTables CSS -->
+    <link href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css" rel="stylesheet" />
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet" />
+
+    <!-- ============ THEME SYSTEM ============ -->
+    <style>
+      /* ── DiFede Dark (default) ── */
+      [data-theme="difede-dark"] {
+        --df-bg: #0f0f1a;
+        --df-surface: #1a1a2e;
+        --df-card: #ffffff;
+        --df-card-header: #16213e;
+        --df-text: #e0e0e0;
+        --df-text-card: #212529;
+        --df-muted: #9a9ab0;
+        --df-accent: #5eead4;
+        --df-accent-hover: #2dd4bf;
+        --df-accent-gradient: linear-gradient(135deg, #5eead4 0%, #2dd4bf 100%);
+        --df-navbar: #16213e;
+        --df-navbar-border: #5eead4;
+        --df-navbar-text: #e0e0e0;
+        --df-navbar-brand: #5eead4;
+        --df-btn-primary-bg: var(--df-accent-gradient);
+        --df-btn-primary-text: #0a2e2a;
+        --df-dt-header: #16213e;
+        --df-dt-header-text: #5eead4;
+        --df-dt-row-alt: #f8f8fa;
+        --df-dt-row: #ffffff;
+        --df-modal-header: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%);
+        --df-footer: #16213e;
+        --df-border: #2a2a4a;
+        --df-link: #5eead4;
+      }
+
+      /* ── DiFede Light ── */
+      [data-theme="classic-light"] {
+        --df-bg: #f4f6f9;
+        --df-surface: #ffffff;
+        --df-card: #ffffff;
+        --df-card-header: #2c3e50;
+        --df-text: #2c3e50;
+        --df-text-card: #2c3e50;
+        --df-muted: #7f8c8d;
+        --df-accent: #2980b9;
+        --df-accent-hover: #2471a3;
+        --df-accent-gradient: linear-gradient(135deg, #2980b9 0%, #3498db 100%);
+        --df-navbar: #2c3e50;
+        --df-navbar-border: #3498db;
+        --df-navbar-text: #ecf0f1;
+        --df-navbar-brand: #3498db;
+        --df-btn-primary-bg: linear-gradient(135deg, #2980b9 0%, #3498db 100%);
+        --df-btn-primary-text: #ffffff;
+        --df-dt-header: #2c3e50;
+        --df-dt-header-text: #ecf0f1;
+        --df-dt-row-alt: #f8f9fa;
+        --df-dt-row: #ffffff;
+        --df-modal-header: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+        --df-footer: #2c3e50;
+        --df-border: #bdc3c7;
+        --df-link: #2980b9;
+      }
+
+      /* ── Midnight Blue ── */
+      [data-theme="midnight-blue"] {
+        --df-bg: #0a0e27;
+        --df-surface: #141832;
+        --df-card: #ffffff;
+        --df-card-header: #1e2749;
+        --df-text: #c5cae9;
+        --df-text-card: #212529;
+        --df-muted: #7986cb;
+        --df-accent: #5c6bc0;
+        --df-accent-hover: #3f51b5;
+        --df-accent-gradient: linear-gradient(135deg, #5c6bc0 0%, #3f51b5 100%);
+        --df-navbar: #1e2749;
+        --df-navbar-border: #5c6bc0;
+        --df-navbar-text: #c5cae9;
+        --df-navbar-brand: #7986cb;
+        --df-btn-primary-bg: linear-gradient(135deg, #5c6bc0 0%, #3f51b5 100%);
+        --df-btn-primary-text: #ffffff;
+        --df-dt-header: #1e2749;
+        --df-dt-header-text: #c5cae9;
+        --df-dt-row-alt: #f5f5ff;
+        --df-dt-row: #ffffff;
+        --df-modal-header: linear-gradient(135deg, #1e2749 0%, #283593 100%);
+        --df-footer: #1e2749;
+        --df-border: #3949ab;
+        --df-link: #7986cb;
+      }
+
+      /* ── Espresso ── */
+      [data-theme="espresso"] {
+        --df-bg: #1a1210;
+        --df-surface: #2a1f1b;
+        --df-card: #fffaf5;
+        --df-card-header: #3d2b1f;
+        --df-text: #e8d5c4;
+        --df-text-card: #2c1810;
+        --df-muted: #a08974;
+        --df-accent: #d4915e;
+        --df-accent-hover: #c47a42;
+        --df-accent-gradient: linear-gradient(135deg, #d4915e 0%, #c47a42 100%);
+        --df-navbar: #3d2b1f;
+        --df-navbar-border: #d4915e;
+        --df-navbar-text: #e8d5c4;
+        --df-navbar-brand: #d4915e;
+        --df-btn-primary-bg: linear-gradient(135deg, #d4915e 0%, #c47a42 100%);
+        --df-btn-primary-text: #1a1210;
+        --df-dt-header: #3d2b1f;
+        --df-dt-header-text: #e8d5c4;
+        --df-dt-row-alt: #f5efe8;
+        --df-dt-row: #fffaf5;
+        --df-modal-header: linear-gradient(135deg, #3d2b1f 0%, #2a1f1b 100%);
+        --df-footer: #3d2b1f;
+        --df-border: #4d3828;
+        --df-link: #d4915e;
+      }
+
+      /* ── Emerald Forest ── */
+      [data-theme="emerald-forest"] {
+        --df-bg: #0a1a14;
+        --df-surface: #142a1e;
+        --df-card: #f5fff8;
+        --df-card-header: #1a3a28;
+        --df-text: #c5e8d4;
+        --df-text-card: #1a2e20;
+        --df-muted: #6dab86;
+        --df-accent: #34d399;
+        --df-accent-hover: #10b981;
+        --df-accent-gradient: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+        --df-navbar: #1a3a28;
+        --df-navbar-border: #34d399;
+        --df-navbar-text: #c5e8d4;
+        --df-navbar-brand: #34d399;
+        --df-btn-primary-bg: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+        --df-btn-primary-text: #0a1a14;
+        --df-dt-header: #1a3a28;
+        --df-dt-header-text: #c5e8d4;
+        --df-dt-row-alt: #f0faf4;
+        --df-dt-row: #f5fff8;
+        --df-modal-header: linear-gradient(135deg, #1a3a28 0%, #142a1e 100%);
+        --df-footer: #1a3a28;
+        --df-border: #2a4a35;
+        --df-link: #34d399;
+      }
+
+      /* ── Rose Wine ── */
+      [data-theme="rose-wine"] {
+        --df-bg: #1a0f14;
+        --df-surface: #2a1a22;
+        --df-card: #fff5f8;
+        --df-card-header: #3d1f2e;
+        --df-text: #e8c5d4;
+        --df-text-card: #2c1020;
+        --df-muted: #b0708a;
+        --df-accent: #f472b6;
+        --df-accent-hover: #ec4899;
+        --df-accent-gradient: linear-gradient(135deg, #f472b6 0%, #ec4899 100%);
+        --df-navbar: #3d1f2e;
+        --df-navbar-border: #f472b6;
+        --df-navbar-text: #e8c5d4;
+        --df-navbar-brand: #f472b6;
+        --df-btn-primary-bg: linear-gradient(135deg, #f472b6 0%, #ec4899 100%);
+        --df-btn-primary-text: #1a0f14;
+        --df-dt-header: #3d1f2e;
+        --df-dt-header-text: #e8c5d4;
+        --df-dt-row-alt: #fef0f5;
+        --df-dt-row: #fff5f8;
+        --df-modal-header: linear-gradient(135deg, #3d1f2e 0%, #2a1a22 100%);
+        --df-footer: #3d1f2e;
+        --df-border: #4d2838;
+        --df-link: #f472b6;
+      }
+
+      /* ── Sunset Blaze ── */
+      [data-theme="sunset-blaze"] {
+        --df-bg: #f8f4ef;
+        --df-surface: #ffffff;
+        --df-card: #ffffff;
+        --df-card-header: #1f1128;
+        --df-text: #3d2c2c;
+        --df-text-card: #3d2c2c;
+        --df-muted: #8a7070;
+        --df-accent: #e85d3a;
+        --df-accent-hover: #d44a2a;
+        --df-accent-gradient: linear-gradient(135deg, #e85d3a 0%, #f59e0b 100%);
+        --df-navbar: #1f1128;
+        --df-navbar-border: #e85d3a;
+        --df-navbar-text: #f0dcd0;
+        --df-navbar-brand: #f59e0b;
+        --df-btn-primary-bg: linear-gradient(135deg, #e85d3a 0%, #f59e0b 100%);
+        --df-btn-primary-text: #ffffff;
+        --df-dt-header: #1f1128;
+        --df-dt-header-text: #f0dcd0;
+        --df-dt-row-alt: #fdf6f0;
+        --df-dt-row: #ffffff;
+        --df-modal-header: linear-gradient(135deg, #1f1128 0%, #3d1a30 100%);
+        --df-footer: #1f1128;
+        --df-border: #e0d0c0;
+        --df-link: #e85d3a;
+      }
+
+      /* ── Arctic Frost ── */
+      [data-theme="arctic-frost"] {
+        --df-bg: #e8eef5;
+        --df-surface: #f4f8fc;
+        --df-card: #ffffff;
+        --df-card-header: #1a2744;
+        --df-text: #2c3e5a;
+        --df-text-card: #2c3e5a;
+        --df-muted: #6b83a0;
+        --df-accent: #0ea5e9;
+        --df-accent-hover: #0284c7;
+        --df-accent-gradient: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
+        --df-navbar: #1a2744;
+        --df-navbar-border: #0ea5e9;
+        --df-navbar-text: #d0e0f0;
+        --df-navbar-brand: #38bdf8;
+        --df-btn-primary-bg: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
+        --df-btn-primary-text: #ffffff;
+        --df-dt-header: #1a2744;
+        --df-dt-header-text: #d0e0f0;
+        --df-dt-row-alt: #eef4fa;
+        --df-dt-row: #ffffff;
+        --df-modal-header: linear-gradient(135deg, #1a2744 0%, #0f1b30 100%);
+        --df-footer: #1a2744;
+        --df-border: #c5d5e5;
+        --df-link: #0ea5e9;
+      }
+
+      /* ── Royal Purple ── */
+      [data-theme="royal-purple"] {
+        --df-bg: #12091e;
+        --df-surface: #1c1030;
+        --df-card: #faf5ff;
+        --df-card-header: #2d1a4e;
+        --df-text: #d4c0f0;
+        --df-text-card: #2d1a4e;
+        --df-muted: #9b7dc8;
+        --df-accent: #a855f7;
+        --df-accent-hover: #9333ea;
+        --df-accent-gradient: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
+        --df-navbar: #2d1a4e;
+        --df-navbar-border: #a855f7;
+        --df-navbar-text: #d4c0f0;
+        --df-navbar-brand: #a855f7;
+        --df-btn-primary-bg: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
+        --df-btn-primary-text: #ffffff;
+        --df-dt-header: #2d1a4e;
+        --df-dt-header-text: #d4c0f0;
+        --df-dt-row-alt: #f5f0ff;
+        --df-dt-row: #faf5ff;
+        --df-modal-header: linear-gradient(135deg, #2d1a4e 0%, #1c1030 100%);
+        --df-footer: #2d1a4e;
+        --df-border: #3d2a5e;
+        --df-link: #a855f7;
+      }
+
+      /* ── Apply Theme Variables ── */
+      body {
+        background-color: var(--df-bg);
+        color: var(--df-text);
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        min-height: 100vh;
+      }
+
+      /* Navbar */
+      .navbar {
+        background-color: var(--df-navbar) !important;
+        border-bottom: 3px solid var(--df-navbar-border);
+        box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+      }
+      .navbar .navbar-brand {
+        color: var(--df-navbar-brand) !important;
+        font-weight: 700;
+        font-size: 1.25rem;
+        letter-spacing: 0.5px;
+      }
+      .navbar .nav-link {
+        color: var(--df-navbar-text) !important;
+        transition: color 0.2s;
+      }
+      .navbar .nav-link:hover {
+        color: var(--df-accent) !important;
+      }
+      .navbar .dropdown-menu {
+        background: var(--df-card);
+        border: 1px solid var(--df-border);
+        right: 0; left: auto; min-width: 220px;
+      }
+      .navbar .dropdown-item { color: var(--df-text-card); }
+      .navbar .dropdown-item:hover { background: var(--df-dt-row-alt); color: var(--df-accent); }
+      .navbar .dropdown-header { color: var(--df-accent); font-weight: 600; }
+      .navbar .dropdown-divider { border-color: var(--df-border); }
+      @media (max-width: 991px) {
+        .navbar .dropdown-menu { position: absolute; right: 15px; left: auto; transform: none; }
+      }
+
+      /* Cards */
+      .card {
+        background: var(--df-card);
+        color: var(--df-text-card);
+        border: 1px solid rgba(0,0,0,0.08);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .card-header {
+        background: var(--df-card-header) !important;
+        color: var(--df-dt-header-text);
+        font-weight: 600;
+        border-bottom: 2px solid var(--df-accent);
+      }
+
+      /* Primary buttons */
+      .btn-primary, .btn-primary:focus {
+        background: var(--df-accent-gradient);
+        border: none;
+        color: var(--df-btn-primary-text);
+        font-weight: 600;
+      }
+      .btn-primary:hover {
+        background: var(--df-accent-gradient);
+        filter: brightness(1.1);
+        color: var(--df-btn-primary-text);
+      }
+
+      /* Links */
+      a { color: var(--df-link); }
+      a:hover { color: var(--df-accent-hover); }
+
+      /* DataTables */
+      .dataTables_wrapper .dataTables_length,
+      .dataTables_wrapper .dataTables_filter,
+      .dataTables_wrapper .dataTables_info,
+      .dataTables_wrapper .dataTables_paginate {
+        color: var(--df-text) !important;
+      }
+      table.dataTable thead th,
+      table.dataTable thead td {
+        background: var(--df-dt-header) !important;
+        color: var(--df-dt-header-text) !important;
+        border-bottom: 2px solid var(--df-accent) !important;
+        font-weight: 600;
+      }
+      table.dataTable tbody tr:nth-child(odd) { background: var(--df-dt-row) !important; }
+      table.dataTable tbody tr:nth-child(even) { background: var(--df-dt-row-alt) !important; }
+      table.dataTable tbody td { color: var(--df-text-card); border-color: rgba(0,0,0,0.05); }
+      .dataTables_wrapper .dataTables_paginate .paginate_button.current {
+        background: var(--df-accent) !important;
+        color: var(--df-btn-primary-text) !important;
+        border-color: var(--df-accent) !important;
+      }
+      .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+        background: var(--df-accent-hover) !important;
+        color: #fff !important;
+        border-color: var(--df-accent-hover) !important;
+      }
+
+      /* Tables (general) */
+      .table td, .table th { vertical-align: middle; text-align: center; }
+      .table-dark { background: var(--df-dt-header) !important; }
+      .table-dark th { color: var(--df-dt-header-text) !important; }
+
+      /* Number input spinners */
+      input[type="number"]::-webkit-inner-spin-button,
+      input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+      input[type="number"] { -moz-appearance: textfield; }
+
+      /* Flash alerts */
+      .alert { border-radius: 8px; }
+
+      /* Themed Modal -- force readable dark text on light modal backgrounds.
+         Modals use white bg by default, but body inherits --df-text (light on
+         dark themes), making modal text invisible. Override globally here. */
+      .modal-content { background-color: #ffffff; color: #212529; }
+      .modal-body { color: #212529; }
+      .modal-body pre { color: #212529; }
+      .modal-footer { color: #212529; }
+      #appModal .modal-content { border-radius: 12px; overflow: hidden; }
+      #appModal .modal-header { background: var(--df-modal-header); color: #fff; border-bottom: none; padding: 1rem 1.5rem; }
+      #appModal .modal-body { padding: 1.5rem; }
+      #appModal .modal-footer { border-top: 1px solid #eee; padding: 0.75rem 1.5rem; }
+      #appModal .btn-primary { background: var(--df-accent-gradient); border: none; }
+      #appModal .btn-primary:hover { filter: brightness(1.1); }
+      /* Fullscreen table modal uses dark bg via inline style -- keep light text */
+      #fullscreenTableModal .modal-content { color: #e0e0e0; }
+      #fullscreenTableModal .modal-body { color: #e0e0e0; }
+
+      /* Theme Switcher Dropdown */
+      .theme-option { cursor: pointer; }
+      .theme-option.active { font-weight: bold; }
+      .theme-option .fa-check { margin-right: 6px; }
+      .theme-swatch {
+        display: inline-block; width: 14px; height: 14px; border-radius: 50%;
+        margin-right: 8px; vertical-align: middle; border: 1px solid rgba(0,0,0,0.15);
+      }
+
+      /* Page headings on dark bg */
+      .page-heading { color: var(--df-text); }
+      .page-heading small { color: var(--df-muted); }
+
+      /* ── Form Controls (Global) ── */
+      .form-control, .form-select {
+        background-color: var(--df-card, #fff);
+        color: var(--df-text-card, #212529);
+        border-color: var(--df-border, #ced4da);
+      }
+      .form-control:focus, .form-select:focus {
+        background-color: var(--df-card, #fff);
+        color: var(--df-text-card, #212529);
+        border-color: var(--df-accent);
+        box-shadow: 0 0 0 0.2rem rgba(0,0,0,0.1);
+      }
+      .form-control::placeholder {
+        color: var(--df-muted, #6c757d);
+        opacity: 0.7;
+      }
+      .form-label {
+        color: var(--df-text);
+      }
+
+      /* ── Light-Background Text Fix (Global) ──
+         On dark themes, body inherits light --df-text. Any section with a
+         white or light background must force dark text so content stays
+         readable. This block covers game templates, Bootstrap defaults,
+         auth pages, and any element using the .df-light-bg utility. */
+
+      .new-game-section,
+      .score-sheet,
+      .paused-games,
+      .completed-games,
+      .game-details,
+      .list-group-item {
+        color: var(--df-text-card, #212529);
+      }
+
+      .new-game-section .form-label,
+      .score-sheet .form-label,
+      .bg-light .form-label,
+      .list-group-item .form-label,
+      .df-light-bg .form-label {
+        color: var(--df-text-card, #333);
+      }
+
+      .new-game-section .text-muted,
+      .score-sheet .text-muted,
+      .completed-games .text-muted,
+      .paused-games .text-muted {
+        color: #6c757d !important;
+      }
+
+      .score-cell {
+        color: #212529;
+      }
+
+      .bg-light,
+      .card.bg-light,
+      .card-header.bg-light {
+        color: var(--df-text-card, #212529) !important;
+      }
+
+      .df-light-bg {
+        color: var(--df-text-card, #212529);
+      }
+
+      /* Mobile */
+      @media (max-width: 768px) {
+        .table td, .table th { padding: 0.5rem; font-size: 0.9rem; }
+        input.form-control-sm { font-size: 0.9rem; padding: 0.25rem; }
+      }
+    </style>
+    {% block styles %}{% endblock %}
+  </head>
+  <body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="{{ url_for('main.index') if not current_user else url_for('main.dashboard') }}">
+          <i class="fas fa-dice"></i> DiFede Games
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+          {% if current_user %}
+          <ul class="navbar-nav me-auto">
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('main.dashboard') }}">
+                <i class="fas fa-home"></i> Dashboard
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('main.games') }}">
+                <i class="fas fa-gamepad"></i> Games
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('main.leaderboard') }}">
+                <i class="fas fa-trophy"></i> Leaderboard
+              </a>
+            </li>
+            {% if current_user.role in ('family_admin', 'super_admin') %}
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('main.my_team') }}">
+                <i class="fas fa-users-cog"></i> My Team
+              </a>
+            </li>
+            {% endif %}
+            {% if current_user.role == 'super_admin' %}
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('main.admin') }}">
+                <i class="fas fa-shield-alt"></i> Admin
+              </a>
+            </li>
+            {% endif %}
+          </ul>
+          <ul class="navbar-nav ms-auto">
+            <!-- Notifications Bell -->
+            <li class="nav-item dropdown">
+              <a class="nav-link position-relative" href="#" id="notifDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="fas fa-bell"></i>
+                <span class="notif-badge position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" id="notifBadge" style="display:none; font-size:0.65rem;">0</span>
+              </a>
+              <div class="dropdown-menu dropdown-menu-end shadow" id="notifMenu" style="min-width:340px; max-height:420px; overflow-y:auto;">
+                <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
+                  <h6 class="mb-0" style="color:var(--df-accent);font-weight:700;">Notifications</h6>
+                  <button class="btn btn-sm btn-link text-muted p-0" id="markAllReadBtn" style="font-size:0.8rem;">Mark all read</button>
+                </div>
+                <div id="notifList"><div class="text-center text-muted py-3" style="font-size:0.85rem;">No notifications</div></div>
+              </div>
+            </li>
+            <!-- Theme Switcher -->
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle" href="#" id="themeDropdown" role="button" data-bs-toggle="dropdown">
+                <i class="fas fa-palette"></i>
+              </a>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li><h6 class="dropdown-header"><i class="fas fa-palette"></i> Theme</h6></li>
+                <li>
+                  <a class="dropdown-item theme-option" data-theme="difede-dark">
+                    <span class="theme-swatch" style="background:#5eead4;"></span> DiFede Dark
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item theme-option" data-theme="classic-light">
+                    <span class="theme-swatch" style="background:#2980b9;"></span> DiFede Light
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item theme-option" data-theme="midnight-blue">
+                    <span class="theme-swatch" style="background:#5c6bc0;"></span> Midnight Blue
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item theme-option" data-theme="espresso">
+                    <span class="theme-swatch" style="background:#d4915e;"></span> Espresso
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item theme-option" data-theme="emerald-forest">
+                    <span class="theme-swatch" style="background:#34d399;"></span> Emerald Forest
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item theme-option" data-theme="rose-wine">
+                    <span class="theme-swatch" style="background:#f472b6;"></span> Rose Wine
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item theme-option" data-theme="sunset-blaze">
+                    <span class="theme-swatch" style="background:linear-gradient(135deg,#e85d3a,#f59e0b);"></span> Sunset Blaze
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item theme-option" data-theme="arctic-frost">
+                    <span class="theme-swatch" style="background:#0ea5e9;"></span> Arctic Frost
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item theme-option" data-theme="royal-purple">
+                    <span class="theme-swatch" style="background:#a855f7;"></span> Royal Purple
+                  </a>
+                </li>
+              </ul>
+            </li>
+            <!-- User menu -->
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
+                <i class="fas fa-user-circle"></i> {{ current_user.first_name }}
+              </a>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li><h6 class="dropdown-header">{{ current_user.family_name }}</h6></li>
+                <li>
+                  <a class="dropdown-item" href="{{ url_for('auth.profile') }}">
+                    <i class="fas fa-user-edit"></i> Profile
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item" href="{{ url_for('auth.change_password') }}">
+                    <i class="fas fa-key"></i> Change Password
+                  </a>
+                </li>
+                <li><hr class="dropdown-divider" /></li>
+                <li>
+                  <a class="dropdown-item" href="{{ url_for('auth.logout') }}">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                  </a>
+                </li>
+              </ul>
+            </li>
+          </ul>
+          {% else %}
+          <ul class="navbar-nav me-auto">
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('main.index') }}">Home</a>
+            </li>
+          </ul>
+          <ul class="navbar-nav ms-auto">
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('auth.login') }}">
+                <i class="fas fa-sign-in-alt"></i> Login
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('auth.register') }}">
+                <i class="fas fa-user-plus"></i> Register
+              </a>
+            </li>
+          </ul>
+          {% endif %}
+        </div>
+      </div>
+    </nav>
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="container mt-3">
+      {% for category, message in messages %}
+      <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <div class="container-fluid mt-4">{% block content %}{% endblock %}</div>
+
+    <!-- App Modal System -->
+    <div class="modal fade" id="appModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+          <div class="modal-header text-white" id="appModalHeader">
+            <h5 class="modal-title" id="appModalTitle"></h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body" id="appModalBody"></div>
+          <div class="modal-footer" id="appModalFooter"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- DataTables JS -->
+    <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+    <!-- Socket.IO JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+
+    <script>
+    /* ── Theme Manager ── */
+    (function() {
+      var saved = localStorage.getItem('df_theme') || 'difede-dark';
+      document.documentElement.setAttribute('data-theme', saved);
+
+      document.addEventListener('DOMContentLoaded', function() {
+        var items = document.querySelectorAll('.theme-option');
+        items.forEach(function(el) {
+          if (el.getAttribute('data-theme') === saved) el.classList.add('active');
+          el.addEventListener('click', function(e) {
+            e.preventDefault();
+            var t = this.getAttribute('data-theme');
+            document.documentElement.setAttribute('data-theme', t);
+            localStorage.setItem('df_theme', t);
+            items.forEach(function(i) { i.classList.remove('active'); });
+            this.classList.add('active');
+          });
+        });
+      });
+    })();
+
+    /* ── Select input contents on focus (score/peg entry) ── */
+    document.addEventListener('focusin', function(e) {
+      var t = e.target;
+      if (t && t.tagName === 'INPUT' && (t.type === 'number' || t.type === 'text')
+          && t.closest('.score-cell, .peg-input-group, .results-card')) {
+        setTimeout(function() { try { t.select(); } catch (_) {} }, 0);
+      }
+    });
+
+    /* ── App Modal ── */
+    window.AppModal = {
+        _modal: null,
+        _getModal: function() {
+            if (!this._modal) this._modal = new bootstrap.Modal(document.getElementById('appModal'));
+            return this._modal;
+        },
+        show: function(opts) {
+            var title = opts.title || 'Notice';
+            var body = opts.body || '';
+            var type = opts.type || 'info';
+            var onConfirm = opts.onConfirm || null;
+            var confirmText = opts.confirmText || 'OK';
+            var cancelText = opts.cancelText || 'Cancel';
+
+            var headerEl = document.getElementById('appModalHeader');
+            var style = getComputedStyle(document.documentElement);
+            var modalGrad = style.getPropertyValue('--df-modal-header').trim();
+            var gradients = {
+                info: modalGrad,
+                success: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)',
+                warning: 'linear-gradient(135deg, #F2994A 0%, #F2C94C 100%)',
+                danger: 'linear-gradient(135deg, #c0392b 0%, #e74c3c 100%)',
+                confirm: modalGrad
+            };
+            headerEl.style.background = gradients[type] || gradients.info;
+
+            document.getElementById('appModalTitle').innerHTML = title;
+            document.getElementById('appModalBody').innerHTML = body;
+
+            var footer = document.getElementById('appModalFooter');
+            footer.innerHTML = '';
+
+            if (type === 'confirm' && onConfirm) {
+                var cancelBtn = document.createElement('button');
+                cancelBtn.className = 'btn btn-secondary';
+                cancelBtn.setAttribute('data-bs-dismiss', 'modal');
+                cancelBtn.textContent = cancelText;
+                footer.appendChild(cancelBtn);
+
+                var confirmBtn = document.createElement('button');
+                confirmBtn.className = 'btn btn-primary';
+                confirmBtn.textContent = confirmText;
+                confirmBtn.onclick = function() {
+                    AppModal._getModal().hide();
+                    onConfirm();
+                };
+                footer.appendChild(confirmBtn);
+            } else {
+                var okBtn = document.createElement('button');
+                okBtn.className = 'btn btn-primary';
+                okBtn.setAttribute('data-bs-dismiss', 'modal');
+                okBtn.textContent = 'OK';
+                footer.appendChild(okBtn);
+            }
+            this._getModal().show();
+        },
+        alert: function(title, body, type) {
+            this.show({title: title, body: '<p>' + body + '</p>', type: type || 'info'});
+        },
+        confirm: function(title, body, onConfirm, opts) {
+            opts = opts || {};
+            this.show({
+                title: title, body: '<p>' + body + '</p>', type: 'confirm',
+                onConfirm: onConfirm,
+                confirmText: opts.confirmText || 'Confirm',
+                cancelText: opts.cancelText || 'Cancel'
+            });
+        },
+        success: function(title, body) { this.alert(title, body, 'success'); },
+        error: function(title, body) { this.alert(title, body, 'danger'); },
+        warning: function(title, body) { this.alert(title, body, 'warning'); }
+    };
+    </script>
+
+    {% if current_user %}
+    <script>
+    (function(){
+      function loadNotifCount() {
+        fetch('/api/notifications/count')
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            var badge = document.getElementById('notifBadge');
+            if (d.count > 0) { badge.textContent = d.count > 99 ? '99+' : d.count; badge.style.display = ''; }
+            else { badge.style.display = 'none'; }
+          }).catch(function(){});
+      }
+
+      function loadNotifications() {
+        fetch('/api/notifications')
+          .then(function(r){ return r.json(); })
+          .then(function(notifs){
+            var list = document.getElementById('notifList');
+            if (!notifs.length) {
+              list.innerHTML = '<div class="text-center text-muted py-3" style="font-size:0.85rem;">No notifications</div>';
+              return;
+            }
+            var html = '';
+            notifs.forEach(function(n){
+              var cls = n.is_read ? 'opacity-50' : '';
+              var dot = n.is_read ? '' : '<span class="text-danger me-1">&bull;</span>';
+              var icon = 'fa-bell';
+              if (n.type === 'crew_up_request') icon = 'fa-handshake';
+              else if (n.type === 'crew_up_accepted') icon = 'fa-check-circle text-success';
+              else if (n.type === 'user_pending_approval') icon = 'fa-user-clock text-warning';
+
+              var actions = '';
+              if (n.type === 'crew_up_request' && !n.is_read) {
+                try {
+                  var data = typeof n.data === 'string' ? JSON.parse(n.data) : n.data;
+                  if (data.alliance_id) {
+                    actions = '<div class="mt-1">' +
+                      '<button class="btn btn-success btn-sm me-1" onclick="acceptAlliance(' + data.alliance_id + ',' + n.id + ')"><i class="fas fa-check"></i> Accept</button>' +
+                      '<button class="btn btn-outline-secondary btn-sm" onclick="declineAlliance(' + data.alliance_id + ',' + n.id + ')"><i class="fas fa-times"></i> Decline</button>' +
+                      '</div>';
+                  }
+                } catch(e){}
+              }
+
+              var ago = timeAgo(n.created_at);
+              html += '<div class="dropdown-item px-3 py-2 border-bottom ' + cls + '" style="white-space:normal;cursor:pointer;" onclick="markRead(' + n.id + ',this)">' +
+                '<div class="d-flex align-items-start">' +
+                  dot + '<i class="fas ' + icon + ' me-2 mt-1" style="color:var(--df-accent);"></i>' +
+                  '<div style="flex:1;min-width:0;">' +
+                    '<div style="font-weight:600;font-size:0.85rem;">' + n.title + '</div>' +
+                    '<div style="font-size:0.8rem;color:#666;" class="text-truncate-2">' + (n.message||'') + '</div>' +
+                    actions +
+                    '<div style="font-size:0.7rem;color:#999;margin-top:2px;">' + ago + '</div>' +
+                  '</div>' +
+                '</div></div>';
+            });
+            list.innerHTML = html;
+          }).catch(function(){});
+      }
+
+      function timeAgo(dt) {
+        var d = new Date(dt);
+        var now = new Date();
+        var s = Math.floor((now - d) / 1000);
+        if (s < 60) return 'just now';
+        var m = Math.floor(s/60); if (m < 60) return m + 'm ago';
+        var h = Math.floor(m/60); if (h < 24) return h + 'h ago';
+        var dy = Math.floor(h/24); return dy + 'd ago';
+      }
+
+      window.markRead = function(id, el) {
+        fetch('/api/notifications/' + id + '/read', {method:'POST'}).then(function(){ loadNotifCount(); });
+        if (el) el.classList.add('opacity-50');
+      };
+
+      window.acceptAlliance = function(allianceId, notifId) {
+        fetch('/api/alliances/' + allianceId + '/accept', {method:'POST',headers:{'Content-Type':'application/json'}})
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            if (d.success) {
+              window.AppModal.success('Crew Up Accepted!', 'You are now game night crew! Time to play together.');
+              markRead(notifId);
+              loadNotifications();
+              loadNotifCount();
+            } else {
+              window.AppModal.error('Error', d.error || 'Failed to accept request.');
+            }
+          });
+      };
+
+      window.declineAlliance = function(allianceId, notifId) {
+        fetch('/api/alliances/' + allianceId + '/decline', {method:'POST',headers:{'Content-Type':'application/json'}})
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            if (d.success) {
+              markRead(notifId);
+              loadNotifications();
+              loadNotifCount();
+            }
+          });
+      };
+
+      document.getElementById('markAllReadBtn').addEventListener('click', function(e){
+        e.preventDefault(); e.stopPropagation();
+        fetch('/api/notifications/read-all', {method:'POST'}).then(function(){
+          loadNotifCount();
+          loadNotifications();
+        });
+      });
+
+      document.getElementById('notifDropdown').addEventListener('click', function(){
+        loadNotifications();
+      });
+
+      loadNotifCount();
+      setInterval(loadNotifCount, 30000);
+    })();
+    </script>
+    {% endif %}
+
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

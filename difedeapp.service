@@ -1,0 +1,19 @@
+[Unit]
+Description=DiFede Family Game Tracker Flask Application
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=joe
+Group=joe
+WorkingDirectory=/home/joe/DiFedeApp
+Environment="PATH=/home/joe/DiFedeApp/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/joe/DiFedeApp/venv/bin/python3 /home/joe/DiFedeApp/run.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,442 @@
+{% extends "base.html" %}
+
+{% block title %}Games{% endblock %}
+
+{% block styles %}
+<style>
+  .games-hero {
+    background: var(--df-card-header);
+    border-radius: 12px;
+    color: var(--df-dt-header-text);
+    padding: 2rem;
+    margin-bottom: 2rem;
+  }
+  .games-hero h1 {
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+  }
+  .games-hero p {
+    opacity: 0.85;
+    margin-bottom: 0;
+  }
+
+  .game-card {
+    border: none;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .game-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+  }
+
+  .game-card-header {
+    background: var(--df-card-header);
+    color: var(--df-dt-header-text);
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .game-card-img-wrapper {
+    height: 180px;
+    overflow: hidden;
+    background: #f0f0f5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .game-card-img-wrapper img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .game-card-img-placeholder {
+    font-size: 4rem;
+    color: #b0b0c0;
+  }
+
+  .game-card .card-body {
+    padding: 1.25rem;
+  }
+  .game-card .card-body .game-description {
+    color: #666;
+    font-size: 0.9rem;
+    min-height: 2.7em;
+  }
+
+  .game-meta {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+  .game-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: #555;
+  }
+  .game-meta-item i {
+    color: var(--df-accent);
+  }
+
+  .game-card .btn-play {
+    background: var(--df-accent-gradient);
+    border: none;
+    color: var(--df-btn-primary-text);
+    font-weight: 600;
+    padding: 0.5rem 1.25rem;
+    border-radius: 8px;
+    transition: opacity 0.2s;
+  }
+  .game-card .btn-play:hover {
+    opacity: 0.9;
+    color: #fff;
+  }
+  .game-card .btn-rules {
+    border: 2px solid var(--df-accent);
+    color: var(--df-accent);
+    font-weight: 600;
+    padding: 0.5rem 1.25rem;
+    border-radius: 8px;
+    background: transparent;
+    transition: background 0.2s, color 0.2s;
+  }
+  .game-card .btn-rules:hover {
+    background: var(--df-accent);
+    color: var(--df-btn-primary-text);
+  }
+
+  .variant-section {
+    margin-bottom: 2.5rem;
+  }
+  .variant-section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 3px solid var(--df-accent);
+  }
+  .variant-section-header h3 {
+    margin: 0;
+    font-weight: 700;
+    color: #333;
+  }
+  .variant-section-header .variant-badge {
+    background: var(--df-accent-gradient);
+    color: var(--df-btn-primary-text);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.65rem;
+    border-radius: 20px;
+  }
+
+  .standalone-section-header {
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 3px solid var(--df-accent);
+  }
+  .standalone-section-header h3 {
+    margin: 0;
+    font-weight: 700;
+    color: #333;
+  }
+
+  @media (max-width: 768px) {
+    .games-hero {
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .games-hero h1 {
+      font-size: 1.5rem;
+    }
+    .game-card-img-wrapper {
+      height: 140px;
+    }
+    .game-card .card-body {
+      padding: 1rem;
+    }
+    .game-card .game-description {
+      min-height: auto;
+    }
+    .game-card .btn-play,
+    .game-card .btn-rules {
+      padding: 0.45rem 1rem;
+      font-size: 0.9rem;
+    }
+  }
+
+  @media (max-width: 576px) {
+    .game-card-img-wrapper {
+      height: 120px;
+    }
+  }
+
+  .games-search-wrapper {
+    position: relative;
+    margin-bottom: 1.5rem;
+  }
+  .games-search-wrapper i {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #999;
+    font-size: 1rem;
+    pointer-events: none;
+  }
+  .games-search-input {
+    width: 100%;
+    padding: 0.7rem 0.7rem 0.7rem 2.5rem;
+    border: 2px solid var(--df-border, #dee2e6);
+    border-radius: 10px;
+    font-size: 1rem;
+    background: var(--df-card, #fff);
+    color: var(--df-text-card, #212529);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .games-search-input:focus {
+    outline: none;
+    border-color: var(--df-accent);
+    box-shadow: 0 0 0 3px rgba(var(--df-accent-rgb, 102,51,153), 0.15);
+  }
+  .games-search-input::placeholder {
+    color: #aaa;
+  }
+  .games-no-results {
+    display: none;
+    text-align: center;
+    padding: 2rem 0;
+    color: var(--df-muted, #6c757d);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-3">
+  <!-- Hero Banner -->
+  <div class="games-hero">
+    <h1><i class="fas fa-gamepad me-2"></i>Games</h1>
+    <p>Choose a game to play with your family</p>
+  </div>
+
+  <div class="games-search-wrapper">
+    <i class="fas fa-search"></i>
+    <input type="text" id="gamesSearchInput" class="games-search-input" placeholder="Search games..." autocomplete="off">
+  </div>
+  <div class="games-no-results" id="gamesNoResults">
+    <i class="fas fa-search fa-2x mb-2 d-block"></i>
+    <h5>No games match your search</h5>
+  </div>
+
+  {% set ns = namespace(has_standalone=false) %}
+  {% for game in games %}
+    {% if not game.parent_game_id %}
+      {% set ns.has_standalone = true %}
+    {% endif %}
+  {% endfor %}
+
+  <!-- Standalone Games -->
+  {% if ns.has_standalone %}
+  <div class="game-section" data-section="standalone">
+  <div class="standalone-section-header game-section-header">
+    <h3><i class="fas fa-star me-2 text-warning"></i>Standalone Games</h3>
+  </div>
+  <div class="row mb-4">
+    {% for game in games %}
+      {% if not game.parent_game_id %}
+      <div class="col-sm-6 col-lg-4 mb-4 game-card-col" data-game-name="{{ game.name|lower }}">
+        <div class="card game-card h-100">
+          <a href="/game/{{ game.slug }}" class="text-decoration-none">
+            <div class="game-card-header" style="cursor:pointer;">
+              <span>{{ game.name }}</span>
+              <span class="badge bg-light text-dark" style="font-size:0.7rem;">
+                {{ game.games_played or 0 }} played
+              </span>
+            </div>
+          </a>
+          <a href="/game/{{ game.slug }}">
+          {% if game.image_url %}
+          <div class="game-card-img-wrapper">
+            <img src="{{ game.image_url }}" alt="{{ game.name }}">
+          </div>
+          {% else %}
+          <div class="game-card-img-wrapper">
+            <span class="game-card-img-placeholder"><i class="fas fa-cards fa-fw"></i></span>
+          </div>
+          {% endif %}
+          </a>
+          <div class="card-body d-flex flex-column">
+            <p class="game-description">{{ game.description or 'A fun card game for the whole family!' }}</p>
+            <div class="game-meta">
+              <span class="game-meta-item">
+                <i class="fas fa-users"></i> {{ game.min_players }}–{{ game.max_players }} players
+              </span>
+              <span class="game-meta-item">
+                <i class="fas fa-chart-line"></i> {{ game.scoring_direction or 'low' }} score wins
+              </span>
+            </div>
+            <div class="mt-auto d-flex gap-2">
+              <a href="{{ slug_to_url.get(game.slug, '/game/' + game.slug) }}" class="btn btn-play flex-fill">
+                <i class="fas fa-play me-1"></i> Play
+              </a>
+              <button type="button" class="btn btn-rules flex-fill" onclick="showRulesModal('{{ game.slug }}', '{{ game.name }}')">
+                <i class="fas fa-book me-1"></i> Rules
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  </div>
+  {% endif %}
+
+  <!-- Variant Groups -->
+  {% for group in variant_groups %}
+  <div class="variant-section game-section" data-section="variant-{{ group.slug }}">
+    <div class="variant-section-header game-section-header">
+      <h3><i class="fas fa-layer-group me-2" style="color:var(--df-accent);"></i>{{ group.name }}</h3>
+      <span class="variant-badge">
+        {% set variant_count = [] %}
+        {% for game in games if game.parent_game_id == group.id %}
+          {% if variant_count.append(1) %}{% endif %}
+        {% endfor %}
+        {{ variant_count|length }} variant{{ 's' if variant_count|length != 1 }}
+      </span>
+    </div>
+    <div class="row">
+      {% for game in games %}
+        {% if game.parent_game_id == group.id %}
+        <div class="col-sm-6 col-lg-4 mb-4 game-card-col" data-game-name="{{ game.name|lower }}">
+          <div class="card game-card h-100">
+            <a href="/game/{{ game.slug }}" class="text-decoration-none">
+              <div class="game-card-header" style="cursor:pointer;">
+                <span>{{ game.name }}</span>
+                <span class="badge bg-light text-dark" style="font-size:0.7rem;">
+                  {{ game.games_played or 0 }} played
+                </span>
+              </div>
+            </a>
+            <a href="/game/{{ game.slug }}">
+            {% if game.image_url %}
+            <div class="game-card-img-wrapper">
+              <img src="{{ game.image_url }}" alt="{{ game.name }}">
+            </div>
+            {% else %}
+            <div class="game-card-img-wrapper">
+              <span class="game-card-img-placeholder"><i class="fas fa-gamepad"></i></span>
+            </div>
+            {% endif %}
+            </a>
+            <div class="card-body d-flex flex-column">
+              <p class="game-description">{{ game.description or 'A fun game variant for the whole family!' }}</p>
+              <div class="game-meta">
+                <span class="game-meta-item">
+                  <i class="fas fa-users"></i> {{ game.min_players }}–{{ game.max_players }} players
+                </span>
+                <span class="game-meta-item">
+                  <i class="fas fa-chart-line"></i> {{ game.scoring_direction or 'low' }} score wins
+                </span>
+              </div>
+              <div class="mt-auto d-flex gap-2">
+                <a href="{{ slug_to_url.get(game.slug, '/game/' + game.slug) }}" class="btn btn-play flex-fill">
+                  <i class="fas fa-play me-1"></i> Play
+                </a>
+                <button type="button" class="btn btn-rules flex-fill" onclick="showRulesModal('{{ game.slug }}', '{{ game.name }}')">
+                  <i class="fas fa-book me-1"></i> Rules
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  <!-- Empty State -->
+  {% if not games %}
+  <div class="text-center py-5">
+    <i class="fas fa-dice fa-4x text-muted mb-3 d-block"></i>
+    <h3 class="text-muted">No games available yet</h3>
+    <p class="text-muted">Check back soon for new games!</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var searchInput = document.getElementById('gamesSearchInput');
+  var noResults = document.getElementById('gamesNoResults');
+  if (!searchInput) return;
+
+  searchInput.addEventListener('input', function() {
+    var query = this.value.toLowerCase().trim();
+    var cards = document.querySelectorAll('.game-card-col');
+    var anyVisible = false;
+
+    cards.forEach(function(card) {
+      var name = card.getAttribute('data-game-name') || '';
+      var match = !query || name.indexOf(query) !== -1;
+      card.style.display = match ? '' : 'none';
+      if (match) anyVisible = true;
+    });
+
+    document.querySelectorAll('.game-section').forEach(function(section) {
+      var visibleCards = section.querySelectorAll('.game-card-col:not([style*="display: none"])');
+      var header = section.querySelector('.game-section-header');
+      if (header) header.style.display = visibleCards.length ? '' : 'none';
+      section.style.display = visibleCards.length ? '' : 'none';
+    });
+
+    noResults.style.display = anyVisible ? 'none' : 'block';
+  });
+})();
+
+function showRulesModal(slug, gameName) {
+  AppModal.show({
+    title: '<i class="fas fa-book me-2"></i>' + gameName + ' Rules',
+    body: '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div><p class="mt-2 text-muted">Loading rules...</p></div>',
+    type: 'info'
+  });
+
+  fetch('/api/game-details/' + slug)
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+      var body = document.getElementById('appModalBody');
+      if (data.success) {
+        var html = '';
+        if (data.details.description_long) {
+          html += '<div class="mb-3"><h6 class="text-muted text-uppercase" style="font-size:0.8rem;">Description</h6>' + data.details.description_long + '</div>';
+        }
+        if (data.details.rules) {
+          html += '<div class="mb-3"><h6 class="text-muted text-uppercase" style="font-size:0.8rem;">Rules</h6>' + data.details.rules + '</div>';
+        }
+        if (data.details.notes) {
+          html += '<div><h6 class="text-muted text-uppercase" style="font-size:0.8rem;">Notes</h6>' + data.details.notes + '</div>';
+        }
+        body.innerHTML = html || '<p class="text-muted">No rules available for this game yet.</p>';
+      } else {
+        body.innerHTML = '<p class="text-danger"><i class="fas fa-exclamation-circle me-1"></i>Could not load game rules.</p>';
+      }
+    })
+    .catch(function() {
+      var body = document.getElementById('appModalBody');
+      body.innerHTML = '<p class="text-danger"><i class="fas fa-exclamation-circle me-1"></i>Error loading game rules. Please try again.</p>';
+    });
+}
+</script>
+{% endblock %}

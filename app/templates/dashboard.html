@@ -1,0 +1,712 @@
+{% extends "base.html" %} {% block title %}Dashboard - {{ config.APP_NAME }}{%
+endblock %} {% block content %}
+<div class="container mt-4">
+  <!-- Welcome Header -->
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card" style="background: var(--df-card-header); border-bottom: 3px solid var(--df-accent);">
+        <div class="card-body" style="color: var(--df-dt-header-text);">
+          <h1 class="h2 mb-2" style="color: var(--df-accent);">Welcome back, {{ current_user.first_name }}!</h1>
+          <p class="mb-0" style="color: var(--df-dt-header-text);">{{ current_user.family_name }} Family Game Portal</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Games Section (Accordion) -->
+  {% if active_games %}
+  <div class="accordion mb-4" id="liveGamesAccordion">
+    <div class="accordion-item" style="background:transparent;border:none;">
+      <h2 class="accordion-header">
+        <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#liveGamesBody" aria-expanded="true"
+          style="background:var(--df-card-header);color:var(--df-dt-header-text);font-weight:700;font-size:1.1rem;border-bottom:2px solid var(--df-accent);border-radius:10px 10px 0 0;padding:0.75rem 1.25rem;">
+          <i class="fas fa-fire text-danger me-2"></i>Live Games
+          <span class="badge rounded-pill ms-2" style="background:var(--df-accent);color:var(--df-btn-primary-text);font-size:0.7rem;">{{ active_games|length }}</span>
+        </button>
+      </h2>
+      <div id="liveGamesBody" class="accordion-collapse collapse show" data-bs-parent="#liveGamesAccordion">
+        <div class="accordion-body p-0 pt-2" style="background:transparent;">
+          {% if active_games|length > 3 %}
+          <div class="d-flex gap-2 align-items-center justify-content-end mb-2 px-1">
+            <input type="text" class="form-control form-control-sm" id="gameSearch" placeholder="Search games..."
+              style="max-width:200px;background:var(--df-surface);color:var(--df-text);border:1px solid var(--df-border);">
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-secondary active" id="viewCards" title="Card view"><i class="fas fa-th-large"></i></button>
+              <button class="btn btn-outline-secondary" id="viewTable" title="Table view"><i class="fas fa-list"></i></button>
+            </div>
+          </div>
+          {% endif %}
+          <!-- Card View -->
+          <div id="liveGamesCards">
+            <div class="row" id="liveGamesGrid">
+              {% for game in active_games %}
+              <div class="col-lg-4 col-md-6 mb-3 game-card-wrapper"
+                   data-game-name="{{ game.game_name|lower }}"
+                   data-players="{{ game.player_names|lower }}"
+                   data-status="{{ 'paused' if game.is_paused else 'active' }}">
+                <div class="card h-100 shadow-sm game-card {% if game.is_paused %}game-card-paused{% endif %}">
+                  <div class="card-header game-card-header d-flex justify-content-between align-items-center">
+                    <span>
+                      {% if game.slug == 'five-crowns' %}<i class="fas fa-crown me-1"></i>
+                      {% elif game.slug == 'uno-classic' %}<i class="fas fa-layer-group me-1"></i>
+                      {% elif game.slug == 'uno-flip' %}<i class="fas fa-sync-alt me-1"></i>
+                      {% elif game.slug == 'dutch-blitz' %}<i class="fas fa-bolt me-1"></i>
+                      {% elif game.slug == 'trouble' %}<i class="fas fa-dice-six me-1"></i>
+                      {% elif game.slug == 'basic-other' %}<i class="fas fa-gamepad me-1"></i>
+                      {% elif game.slug == 'kings-corner' %}<i class="fas fa-crown me-1" style="color:#C9A02C;"></i>
+                      {% elif game.slug == 'gin-rummy' %}<i class="fas fa-heart me-1" style="color:#8B1A2B;"></i>
+                      {% elif game.slug == 'sevens' %}<i class="fas fa-7 me-1" style="color:#C9A02C;"></i>
+                      {% elif game.slug == 'skyjo' %}<i class="fas fa-layer-group me-1" style="color:#7a3fa0;"></i>
+                      {% else %}<i class="fas fa-dice me-1"></i>{% endif %}
+                      {% if game.slug == 'basic-other' %}Basic: {{ game.game_name }}{% else %}{{ game.game_name }}{% endif %}
+                    </span>
+                    {% if game.is_paused %}<span class="badge bg-warning text-dark">Paused</span>
+                    {% else %}<span class="badge bg-success">Active</span>{% endif %}
+                  </div>
+                  <div class="card-body d-flex flex-column">
+                    <div class="mb-2"><small class="text-muted"><i class="fas fa-users me-1"></i>{{ game.player_names }}</small></div>
+                    <div class="mb-2"><small class="text-muted"><i class="fas fa-user-friends me-1"></i>{{ game.player_count }} player{{ 's' if game.player_count != 1 else '' }}</small></div>
+                    <div class="mb-3"><small class="text-muted"><i class="fas fa-clock me-1"></i><span class="game-time" data-start="{{ game.start_time }}"></span></small></div>
+                    <div class="mt-auto">
+                      {% if game.slug == 'five-crowns' %}
+                        <a href="{{ url_for('main.five_crowns') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% elif game.slug == 'uno-classic' %}
+                        <a href="{{ url_for('main.uno') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% elif game.slug == 'uno-flip' %}
+                        <a href="{{ url_for('main.uno_flip') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% elif game.slug == 'dutch-blitz' %}
+                        <a href="{{ url_for('main.dutch_blitz') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% elif game.slug == 'trouble' %}
+                        <a href="{{ url_for('main.trouble') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% elif game.slug == 'basic-other' %}
+                        <a href="{{ url_for('main.basic_other') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% elif game.slug == 'kings-corner' %}
+                        <a href="{{ url_for('main.kings_corner') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% elif game.slug == 'gin-rummy' %}
+                        <a href="{{ url_for('main.gin_rummy') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% elif game.slug == 'sevens' %}
+                        <a href="{{ url_for('main.sevens') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% elif game.slug == 'skyjo' %}
+                        <a href="{{ url_for('main.skyjo') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% else %}
+                        <a href="{{ url_for('main.games') }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <!-- Table View (hidden by default) -->
+          <div id="liveGamesTable" style="display:none;">
+            <div class="table-responsive" style="border-radius:8px;overflow:hidden;">
+              <table class="table table-sm mb-0" style="background:var(--df-card);color:var(--df-text-card);">
+                <thead style="background:var(--df-dt-header);color:var(--df-dt-header-text);">
+                  <tr><th>Game</th><th>Players</th><th>Status</th><th>Started</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {% for game in active_games %}
+                  <tr class="game-table-row"
+                      data-game-name="{{ game.game_name|lower }}"
+                      data-players="{{ game.player_names|lower }}">
+                    <td class="fw-bold">
+                      {% if game.slug == 'five-crowns' %}<i class="fas fa-crown me-1 text-warning"></i>
+                      {% elif game.slug == 'uno-classic' %}<i class="fas fa-layer-group me-1" style="color:#ED1C24;"></i>
+                      {% elif game.slug == 'uno-flip' %}<i class="fas fa-sync-alt me-1" style="color:#00a89d;"></i>
+                      {% elif game.slug == 'dutch-blitz' %}<i class="fas fa-bolt me-1" style="color:#006B3F;"></i>
+                      {% elif game.slug == 'trouble' %}<i class="fas fa-dice-six me-1" style="color:#E31937;"></i>
+                      {% elif game.slug == 'basic-other' %}<i class="fas fa-gamepad me-1" style="color:var(--df-accent);"></i>
+                      {% elif game.slug == 'kings-corner' %}<i class="fas fa-crown me-1" style="color:#C9A02C;"></i>
+                      {% elif game.slug == 'gin-rummy' %}<i class="fas fa-heart me-1" style="color:#8B1A2B;"></i>
+                      {% elif game.slug == 'sevens' %}<i class="fas fa-dice-d6 me-1" style="color:#C9A02C;"></i>
+                      {% elif game.slug == 'skyjo' %}<i class="fas fa-layer-group me-1" style="color:#7a3fa0;"></i>
+                      {% endif %}{% if game.slug == 'basic-other' %}Basic: {{ game.game_name }}{% else %}{{ game.game_name }}{% endif %}
+                    </td>
+                    <td style="font-size:0.85rem;">{{ game.player_names }}</td>
+                    <td>
+                      {% if game.is_paused %}<span class="badge bg-warning text-dark">Paused</span>
+                      {% else %}<span class="badge bg-success">Active</span>{% endif %}
+                    </td>
+                    <td style="font-size:0.8rem;"><span class="game-time" data-start="{{ game.start_time }}"></span></td>
+                    <td>
+                      {% if game.slug == 'five-crowns' %}
+                        <a href="{{ url_for('main.five_crowns') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
+                      {% elif game.slug == 'uno-classic' %}
+                        <a href="{{ url_for('main.uno') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
+                      {% elif game.slug == 'uno-flip' %}
+                        <a href="{{ url_for('main.uno_flip') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
+                      {% elif game.slug == 'dutch-blitz' %}
+                        <a href="{{ url_for('main.dutch_blitz') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
+                      {% elif game.slug == 'trouble' %}
+                        <a href="{{ url_for('main.trouble') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
+                      {% elif game.slug == 'basic-other' %}
+                        <a href="{{ url_for('main.basic_other') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
+                      {% elif game.slug == 'kings-corner' %}
+                        <a href="{{ url_for('main.kings_corner') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
+                      {% elif game.slug == 'gin-rummy' %}
+                        <a href="{{ url_for('main.gin_rummy') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
+                      {% elif game.slug == 'sevens' %}
+                        <a href="{{ url_for('main.sevens') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
+                      {% elif game.slug == 'skyjo' %}
+                        <a href="{{ url_for('main.skyjo') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Quick Actions -->
+  <div class="row mb-4">
+    <div class="col-md-4 mb-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body text-center">
+          <i class="fas fa-gamepad fa-3x text-primary mb-3"></i>
+          <h5 class="card-title">Play Games</h5>
+          <p class="card-text">
+            Start a new game session or continue existing games
+          </p>
+          <a href="{{ url_for('main.games') }}" class="btn btn-primary">
+            Go to Games
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4 mb-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body text-center">
+          <i class="fas fa-trophy fa-3x text-warning mb-3"></i>
+          <h5 class="card-title">Leaderboards</h5>
+          <p class="card-text">
+            View your family's game statistics and achievements
+          </p>
+          <a href="{{ url_for('main.leaderboard') }}" class="btn btn-warning">
+            View Stats
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4 mb-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body text-center">
+          <i class="fas fa-users fa-3x text-success mb-3"></i>
+          <h5 class="card-title">Manage Players</h5>
+          <p class="card-text">Add, edit, or remove players from your family</p>
+          <button class="btn btn-success" onclick="managePlayersModal()">
+            Manage Players
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game Night Crew Section -->
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="fas fa-handshake me-2"></i>Game Night Crew</h5>
+          <button class="btn btn-sm" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);" data-bs-toggle="modal" data-bs-target="#crewUpModal">
+            <i class="fas fa-plus me-1"></i>Crew Up
+          </button>
+        </div>
+        <div class="card-body">
+          <div id="allianceSection">
+            <div class="text-muted text-center py-2">Loading crew info...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Crew Up Modal -->
+  <div class="modal fade" id="crewUpModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header" style="background:var(--df-modal-header);color:#fff;">
+          <h5 class="modal-title"><i class="fas fa-handshake me-2"></i>Send a Crew Up Request</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p>Invite another family to be your game night crew! Once accepted, you can invite their players to your games.</p>
+          <input type="text" class="form-control mb-3" id="crewSearchInput" placeholder="Search by family name or email...">
+          <div id="availableFamilies">
+            <div class="text-muted text-center py-2">Loading families...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Activity -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="fas fa-clock me-2"></i>Recent Activity</h5>
+        </div>
+        <div class="card-body">
+          <div id="recent-activity">
+            <p class="text-muted">Loading recent activity...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Player Management Modal -->
+<div class="modal fade" id="playerModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Manage Family Players</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <!-- Add New Player Form -->
+        <form id="addPlayerForm" class="mb-4">
+          <h6>Add New Player</h6>
+          <div class="row">
+            <div class="col-md-6 mb-2">
+              <input
+                type="text"
+                class="form-control"
+                id="firstName"
+                placeholder="First Name"
+                required
+              />
+            </div>
+            <div class="col-md-6 mb-2">
+              <input
+                type="text"
+                class="form-control"
+                id="lastName"
+                placeholder="Last Name"
+                required
+              />
+            </div>
+          </div>
+          <div class="mb-2">
+            <input
+              type="text"
+              class="form-control"
+              id="displayName"
+              placeholder="Display Name (optional)"
+            />
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">
+            Add Player
+          </button>
+        </form>
+
+        <hr />
+
+        <!-- Existing Players List -->
+        <h6>Current Players</h6>
+        <div id="playersList">
+          <p class="text-muted">Loading players...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block styles %}
+<style>
+  .accordion-button::after { filter: invert(1) brightness(2); }
+  .accordion-button:not(.collapsed)::after { filter: invert(1) brightness(2); }
+  .accordion-button:focus { box-shadow: none; }
+
+  .card {
+    transition: transform 0.2s;
+  }
+
+  .card:hover {
+    transform: translateY(-2px);
+  }
+
+  .fa-3x {
+    font-size: 2.5rem;
+  }
+
+  .recent-activity-item {
+    border-left: 3px solid var(--df-accent);
+    padding-left: 15px;
+    margin-bottom: 15px;
+  }
+
+  .recent-activity-item:last-child {
+    margin-bottom: 0;
+  }
+
+  .game-card {
+    border: none;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .game-card-header {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text);
+    font-weight: 600;
+    border: none;
+    border-bottom: 2px solid var(--df-accent);
+    padding: 0.75rem 1rem;
+  }
+
+  .game-card-paused .game-card-header {
+    background: linear-gradient(135deg, #6c757d 0%, #495057 100%) !important;
+    border-bottom-color: #F2994A;
+  }
+
+  .game-card .btn-primary {
+    background: var(--df-accent-gradient);
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    color: var(--df-btn-primary-text);
+  }
+
+  .game-card .btn-primary:hover {
+    background: var(--df-accent-gradient);
+    filter: brightness(1.12);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+
+  .game-card-paused .btn-primary {
+    background: linear-gradient(135deg, #F2994A 0%, #F2C94C 100%);
+    color: #1a1a2e;
+  }
+
+  .game-card-paused .btn-primary:hover {
+    background: linear-gradient(135deg, #e08a3a 0%, #e0b83c 100%);
+    box-shadow: 0 4px 12px rgba(242, 153, 74, 0.4);
+  }
+</style>
+{% endblock %} {% block scripts %}
+<script>
+  let players = [];
+
+  document.addEventListener("DOMContentLoaded", function () {
+    loadPlayers();
+    loadRecentActivity();
+    formatGameTimes();
+    loadAlliances();
+    initGameSearch();
+  });
+
+  function formatGameTimes() {
+    document.querySelectorAll('.game-time').forEach(function(el) {
+      var startStr = el.getAttribute('data-start');
+      if (!startStr) return;
+      var start = new Date(startStr);
+      var now = new Date();
+      var diffMs = now - start;
+      var diffMins = Math.floor(diffMs / 60000);
+      var diffHours = Math.floor(diffMins / 60);
+      var diffDays = Math.floor(diffHours / 24);
+
+      if (diffMins < 1) {
+        el.textContent = 'Just now';
+      } else if (diffMins < 60) {
+        el.textContent = diffMins + ' min' + (diffMins !== 1 ? 's' : '') + ' ago';
+      } else if (diffHours < 24) {
+        el.textContent = diffHours + ' hour' + (diffHours !== 1 ? 's' : '') + ' ago';
+      } else {
+        el.textContent = diffDays + ' day' + (diffDays !== 1 ? 's' : '') + ' ago';
+      }
+    });
+  }
+
+  function managePlayersModal() {
+    loadPlayers();
+    var modal = new bootstrap.Modal(document.getElementById("playerModal"));
+    modal.show();
+  }
+
+  function loadPlayers() {
+    fetch("/api/players")
+      .then(function(response) { return response.json(); })
+      .then(function(data) {
+        players = data;
+        displayPlayers();
+      })
+      .catch(function(error) {
+        console.error("Error loading players:", error);
+        document.getElementById("playersList").innerHTML =
+          '<p class="text-danger">Error loading players</p>';
+      });
+  }
+
+  function displayPlayers() {
+    var container = document.getElementById("playersList");
+    if (players.length === 0) {
+      container.innerHTML = '<p class="text-muted">No players added yet</p>';
+      return;
+    }
+
+    var html = '<div class="list-group">';
+    players.forEach(function(player) {
+      html += '<div class="list-group-item d-flex justify-content-between align-items-center">' +
+        '<div><strong>' + player.display_name + '</strong>' +
+        (player.has_duplicate ? ' (' + player.first_name + ' ' + player.last_name + ')' : '') +
+        '</div>' +
+        '<button class="btn btn-outline-danger btn-sm" onclick="deletePlayer(' + player.id + ')">' +
+        '<i class="fas fa-trash"></i></button></div>';
+    });
+    html += "</div>";
+    container.innerHTML = html;
+  }
+
+  document
+    .getElementById("addPlayerForm")
+    .addEventListener("submit", function (e) {
+      e.preventDefault();
+
+      var firstName = document.getElementById("firstName").value.trim();
+      var lastName = document.getElementById("lastName").value.trim();
+      var displayName = document.getElementById("displayName").value.trim();
+
+      if (!firstName || !lastName) {
+        window.AppModal.warning('Missing Info', 'First and last names are required.');
+        return;
+      }
+
+      fetch("/api/players", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          first_name: firstName,
+          last_name: lastName,
+          display_name: displayName || null,
+        }),
+      })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+          if (data.error) {
+            window.AppModal.error('Error', 'Error adding player: ' + data.error);
+          } else {
+            document.getElementById("addPlayerForm").reset();
+            loadPlayers();
+            window.AppModal.success('Player Added', firstName + ' has been added to your family.');
+          }
+        })
+        .catch(function(error) {
+          console.error("Error adding player:", error);
+          window.AppModal.error('Error', 'Error adding player. Please try again.');
+        });
+    });
+
+  function deletePlayer(playerId) {
+    window.AppModal.confirm(
+      'Delete Player',
+      'Are you sure you want to delete this player? This will remove all their game history.',
+      function() {
+        fetch('/api/players/' + playerId, { method: 'DELETE' })
+          .then(function(response) { return response.json(); })
+          .then(function(data) {
+            if (data.error) {
+              window.AppModal.error('Error', 'Error deleting player: ' + data.error);
+            } else {
+              loadPlayers();
+            }
+          })
+          .catch(function(error) {
+            console.error("Error deleting player:", error);
+            window.AppModal.error('Error', 'Error deleting player. Please try again.');
+          });
+      },
+      { confirmText: 'Delete', cancelText: 'Cancel' }
+    );
+  }
+
+  function loadRecentActivity() {
+    document.getElementById("recent-activity").innerHTML =
+      '<div class="recent-activity-item">' +
+        '<h6 class="mb-1">Welcome to your family game portal!</h6>' +
+        '<p class="mb-1">Start by adding some players and playing your first game.</p>' +
+        '<small class="text-muted">Get started by clicking "Go to Games" above</small>' +
+      '</div>';
+  }
+
+  /* ── Game Search & Toggle ── */
+  function initGameSearch() {
+    var search = document.getElementById('gameSearch');
+    if (search) {
+      search.addEventListener('input', function() {
+        var q = this.value.toLowerCase();
+        document.querySelectorAll('.game-card-wrapper').forEach(function(card) {
+          var name = card.getAttribute('data-game-name') || '';
+          var players = card.getAttribute('data-players') || '';
+          var status = card.getAttribute('data-status') || '';
+          card.style.display = (name.indexOf(q) !== -1 || players.indexOf(q) !== -1 || status.indexOf(q) !== -1) ? '' : 'none';
+        });
+        document.querySelectorAll('.game-table-row').forEach(function(row) {
+          var name = row.getAttribute('data-game-name') || '';
+          var players = row.getAttribute('data-players') || '';
+          row.style.display = (name.indexOf(q) !== -1 || players.indexOf(q) !== -1) ? '' : 'none';
+        });
+      });
+    }
+    var viewCardsBtn = document.getElementById('viewCards');
+    var viewTableBtn = document.getElementById('viewTable');
+    if (viewCardsBtn && viewTableBtn) {
+      viewCardsBtn.addEventListener('click', function() {
+        document.getElementById('liveGamesCards').style.display = '';
+        document.getElementById('liveGamesTable').style.display = 'none';
+        viewCardsBtn.classList.add('active');
+        viewTableBtn.classList.remove('active');
+      });
+      viewTableBtn.addEventListener('click', function() {
+        document.getElementById('liveGamesCards').style.display = 'none';
+        document.getElementById('liveGamesTable').style.display = '';
+        viewTableBtn.classList.add('active');
+        viewCardsBtn.classList.remove('active');
+      });
+    }
+  }
+
+  /* ── Alliance / Crew Up ── */
+  function loadAlliances() {
+    fetch('/api/alliances')
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        var sec = document.getElementById('allianceSection');
+        var html = '';
+
+        if (data.pending_received && data.pending_received.length > 0) {
+          html += '<div class="mb-3"><h6 class="text-warning"><i class="fas fa-envelope-open me-1"></i>Pending Crew Up Requests</h6>';
+          data.pending_received.forEach(function(p){
+            html += '<div class="d-flex justify-content-between align-items-center border rounded p-2 mb-2" style="background:rgba(var(--df-accent),0.05);">' +
+              '<div><strong>' + p.requesting_family_name + '</strong> <small class="text-muted">from ' + (p.requested_by||'a member') + '</small></div>' +
+              '<div>' +
+                '<button class="btn btn-success btn-sm me-1" onclick="respondAlliance(' + p.id + ',\'accept\')"><i class="fas fa-check"></i></button>' +
+                '<button class="btn btn-outline-secondary btn-sm" onclick="respondAlliance(' + p.id + ',\'decline\')"><i class="fas fa-times"></i></button>' +
+              '</div></div>';
+          });
+          html += '</div>';
+        }
+
+        if (data.alliances && data.alliances.length > 0) {
+          html += '<div class="mb-2"><h6 style="color:var(--df-accent);"><i class="fas fa-users me-1"></i>Your Crew</h6>';
+          if (data.alliances.length > 5) {
+            html += '<input type="text" class="form-control form-control-sm mb-2" id="crewFilterInput" placeholder="Filter crew families..." style="max-width:300px;">';
+          }
+          html += '<div class="d-flex flex-wrap gap-2" id="crewBadgeList">';
+          data.alliances.forEach(function(a){
+            html += '<a href="/family/' + a.ally_family_id + '" class="badge rounded-pill px-3 py-2 crew-badge text-decoration-none" data-crew-name="' + a.ally_name.toLowerCase() + '" style="background:var(--df-card-header);color:var(--df-dt-header-text);font-size:0.85rem;cursor:pointer;">' +
+              '<i class="fas fa-handshake me-1" style="color:var(--df-accent);"></i>' + a.ally_name + '</a>';
+          });
+          html += '</div></div>';
+        }
+
+        if (data.pending_sent && data.pending_sent.length > 0) {
+          html += '<div class="mb-2"><small class="text-muted"><i class="fas fa-paper-plane me-1"></i>Pending sent: ';
+          data.pending_sent.forEach(function(p, i){
+            html += (i > 0 ? ', ' : '') + p.target_family_name;
+          });
+          html += '</small></div>';
+        }
+
+        if (!data.alliances.length && !data.pending_sent.length && !data.pending_received.length) {
+          html = '<div class="text-center text-muted py-2"><i class="fas fa-handshake me-2"></i>No game night crew yet. Click <strong>Crew Up</strong> to invite another family!</div>';
+        }
+
+        sec.innerHTML = html;
+
+        var crewFilter = document.getElementById('crewFilterInput');
+        if (crewFilter) {
+          crewFilter.addEventListener('input', function(){
+            var q = this.value.toLowerCase();
+            document.querySelectorAll('.crew-badge').forEach(function(badge){
+              badge.style.display = badge.getAttribute('data-crew-name').indexOf(q) !== -1 ? '' : 'none';
+            });
+          });
+        }
+      }).catch(function(){
+        document.getElementById('allianceSection').innerHTML = '<div class="text-muted text-center">Could not load crew info.</div>';
+      });
+  }
+
+  function respondAlliance(id, action) {
+    fetch('/api/alliances/' + id + '/' + action, {method:'POST', headers:{'Content-Type':'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d.success) {
+          if (action === 'accept') window.AppModal.success('Crew Up!', 'You\'re now game night crew! Time to play together.');
+          loadAlliances();
+        } else {
+          window.AppModal.error('Error', d.error || 'Something went wrong.');
+        }
+      });
+  }
+
+  var _crewSearchTimer = null;
+
+  function loadAvailableFamilies(query) {
+    var container = document.getElementById('availableFamilies');
+    container.innerHTML = '<div class="text-center py-2"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+    var url = '/api/alliances/families';
+    if (query) url += '?q=' + encodeURIComponent(query);
+    fetch(url)
+      .then(function(r){ return r.json(); })
+      .then(function(families){
+        if (!families.length) {
+          container.innerHTML = '<div class="text-muted text-center py-2">' +
+            (query ? 'No families match your search.' : 'No other families available to crew up with right now.') +
+            '</div>';
+          return;
+        }
+        var html = '<div class="list-group">';
+        families.forEach(function(f){
+          html += '<div class="list-group-item d-flex justify-content-between align-items-center">' +
+            '<div><strong>' + f.name + '</strong> <small class="text-muted">' + f.player_count + ' player' + (f.player_count !== 1 ? 's' : '') + '</small></div>' +
+            '<button class="btn btn-sm" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);" onclick="sendCrewUp(' + f.id + ', \'' + f.name.replace(/'/g, "\\'") + '\')"><i class="fas fa-paper-plane me-1"></i>Crew Up</button>' +
+            '</div>';
+        });
+        html += '</div>';
+        container.innerHTML = html;
+      });
+  }
+
+  document.getElementById('crewUpModal').addEventListener('show.bs.modal', function(){
+    document.getElementById('crewSearchInput').value = '';
+    loadAvailableFamilies('');
+  });
+
+  document.getElementById('crewSearchInput').addEventListener('input', function(){
+    var value = this.value.trim();
+    clearTimeout(_crewSearchTimer);
+    _crewSearchTimer = setTimeout(function(){ loadAvailableFamilies(value); }, 300);
+  });
+
+  function sendCrewUp(familyId, familyName) {
+    fetch('/api/alliances', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({target_family_id: familyId})})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d.success) {
+          bootstrap.Modal.getInstance(document.getElementById('crewUpModal')).hide();
+          window.AppModal.success('Crew Up Sent!', 'Your request has been sent to the ' + familyName + ' family. They\'ll get an email and notification!');
+          loadAlliances();
+        } else {
+          window.AppModal.error('Error', d.error || 'Failed to send request.');
+        }
+      });
+  }
+</script>
+{% endblock %}

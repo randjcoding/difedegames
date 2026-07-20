@@ -1,0 +1,36 @@
+---
+description: DiFede Games app architecture and expert context - read APPLICATION_EXPERT_GUIDE.md for full details
+alwaysApply: true
+---
+
+# DiFede Games Expert Context
+
+**App:** Family game-night score tracker (Flask + PostgreSQL + SocketIO, port 5002).
+**NOT:** A rules engine or digital board -- scores only.
+
+## Must-Read Docs
+- `APPLICATION_EXPERT_GUIDE.md` -- full architecture, all 10 games, API, pitfalls
+- `CREATINGANEWGAME.MD` -- step-by-step new game checklist + image creation
+- `README.md` -- service ops, backup, troubleshooting
+- `.cursor/rules/theme-text-contrast.mdc` -- light-on-light text bug
+
+## Core Model
+- `games` = type definition | `active_games` = session | `game_scores` = all scores (save on every entry)
+- `/api/scores` uses `active_games.id`; `/api/games/new` uses `games.id`
+- `game_sessions_numbered` view provides `game_number` per game type (use in UI, not session IDs)
+
+## New Game Checklist (8 steps)
+1. INSERT `games` + `game_details` 2. Generate image 3. Create template 4. Route in routes.py
+5. `SLUG_TO_URL` entry 6. Dashboard (6 slug cases) 7. Verify Jinja parses 8. Restart port 5002
+
+## Critical Pitfalls
+- Jinja in JS: `function(){ {% if %}` NOT `function(){{% if`
+- Light backgrounds MUST have `color: #212529` (dark themes use light body text)
+- Kill stale processes: `lsof -i :5002` before restart (systemd auto-restarts with Restart=always)
+- Reference template for new games: `gin_rummy.html` or `uno_classic.html`
+
+## Current Games (id 1-10)
+Five Crowns, UNO (group), UNO Classic, UNO Flip, Dutch Blitz, Trouble, Basic/Other, Kings Corner, Gin Rummy, Sevens
+
+## UX Rules
+Mobile-first. No emojis. Plain labels. Save immediately. Modals outside game container.

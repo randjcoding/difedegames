@@ -1,0 +1,918 @@
+{% extends "base.html" %} {% block title %}Basic / Other{% endblock %} {% block
+content %}
+<div class="basic-container">
+  {% if not active_game %}
+  <div class="new-game-section">
+    <h2>Basic / Other Games</h2>
+
+    {% if paused_games %}
+    <div class="paused-games mb-4">
+      <h3>In-Progress Games</h3>
+      <div class="list-group">
+        {% for game in paused_games %}
+        <div class="list-group-item d-flex justify-content-between align-items-center py-2">
+          <div class="small">
+            <h6 class="mb-1">Game #{{ game.id }}{% if game.custom_game_name %} - {{ game.custom_game_name }}{% endif %}</h6>
+            <p class="mb-1 text-muted">Players: {{ game.player_names }}</p>
+            <small>Started: {{ game.start_time }}</small>
+          </div>
+          <div>
+            <button class="btn btn-sm resume-game me-2" style="background:var(--df-accent-gradient);color:#fff;font-weight:600;" data-game-id="{{ game.id }}">Resume</button>
+            <button class="btn btn-sm complete-paused-game" style="background:#dc3545;color:white;" data-game-id="{{ game.id }}">End</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if completed_games %}
+    <div class="completed-games mb-4">
+      <div class="d-flex justify-content-between align-items-center">
+        <h3>Recent Completed Games</h3>
+        <button id="clearCompletedGames" class="btn btn-sm" style="background:#dc3545;color:white;">Clear History</button>
+      </div>
+      <div class="list-group">
+        {% for game in completed_games %}
+        <div class="list-group-item py-2">
+          <div class="small">
+            <h6 class="mb-1">{{ game.custom_game_name or 'Game' }} #{{ game.game_number or game.id }}</h6>
+            <p class="mb-1">Players: {{ game.player_names }}</p>
+            {% if game.winner %}
+            <p class="mb-1 text-success"><strong>Winner: {{ game.winner }}</strong> ({{ game.winning_score }} pts)</p>
+            {% else %}
+            <p class="mb-1 text-muted"><em>Game incomplete</em></p>
+            {% endif %}
+            <small class="text-muted">{{ game.start_time.strftime('%Y-%m-%d %H:%M') if game.start_time else 'Unknown' }}</small>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="new-game-section">
+      <h3>Start New Game</h3>
+      <form id="newGameForm" class="mt-4">
+        <div class="mb-3">
+          <label for="customGameName" class="form-label">Game Name</label>
+          <input type="text" class="form-control" id="customGameName" placeholder="e.g. Rummy, Poker, Yahtzee..." autocomplete="off" required list="gameNameSuggestions">
+          <datalist id="gameNameSuggestions"></datalist>
+          <small class="text-muted">Start typing to see games your family has played before</small>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Scoring Mode</label>
+          <div class="btn-group w-100 scoring-mode-group" role="group">
+            <input type="radio" class="btn-check" name="scoringMode" id="modeHigh" value="high_wins" checked>
+            <label class="btn btn-outline-primary" for="modeHigh">High Score Wins</label>
+            <input type="radio" class="btn-check" name="scoringMode" id="modeLow" value="low_wins">
+            <label class="btn btn-outline-primary" for="modeLow">Low Score Wins</label>
+            <input type="radio" class="btn-check" name="scoringMode" id="modeManual" value="manual">
+            <label class="btn btn-outline-primary" for="modeManual">Just Pick Winner</label>
+          </div>
+        </div>
+
+        <div class="mb-3" id="targetScoreGroup">
+          <label for="targetScore" class="form-label">Target Score (optional)</label>
+          <input type="number" class="form-control" id="targetScore" placeholder="e.g. 500" min="1">
+          <small class="text-muted">Leave blank for no target</small>
+        </div>
+
+        <div class="mb-3">
+          <label for="playerCount" class="form-label">Number of Players (1-10)</label>
+          <select class="form-select" id="playerCount" required>
+            {% for i in range(1, 11) %}
+            <option value="{{ i }}" {% if i == 2 %}selected{% endif %}>{{ i }} Player{{ 's' if i > 1 else '' }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div id="playerSelections"></div>
+
+        <button type="submit" class="btn mt-3 w-100 py-2" style="background:var(--df-accent-gradient);color:#fff;font-weight:600;">
+          <i class="fas fa-play me-2"></i>Start Game
+        </button>
+      </form>
+    </div>
+  </div>
+
+  {% else %}
+  <div class="game-board basic-board" data-game-id="{{ active_game.id }}" data-scoring="{{ active_game.scoring_direction }}" data-target-score="{{ active_game.target_score or '' }}">
+    <div class="game-header-container position-relative mb-3">
+      <h2 class="game-title text-center mb-0">
+        {{ active_game.custom_game_name or 'Game' }}
+      </h2>
+      <button type="button" class="btn btn-link p-1 game-info-btn position-absolute" style="border:none;background:none;top:0;right:0;z-index:10;color:var(--df-accent);" data-game-id="basic-other" data-bs-toggle="tooltip" title="View game info">
+        <i class="fas fa-info-circle fa-lg"></i>
+      </button>
+    </div>
+
+    {% if active_game.scoring_direction == 'manual' %}
+    <div class="results-card">
+      <h4 class="text-center mb-3">Who Won?</h4>
+      <div class="mb-3">
+        <select class="form-select" id="manualWinnerSelect" required>
+          <option value="">Select Winner</option>
+          {% for player in game_players %}
+          <option value="{{ player.id }}">{{ player.display_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button id="submitManualWinner" class="btn w-100 py-2" style="background:var(--df-accent-gradient);color:#fff;font-weight:600;" disabled>
+        <i class="fas fa-trophy me-2"></i>Complete Game
+      </button>
+    </div>
+    {% else %}
+
+    <div class="game-status-bar mb-2">
+      <span class="badge" style="background:var(--df-accent-gradient);color:#fff;">
+        {{ 'Low Score Wins' if active_game.scoring_direction == 'low_wins' else 'High Score Wins' }}
+      </span>
+      {% if active_game.target_score %}
+      <span class="badge bg-secondary">Target: {{ active_game.target_score }}</span>
+      {% endif %}
+      <span id="leaderDisplay" class="badge bg-dark">
+        <i class="fas fa-trophy"></i> Leader: --
+      </span>
+    </div>
+
+    <div class="score-sheet">
+      <div class="table-responsive">
+        <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
+          <thead>
+            <tr class="basic-header">
+              <th class="round-header">Round</th>
+              {% for player in game_players %}
+              <th>{{ player.display_name }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody id="scoreBody">
+            {% set ns = namespace(max_round=0) %}
+            {% for key in scores %}
+              {% if key[1] > ns.max_round %}{% set ns.max_round = key[1] %}{% endif %}
+            {% endfor %}
+            {% for round_num in range(1, (ns.max_round if ns.max_round > 0 else 0) + 2) %}
+            <tr class="hand-row" data-round="{{ round_num }}">
+              <td class="round-cell">{{ round_num }}</td>
+              {% for player in game_players %}
+              <td class="score-cell" data-player="{{ player.id }}" data-round="{{ round_num }}">
+                {{ scores.get((player.id, round_num), '') }}
+              </td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+            <tr class="total-row">
+              <td>Total</td>
+              {% for player in game_players %}
+              <td class="total-cell" data-player="{{ player.id }}">0</td>
+              {% endfor %}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="text-center mt-3 d-flex flex-wrap justify-content-center gap-2">
+      {% if active_game.scoring_direction != 'manual' %}
+      <button id="addRound" class="btn btn-sm" style="background:var(--df-accent-gradient);color:#fff;">
+        <i class="fas fa-plus"></i> Add Round
+      </button>
+      <button id="completeGame" class="btn btn-sm btn-success">
+        <i class="fas fa-check"></i> Complete Game
+      </button>
+      {% endif %}
+      <button id="pauseGame" class="btn btn-sm btn-warning">
+        <i class="fas fa-pause"></i> Pause
+      </button>
+      <a href="{{ url_for('main.basic_other', new='1') }}" class="btn btn-outline-info btn-sm">
+        <i class="fas fa-plus-circle"></i> New Game
+      </a>
+      <button id="deleteGame" class="btn btn-outline-danger btn-sm" data-game-id="{{ active_game.id }}">
+        <i class="fas fa-trash"></i> Delete
+      </button>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Add Player Modal -->
+<div class="modal fade" id="addPlayerModal">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Add New Player</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="addPlayerForm">
+          <div class="mb-3">
+            <label for="firstName" class="form-label">First Name</label>
+            <input type="text" class="form-control" id="firstName" required />
+          </div>
+          <div class="mb-3">
+            <label for="lastName" class="form-label">Last Name</label>
+            <input type="text" class="form-control" id="lastName" required />
+          </div>
+          <div class="mb-3">
+            <label for="displayName" class="form-label">Display Name (Optional)</label>
+            <input type="text" class="form-control" id="displayName" />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="savePlayer">Save Player</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Game Info Modal -->
+<div class="modal fade" id="gameInfoModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Game Information</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="gameInfoContent">
+        <div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %} {% block styles %}
+<style>
+  .basic-container {
+    background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+    position: relative;
+    padding: 2rem;
+    border-radius: 10px;
+    margin: 20px auto;
+    max-width: 900px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    border-top: 4px solid var(--df-accent, #764ba2);
+  }
+
+  .new-game-section,
+  .score-sheet,
+  .results-card {
+    background-color: white;
+    color: #212529;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    margin-bottom: 1rem;
+  }
+
+  .new-game-section h2 { color: var(--df-accent, #764ba2); margin-bottom: 1.5rem; }
+  .new-game-section h3 { color: #333; }
+
+  .game-board h2, .game-title {
+    color: white;
+    text-align: center;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+  }
+
+  .game-status-bar {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .scoring-mode-group .btn-outline-primary {
+    color: var(--df-accent, #764ba2);
+    border-color: var(--df-accent, #764ba2);
+  }
+  .scoring-mode-group .btn-check:checked + .btn-outline-primary {
+    background: var(--df-accent-gradient, #764ba2);
+    border-color: var(--df-accent, #764ba2);
+    color: #fff;
+  }
+
+  #scoreTable {
+    margin: 0;
+    border-collapse: collapse;
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  .basic-header th {
+    background: var(--df-accent-gradient, linear-gradient(135deg, #764ba2, #667eea));
+    color: #fff;
+    text-align: center;
+    padding: 0.6rem;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .round-header { width: 50px; min-width: 50px; }
+
+  .round-cell {
+    background-color: #f0f0f0;
+    color: #333;
+    text-align: center;
+    font-weight: bold;
+    font-size: 0.85rem;
+    width: 50px;
+    min-width: 50px;
+  }
+
+  .score-cell {
+    text-align: center;
+    cursor: pointer;
+    padding: 0.4rem;
+    font-weight: 500;
+    transition: background 0.15s;
+    color: #212529;
+  }
+  .score-cell:hover { background-color: rgba(118, 75, 162, 0.08); }
+  .score-cell.editing {
+    padding: 0;
+    background-color: #fff3cd;
+  }
+  .score-cell.editing input {
+    width: 100%;
+    height: 100%;
+    border: 2px solid var(--df-accent, #764ba2);
+    text-align: center;
+    font-weight: bold;
+    font-size: 0.95rem;
+    padding: 0.3rem;
+    border-radius: 0;
+    outline: none;
+  }
+
+  .total-row td {
+    background-color: #e8e0f0;
+    color: #333;
+    font-weight: bold;
+    text-align: center;
+    border-top: 2px solid var(--df-accent, #764ba2);
+  }
+
+  .target-crossed {
+    background-color: rgba(118, 75, 162, 0.25) !important;
+    font-weight: bold;
+  }
+
+  .modal-content { background-color: white; color: #212529; }
+
+  @media (max-width: 768px) {
+    .basic-container { padding: 0.75rem; }
+    .new-game-section, .score-sheet, .results-card { padding: 1rem; }
+    .score-cell { font-size: 0.85rem; padding: 0.3rem; }
+    .scoring-mode-group { flex-direction: column; }
+    .scoring-mode-group .btn { border-radius: 0.375rem !important; margin-bottom: 2px; }
+  }
+</style>
+{% endblock %} {% block scripts %}
+<script>
+$(document).ready(function () {
+  let players = [];
+  const GAME_ID = {{ game_def.id }};
+  const GAME_PLAYERS = [
+    {% for player in game_players %}
+    { id: {{ player.id }}, name: "{{ player.display_name }}" }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
+
+  // ===================== GAME NAME AUTOCOMPLETE =====================
+
+  $.get("/api/basic-games/names", function (data) {
+    var dl = $("#gameNameSuggestions");
+    dl.empty();
+    (data.names || []).forEach(function (n) {
+      dl.append($("<option>").val(n));
+    });
+  });
+
+  // ===================== SCORING MODE TOGGLE =====================
+
+  $('input[name="scoringMode"]').change(function () {
+    if ($(this).val() === 'manual') {
+      $("#targetScoreGroup").hide();
+    } else {
+      $("#targetScoreGroup").show();
+    }
+  });
+
+  // ===================== PLAYER SELECTIONS =====================
+
+  function loadPlayers() {
+    $.get("/api/players", function (data) {
+      players = data;
+      updatePlayerSelections();
+    });
+  }
+
+  function updatePlayerSelections() {
+    var count = parseInt($("#playerCount").val());
+    var container = $("#playerSelections");
+    container.empty();
+
+    for (var i = 1; i <= count; i++) {
+      var div = $("<div>").addClass("mb-3");
+      div.append($("<label>").addClass("form-label").text("Player " + i));
+
+      var select = $("<select>")
+        .addClass("form-select player-select")
+        .attr("required", true)
+        .attr("data-player-num", i);
+
+      select.append($("<option>").val("").text("Select Player"));
+      select.append($("<option>").val("new").text("+ Add New Player"));
+
+      var familyPlayers = players.filter(function(p) { return !p.is_guest; });
+      var crewPlayers = players.filter(function(p) { return p.is_guest; });
+      var crewGroups = {};
+      crewPlayers.forEach(function(p) {
+        var gn = p.guest_family_name || "Other";
+        if (!crewGroups[gn]) crewGroups[gn] = [];
+        crewGroups[gn].push(p);
+      });
+
+      function playerLabel(p) {
+        return p.display_name + (p.has_duplicate ? " (" + p.first_name + " " + p.last_name + ")" : "");
+      }
+
+      if (familyPlayers.length) {
+        var grp = $("<optgroup>").attr("label", "Your Family");
+        familyPlayers.forEach(function(p) { grp.append($("<option>").val(p.id).text(playerLabel(p))); });
+        select.append(grp);
+      }
+      Object.keys(crewGroups).sort().forEach(function(name) {
+        var grp = $("<optgroup>").attr("label", "Crew - " + name);
+        crewGroups[name].forEach(function(p) { grp.append($("<option>").val(p.id).text(playerLabel(p))); });
+        select.append(grp);
+      });
+
+      div.append(select);
+      container.append(div);
+    }
+
+    $(".player-select").change(function () {
+      if ($(this).val() === "new") {
+        window.currentPlayerSelect = $(this);
+        $("#addPlayerForm")[0].reset();
+        new bootstrap.Modal($("#addPlayerModal")).show();
+        $(this).val("");
+      }
+    });
+    if (count === 2) {
+      var kim = players.find(function (p) { return p.display_name === "Kim"; });
+      var joe = players.find(function (p) { return p.display_name === "Joe"; });
+      if (kim) $(".player-select[data-player-num='1']").val(kim.id);
+      if (joe) $(".player-select[data-player-num='2']").val(joe.id);
+    }
+  }
+
+  $("#playerCount").change(updatePlayerSelections);
+  loadPlayers();
+
+  // ===================== ADD PLAYER =====================
+
+  $("#savePlayer").click(function () {
+    var firstName = $("#firstName").val();
+    var lastName = $("#lastName").val();
+    var displayName = $("#displayName").val();
+    $.ajax({
+      url: "/api/players",
+      method: "POST",
+      contentType: "application/json",
+      data: JSON.stringify({ first_name: firstName, last_name: lastName, display_name: displayName }),
+      success: function (response) {
+        bootstrap.Modal.getInstance($("#addPlayerModal")).hide();
+        var playerText = response.display_name + (response.has_duplicate ? " (" + response.first_name + " " + response.last_name + ")" : "");
+        $(".player-select").each(function () {
+          $(this).find('option[value="new"]').before($("<option>").val(response.id).text(playerText));
+        });
+        if (window.currentPlayerSelect) {
+          window.currentPlayerSelect.val(response.id);
+          window.currentPlayerSelect = null;
+        }
+      },
+      error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to add player"); }
+    });
+  });
+
+  // ===================== START GAME =====================
+
+  $("#newGameForm").submit(function (e) {
+    e.preventDefault();
+    var playerIds = $(".player-select").map(function () { return $(this).val(); }).get();
+    var gameName = $("#customGameName").val().trim();
+    var scoringMode = $('input[name="scoringMode"]:checked').val();
+    var targetScore = parseInt($("#targetScore").val()) || null;
+
+    if (!gameName) { AppModal.warning("Missing Name", "Please enter a game name."); return; }
+    if (playerIds.some(function (id) { return !id; })) { AppModal.warning("Missing Players", "Please select all players."); return; }
+    if (new Set(playerIds).size !== playerIds.length) { AppModal.warning("Duplicates", "Each player can only be selected once!"); return; }
+
+    $.ajax({
+      url: "/api/games/new",
+      method: "POST",
+      contentType: "application/json",
+      data: JSON.stringify({
+        game_id: GAME_ID,
+        player_ids: playerIds,
+        scoring_direction: scoringMode,
+        target_score: scoringMode === 'manual' ? null : targetScore,
+        custom_game_name: gameName
+      }),
+      success: function (response) {
+        window.location.href = "{{ url_for('main.basic_other') }}?game_id=" + response.id;
+      },
+      error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to create game"); }
+    });
+  });
+
+  // ===================== MANUAL WINNER MODE =====================
+
+  $("#manualWinnerSelect").change(function () {
+    $("#submitManualWinner").prop("disabled", !$(this).val());
+  });
+
+  $("#submitManualWinner").click(function () {
+    var winnerId = parseInt($("#manualWinnerSelect").val());
+    if (!winnerId) return;
+    var gameId = $(".game-board").data("game-id");
+
+    $.ajax({
+      url: "/api/games/basic/complete-quick",
+      method: "POST",
+      contentType: "application/json",
+      data: JSON.stringify({ game_id: gameId, winner_id: winnerId }),
+      success: function (response) {
+        if (response.summary) {
+          AppModal.show({ title: "Game Complete!", body: '<pre class="mb-0" style="white-space:pre-wrap;font-family:inherit;">' + response.summary + '</pre>', type: "success" });
+          var modalEl = document.getElementById("appModal");
+          $(modalEl).on("hidden.bs.modal.reload", function () {
+            $(modalEl).off("hidden.bs.modal.reload");
+            window.location.reload();
+          });
+        } else { window.location.reload(); }
+      },
+      error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to complete game"); }
+    });
+  });
+
+  // ===================== ROUND-BY-ROUND SCORING =====================
+
+  var targetScoreAlertShown = false;
+
+  function getCellScoreValue(cell) {
+    if (cell.hasClass("editing")) {
+      var inp = cell.find("input");
+      if (inp.length) return inp.val().trim();
+    }
+    return cell.text().trim();
+  }
+
+  function isRoundComplete(roundNum) {
+    var expected = $("#scoreTable thead th").length - 1;
+    var cells = $('.score-cell[data-round="' + roundNum + '"]');
+    if (!cells.length || cells.length !== expected) return false;
+    var ok = true;
+    cells.each(function () {
+      if (getCellScoreValue($(this)) === "") { ok = false; return false; }
+    });
+    return ok;
+  }
+
+  function checkTargetScore(triggerRound) {
+    if (targetScoreAlertShown) return;
+    var target = parseInt($(".game-board").data("target-score"));
+    if (!target || triggerRound == null || !isRoundComplete(triggerRound)) return;
+
+    var crossed = [];
+    $(".total-cell").each(function () {
+      var total = parseInt($(this).text()) || 0;
+      if (total >= target) {
+        var idx = $(".total-cell").index(this);
+        var name = $("#scoreTable thead th").eq(idx + 1).text().trim();
+        crossed.push({ name: name, total: total });
+        $(this).addClass("target-crossed");
+      } else {
+        $(this).removeClass("target-crossed");
+      }
+    });
+
+    if (crossed.length > 0) {
+      targetScoreAlertShown = true;
+      var names = crossed.map(function (c) {
+        return "<strong>" + c.name + "</strong> (" + c.total + ")";
+      }).join(", ");
+      var lowWins = $(".game-board").data("scoring") === "low_wins";
+      var verb = lowWins ? " reached the target of " : " crossed the target of ";
+      AppModal.confirm(
+        "Target Score Reached!",
+        names + verb + "<strong>" + target + "</strong> points. Would you like to end the game?",
+        function () { doCompleteGame(); },
+        { confirmText: "End Game", cancelText: "Keep Playing" }
+      );
+      var modalEl = document.getElementById("appModal");
+      $(modalEl).on("hidden.bs.modal.targetcheck", function () {
+        targetScoreAlertShown = false;
+        $(modalEl).off("hidden.bs.modal.targetcheck");
+      });
+    }
+  }
+
+  function doCompleteGame() {
+    var gameId = $(".game-board").data("game-id");
+    $.ajax({
+      url: "/api/games/complete/" + gameId,
+      method: "POST",
+      success: function (response) {
+        if (response.summary) {
+          AppModal.show({ title: "Game Complete!", body: '<pre class="mb-0" style="white-space:pre-wrap;font-family:inherit;">' + response.summary + '</pre>', type: "success" });
+          var modalEl = document.getElementById("appModal");
+          $(modalEl).on("hidden.bs.modal.reload", function () {
+            $(modalEl).off("hidden.bs.modal.reload");
+            window.location.reload();
+          });
+        } else { window.location.reload(); }
+      },
+      error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to complete game"); }
+    });
+  }
+
+  function getMaxRound() {
+    var max = 0;
+    $(".hand-row").each(function () {
+      var r = parseInt($(this).data("round"));
+      if (r > max) max = r;
+    });
+    return max;
+  }
+
+  function addRoundRow(roundNum) {
+    var row = '<tr class="hand-row" data-round="' + roundNum + '"><td class="round-cell">' + roundNum + '</td>';
+    GAME_PLAYERS.forEach(function (p) {
+      row += '<td class="score-cell" data-player="' + p.id + '" data-round="' + roundNum + '"></td>';
+    });
+    row += '</tr>';
+    $(".total-row").before(row);
+  }
+
+  $("#addRound").click(function () {
+    addRoundRow(getMaxRound() + 1);
+    var lastRow = $(".hand-row").last();
+    lastRow.find(".score-cell").first().click();
+  });
+
+  $(document).on("click", ".score-cell", function () {
+    if ($(this).hasClass("editing")) return;
+    var cell = $(this);
+    var currentVal = cell.text().trim();
+    cell.addClass("editing");
+    var input = $("<input>").attr("type", "number").attr("inputmode", "numeric").val(currentVal === '' ? '' : parseInt(currentVal));
+    cell.html(input);
+    input.focus().select();
+
+    function saveCell() {
+      var val = input.val().trim();
+      cell.removeClass("editing");
+      cell.text(val);
+      var roundNum = parseInt(cell.attr("data-round"), 10);
+      var playerId = cell.attr("data-player");
+      if (val !== '' && val !== currentVal) {
+        $.ajax({
+          url: "/api/scores",
+          method: "POST",
+          contentType: "application/json",
+          data: JSON.stringify({
+            game_id: $(".game-board").data("game-id"),
+            player_id: playerId,
+            round_number: roundNum,
+            score: parseInt(val) || 0
+          })
+        });
+      } else if (val === '' && currentVal !== '') {
+        $.ajax({
+          url: "/api/scores",
+          method: "POST",
+          contentType: "application/json",
+          data: JSON.stringify({
+            game_id: $(".game-board").data("game-id"),
+            player_id: playerId,
+            round_number: roundNum,
+            score: null
+          })
+        });
+      }
+      recalcTotals();
+      setTimeout(function () {
+        checkTargetScore(roundNum);
+        autoAddRound();
+      }, 0);
+    }
+
+    input.on("blur", saveCell);
+    input.on("keydown", function (e) {
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        saveCell();
+        var nextCell;
+        if (e.key === "Tab" && e.shiftKey) {
+          nextCell = cell.prev(".score-cell");
+        } else {
+          nextCell = cell.next(".score-cell");
+        }
+        if (nextCell && nextCell.length) nextCell.click();
+      } else if (e.key === "Escape") {
+        cell.removeClass("editing");
+        cell.text(currentVal);
+      }
+    });
+  });
+
+  function recalcTotals() {
+    GAME_PLAYERS.forEach(function (p) {
+      var total = 0;
+      $(".score-cell[data-player='" + p.id + "']").each(function () {
+        var v = getCellScoreValue($(this));
+        if (v !== '' && !isNaN(parseInt(v))) total += parseInt(v);
+      });
+      $(".total-cell[data-player='" + p.id + "']").text(total);
+    });
+    updateLeader();
+  }
+
+  function updateLeader() {
+    var leader = null;
+    var bestScore = null;
+    var lowWins = $(".game-board").data("scoring") === "low_wins";
+    GAME_PLAYERS.forEach(function (p) {
+      var t = parseInt($(".total-cell[data-player='" + p.id + "']").text()) || 0;
+      if (bestScore === null || (lowWins ? t < bestScore : t > bestScore)) {
+        bestScore = t;
+        leader = p.name;
+      }
+    });
+    if (leader) {
+      $("#leaderDisplay").html('<i class="fas fa-trophy"></i> ' + leader + ': ' + bestScore);
+    }
+  }
+
+  function autoAddRound() {
+    var lastRow = $(".hand-row").last();
+    var allFilled = true;
+    lastRow.find(".score-cell").each(function () {
+      if (getCellScoreValue($(this)) === '') { allFilled = false; return false; }
+    });
+    if (allFilled) addRoundRow(getMaxRound() + 1);
+  }
+
+  recalcTotals();
+
+  // ===================== COMPLETE GAME (SCORED) =====================
+
+  $("#completeGame").click(function () {
+    AppModal.confirm("Complete Game", "Finish this game and determine the winner based on scores?", function () {
+      doCompleteGame();
+    });
+  });
+
+  // ===================== GAME ACTIONS =====================
+
+  $(".resume-game").click(function () {
+    var gameId = $(this).data("game-id");
+    $.ajax({
+      url: "/api/games/resume/" + gameId,
+      method: "POST",
+      success: function () {
+        AppModal.show({ title: "Game Resumed", body: "<p>Loading game...</p>", type: "success" });
+        setTimeout(function () { window.location.href = "{{ url_for('main.basic_other') }}"; }, 1000);
+      },
+      error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to resume game"); }
+    });
+  });
+
+  $(".complete-paused-game").click(function () {
+    var gameId = $(this).data("game-id");
+    AppModal.confirm("End Game", "End this game without recording results?", function () {
+      $.ajax({
+        url: "/api/games/complete/" + gameId,
+        method: "POST",
+        success: function () { window.location.reload(); },
+        error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to end game"); }
+      });
+    }, { confirmText: "End Game", cancelText: "Cancel" });
+  });
+
+  $("#pauseGame").click(function () {
+    var gameId = $(".game-board").data("game-id");
+    $.ajax({
+      url: "/api/games/pause/" + gameId,
+      method: "POST",
+      success: function () { window.location.href = "{{ url_for('main.basic_other') }}"; },
+      error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to pause game"); }
+    });
+  });
+
+  $("#deleteGame").click(function () {
+    var gid = $(this).data("game-id");
+    AppModal.confirm("Delete Game", "Permanently delete this game?", function () {
+      $.ajax({
+        url: "/api/games/delete/" + gid,
+        method: "POST",
+        success: function () { window.location.href = "{{ url_for('main.basic_other') }}"; },
+        error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to delete game"); }
+      });
+    });
+  });
+
+  $("#clearCompletedGames").click(function () {
+    AppModal.confirm("Clear History", "Clear all completed game history?", function () {
+      $.ajax({
+        url: "/api/games/five-crowns/clear-history",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({ game_id: {{ game_def.id }} }),
+        success: function () { window.location.reload(); },
+        error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to clear history"); }
+      });
+    }, { confirmText: "Clear History", cancelText: "Cancel" });
+  });
+
+  // ===================== SOCKETIO =====================
+
+  function initializeSocket() {
+    if (typeof io === "undefined") { setTimeout(initializeSocket, 100); return; }
+    var socket = io({ transports: ["websocket"], cors: { origin: "*" } });
+    socket.on("connect", function () {
+      {% if active_game %}
+      socket.emit('join_game', {game_id: {{ active_game.id }}});
+      {% endif %}
+    });
+    {% if active_game %}
+    window.addEventListener('beforeunload', function() {
+      socket.emit('leave_game', {game_id: {{ active_game.id }}});
+    });
+    {% endif %}
+
+    socket.on("score_updated", function (data) {
+      var cell = $(".score-cell[data-player='" + data.player_id + "'][data-round='" + data.round_number + "']");
+      if (cell.length && !cell.hasClass("editing")) {
+        cell.text(data.score === null || data.score === "" ? "" : data.score);
+        recalcTotals();
+        setTimeout(function () {
+          checkTargetScore(parseInt(data.round_number, 10));
+          autoAddRound();
+        }, 0);
+      }
+    });
+
+    socket.on("game_completed", function (data) {
+      AppModal.show({ title: "Game Complete!", body: '<pre style="white-space:pre-wrap;font-family:inherit;">' + data.summary + '</pre>', type: "success" });
+      var modalEl = document.getElementById("appModal");
+      $(modalEl).on("hidden.bs.modal.reload", function () {
+        $(modalEl).off("hidden.bs.modal.reload");
+        window.location.reload();
+      });
+    });
+  }
+
+  initializeSocket();
+
+  // ===================== GAME INFO =====================
+
+  $(document).on("click", ".game-info-btn", function () {
+    var modal = new bootstrap.Modal(document.getElementById("gameInfoModal"));
+    var content = document.getElementById("gameInfoContent");
+    content.innerHTML = '<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+    modal.show();
+    fetch("/api/game-details/" + $(this).data("game-id"))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.success) {
+          var html = '';
+          if (data.details.rules) html += '<div class="mb-3">' + data.details.rules + '</div>';
+          if (data.details.scoring_system) html += '<hr><div>' + data.details.scoring_system + '</div>';
+          content.innerHTML = html || "<p>No game information available.</p>";
+        } else { content.innerHTML = '<p class="text-danger">Error loading game information.</p>'; }
+      })
+      .catch(function () { content.innerHTML = '<p class="text-danger">Error loading game information.</p>'; });
+  });
+
+  // ===================== TOOLTIPS =====================
+
+  if (window.innerWidth > 768) {
+    [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(function (el) {
+      return new bootstrap.Tooltip(el);
+    });
+  }
+});
+</script>
+{% endblock %}

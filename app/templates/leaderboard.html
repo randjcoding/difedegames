@@ -1,0 +1,891 @@
+{% extends "base.html" %} {% block title %}Leaderboard{% endblock %} {% block
+content %}
+<div class="container mt-4">
+  <h1>Leaderboard</h1>
+
+  <!-- Game Filter Subtitle -->
+  <p class="text-muted mb-3" id="filterSubtitle">
+    {% if current_game_type %}
+      {% for game in available_games %}
+        {% if game.id|string == current_game_type|string %}
+          Showing stats for <strong>{{ game.name }}</strong>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      Showing stats across <strong>all games</strong>
+    {% endif %}
+  </p>
+
+  <!-- Game Filter Buttons -->
+  <div class="mb-4">
+    <div class="btn-group flex-wrap game-filter-group" role="group" aria-label="Filter by game type">
+      <a href="{{ url_for('main.leaderboard') }}"
+         class="btn btn-game-filter {% if not current_game_type %}active{% endif %}">
+        All Games
+      </a>
+      {% for game in available_games %}
+      <a href="{{ url_for('main.leaderboard', game_type=game.id) }}"
+         class="btn btn-game-filter {% if current_game_type|string == game.id|string %}active{% endif %}">
+        {{ game.name }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if sub_game_names %}
+  <div class="mb-4">
+    <small class="text-muted d-block mb-1">Filter by game name:</small>
+    <div class="btn-group flex-wrap game-filter-group" role="group" aria-label="Filter by sub-game">
+      <a href="{{ url_for('main.leaderboard', game_type=current_game_type) }}"
+         class="btn btn-game-filter btn-sm {% if not current_sub_game %}active{% endif %}">
+        All
+      </a>
+      {% for sg in sub_game_names %}
+      <a href="{{ url_for('main.leaderboard', game_type=current_game_type, sub_game=sg) }}"
+         class="btn btn-game-filter btn-sm {% if current_sub_game == sg %}active{% endif %}">
+        {{ sg }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Accordion -->
+  <div class="accordion" id="leaderboardAccordion">
+
+    <!-- Top Winners -->
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="headingTopWinners">
+        <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTopWinners" aria-expanded="true" aria-controls="collapseTopWinners">
+          <i class="bi bi-trophy me-2"></i> Top Winners
+          <span class="badge rounded-pill bg-secondary ms-2">{{ top_winners|length }}</span>
+        </button>
+      </h2>
+      <div id="collapseTopWinners" class="accordion-collapse collapse show" aria-labelledby="headingTopWinners" data-bs-parent="#leaderboardAccordion">
+        <div class="accordion-body">
+          <div class="table-responsive">
+            <table class="table table-striped" id="topWinnersTable">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Solo Wins</th>
+                  <th>Tied Wins</th>
+                  <th>Total Wins</th>
+                  {% if show_scores %}
+                  <th>Average Score</th>
+                  <th>Best Score</th>
+                  {% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for winner in top_winners %}
+                <tr>
+                  <td>{{ winner.display_name }}</td>
+                  <td>{{ winner.solo_wins }}</td>
+                  <td>{{ winner.tied_wins }}</td>
+                  <td>{{ winner.total_wins }}</td>
+                  {% if show_scores %}
+                  <td data-order="{{ winner.avg_score }}">
+                    {{ winner.avg_score }}
+                  </td>
+                  <td>{{ winner.best_score }}</td>
+                  {% endif %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Win Streaks -->
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="headingStreaks">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseStreaks" aria-expanded="false" aria-controls="collapseStreaks">
+          <i class="bi bi-fire me-2"></i> Win Streaks
+          <span class="badge rounded-pill bg-secondary ms-2">{{ longest_streaks|length }}</span>
+        </button>
+      </h2>
+      <div id="collapseStreaks" class="accordion-collapse collapse" aria-labelledby="headingStreaks" data-bs-parent="#leaderboardAccordion">
+        <div class="accordion-body">
+          <div class="table-responsive">
+            <table class="table table-striped" id="streaksTable">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Streak Length</th>
+                  <th>Ties in Streak</th>
+                  <th>Started</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for streak in longest_streaks %}
+                <tr>
+                  <td>{{ streak.display_name }}</td>
+                  <td>{{ streak.streak_length }}</td>
+                  <td>{{ streak.ties_in_streak }}</td>
+                  <td
+                    data-order="{{ streak.streak_start_date.strftime('%Y%m%d%H%M') }}"
+                  >
+                    {{ streak.streak_start_date.strftime('%Y-%m-%d') }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Overall Records -->
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="headingOverallRecords">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOverallRecords" aria-expanded="false" aria-controls="collapseOverallRecords">
+          <i class="bi bi-bar-chart me-2"></i> Overall Records
+          <span class="badge rounded-pill bg-secondary ms-2">{{ overall_records|length }}</span>
+        </button>
+      </h2>
+      <div id="collapseOverallRecords" class="accordion-collapse collapse" aria-labelledby="headingOverallRecords" data-bs-parent="#leaderboardAccordion">
+        <div class="accordion-body">
+          <div class="table-responsive">
+            <table class="table table-striped" id="overallRecordsTable">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Games</th>
+                  <th>Wins</th>
+                  <th>Losses</th>
+                  <th>Ties</th>
+                  <th>Win %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for record in overall_records %}
+                <tr>
+                  <td>
+                    {{ record.first_name }} {{ record.last_name }} {% if
+                    record.display_name != record.first_name + ' ' +
+                    record.last_name %}
+                    <small class="text-muted">({{ record.display_name }})</small>
+                    {% endif %}
+                  </td>
+                  <td>{{ record.total_games }}</td>
+                  <td>{{ record.wins }}</td>
+                  <td>{{ record.losses }}</td>
+                  <td>{{ record.ties }}</td>
+                  <td data-order="{{ record.win_percentage }}">
+                    {{ "%.1f"|format(record.win_percentage) }}%
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Games -->
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="headingRecentGames">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseRecentGames" aria-expanded="false" aria-controls="collapseRecentGames">
+          <i class="bi bi-clock-history me-2"></i> Recent Games
+          <span class="badge rounded-pill bg-secondary ms-2">{{ recent_games|length }}</span>
+        </button>
+      </h2>
+      <div id="collapseRecentGames" class="accordion-collapse collapse" aria-labelledby="headingRecentGames" data-bs-parent="#leaderboardAccordion">
+        <div class="accordion-body">
+          <div class="table-responsive">
+            <table class="table table-striped" id="recentGamesTable">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Game #</th>
+                  <th>Game</th>
+                  <th>Date</th>
+                  <th>Players</th>
+                  <th>Winner(s)</th>
+                  <th>Score</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for game in recent_games %}
+                <tr>
+                  <td class="details-control"></td>
+                  <td data-order="{{ game.game_number }}" title="ID: {{ game.game_id }}">{{ game.game_name }} #{{ game.game_number }}</td>
+                  <td>{{ game.game_name }}</td>
+                  <td data-order="{{ game.start_time.strftime('%Y%m%d%H%M') }}">
+                    {{ game.start_time.strftime('%Y-%m-%d %H:%M') }}
+                  </td>
+                  <td>{{ game.player_names }}</td>
+                  <td>{{ game.winner_display }}</td>
+                  <td>{{ game.winning_score }}</td>
+                  <td>
+                    <button
+                      class="btn btn-sm btn-primary round-by-round-btn"
+                      data-game-id="{{ game.game_id }}"
+                      data-bs-toggle="tooltip"
+                      title="View round-by-round scores"
+                    >
+                      Round by Round
+                    </button>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end accordion -->
+</div>
+
+<!-- Round by Round Scores Modal -->
+<div
+  class="modal fade"
+  id="roundByRoundModal"
+  tabindex="-1"
+  aria-labelledby="roundByRoundModalLabel"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="roundByRoundModalLabel">
+          Round by Round Scores
+        </h5>
+        <div class="d-flex align-items-center">
+          <div class="me-3 text-muted" id="gameDate">
+            <!-- Date will be inserted here -->
+          </div>
+          <button
+            type="button"
+            class="btn-close"
+            data-bs-dismiss="modal"
+            aria-label="Close"
+          ></button>
+        </div>
+      </div>
+      <div class="modal-body" id="roundByRoundContent">
+        <div class="text-center">
+          <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="d-flex justify-content-between align-items-center w-100">
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            id="prevGameBtn"
+            aria-label="Previous Game"
+            style="display: none"
+          >
+            <i class="bi bi-chevron-left"></i>
+          </button>
+          <div class="text-muted" id="gameInfo">
+            <!-- Game ID will be inserted here -->
+          </div>
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            id="nextGameBtn"
+            aria-label="Next Game"
+            style="display: none"
+          >
+            <i class="bi bi-chevron-right"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %} {% block styles %}
+<style>
+  /* Accordion theme styles */
+  .accordion-button {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text) !important;
+    font-weight: 600;
+    font-size: 1.1rem;
+  }
+  .accordion-button:not(.collapsed) {
+    border-left: 3px solid var(--df-accent);
+  }
+  .accordion-button::after {
+    filter: invert(1);
+  }
+  .accordion-body {
+    background: var(--df-card);
+    color: var(--df-text-card);
+  }
+  .accordion-button:focus {
+    box-shadow: none;
+    border-color: var(--df-accent);
+  }
+  .accordion-item {
+    border-color: var(--df-card-header);
+    background: var(--df-card);
+  }
+
+  /* Game Filter Button Styles */
+  .game-filter-group {
+    gap: 0;
+  }
+
+  .btn-game-filter {
+    background: #fff;
+    color: var(--df-accent);
+    border: 2px solid var(--df-accent);
+    font-weight: 500;
+    transition: all 0.2s ease;
+  }
+
+  .btn-game-filter:hover {
+    background: var(--df-accent-gradient);
+    color: var(--df-btn-primary-text);
+    border-color: var(--df-accent);
+  }
+
+  .btn-game-filter.active {
+    background: var(--df-accent-gradient);
+    color: var(--df-btn-primary-text);
+    border-color: var(--df-accent);
+    box-shadow: 0 2px 8px rgba(118, 75, 162, 0.35);
+  }
+
+  .btn-game-filter:focus {
+    box-shadow: 0 0 0 0.2rem rgba(118, 75, 162, 0.25);
+  }
+
+  @media (max-width: 576px) {
+    .game-filter-group {
+      flex-direction: column;
+      width: 100%;
+    }
+
+    .btn-game-filter {
+      border-radius: 0.375rem !important;
+      margin-bottom: 0.25rem;
+      font-size: 0.875rem;
+    }
+  }
+
+  /* Details control styling */
+  td.details-control {
+    background: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjMDA3YmZmIj48cGF0aCBkPSJNMTkgMTNoLTZ2NmgtMnYtNkg1di0yaDZWNWgydjZoNnYyeiIvPjwvc3ZnPg==")
+      no-repeat center center;
+    cursor: pointer;
+    width: 30px;
+  }
+
+  tr.shown td.details-control {
+    background: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjMDA3YmZmIj48cGF0aCBkPSJNMTkgMTNINXYtMmgxNHYyeiIvPjwvc3ZnPg==")
+      no-repeat center center;
+  }
+
+  .game-details {
+    padding: 1rem;
+    background-color: #f8f9fa;
+    margin: 0.5rem 2rem;
+    border-radius: 0.25rem;
+  }
+
+  .score-table {
+    margin-bottom: 0;
+  }
+
+  .score-table th,
+  .score-table td {
+    padding: 0.5rem;
+  }
+
+  /* Mobile optimizations for iPhone */
+  @media (max-width: 768px) {
+    .table th,
+    .table td {
+      padding: 0.5rem 0.25rem;
+      font-size: 0.875rem;
+    }
+
+    .btn-sm {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
+    }
+
+    .container {
+      padding-left: 0.5rem;
+      padding-right: 0.5rem;
+    }
+
+    /* Hide tooltips on mobile - they stick around */
+    [data-bs-toggle="tooltip"] {
+      pointer-events: none;
+    }
+
+    /* Re-enable pointer events for buttons but remove tooltip */
+    .round-by-round-btn {
+      pointer-events: all;
+    }
+    .round-by-round-btn[data-bs-toggle="tooltip"] {
+      pointer-events: all;
+    }
+
+    /* Navigation buttons in modal */
+    #prevGameBtn,
+    #nextGameBtn {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.875rem;
+    }
+
+    #gameInfo,
+    #gameDate {
+      font-size: 0.875rem;
+      white-space: nowrap;
+    }
+
+    .modal-footer {
+      border-top: 1px solid #dee2e6;
+      padding: 0.75rem 1rem;
+    }
+
+    @media (max-width: 576px) {
+      #gameInfo,
+      #gameDate {
+        font-size: 0.75rem;
+      }
+
+      #prevGameBtn,
+      #nextGameBtn {
+        padding: 0.2rem 0.4rem;
+        font-size: 0.75rem;
+      }
+
+      .modal-footer {
+        padding: 0.5rem 0.75rem;
+      }
+    }
+  }
+
+  @media (max-width: 576px) {
+    .table th,
+    .table td {
+      padding: 0.375rem 0.125rem;
+      font-size: 0.8rem;
+    }
+
+    .btn-sm {
+      padding: 0.2rem 0.4rem;
+      font-size: 0.7rem;
+    }
+
+    /* Make Details column narrower on mobile */
+    #recentGamesTable th:last-child,
+    #recentGamesTable td:last-child {
+      width: 80px;
+      min-width: 80px;
+    }
+
+    /* Make expand/collapse column narrower */
+    #recentGamesTable th:first-child,
+    #recentGamesTable td:first-child {
+      width: 25px;
+      min-width: 25px;
+    }
+  }
+
+  /* Hide DataTable sorting arrows for cleaner mobile look */
+  .dataTables_wrapper .dataTable thead .sorting,
+  .dataTables_wrapper .dataTable thead .sorting_asc,
+  .dataTables_wrapper .dataTable thead .sorting_desc {
+    background-image: none !important;
+  }
+
+  /* For mobile, completely remove sorting indicators */
+  @media (max-width: 768px) {
+    .dataTables_wrapper .dataTable thead th {
+      background-image: none !important;
+      padding-right: 0.5rem !important;
+    }
+  }
+
+  /* More aggressive removal of DataTable sorting arrows */
+  table.dataTable thead .sorting:after,
+  table.dataTable thead .sorting_asc:after,
+  table.dataTable thead .sorting_desc:after,
+  table.dataTable thead .sorting:before,
+  table.dataTable thead .sorting_asc:before,
+  table.dataTable thead .sorting_desc:before {
+    display: none !important;
+  }
+
+  /* Remove sorting class background images entirely */
+  table.dataTable thead th.sorting,
+  table.dataTable thead th.sorting_asc,
+  table.dataTable thead th.sorting_desc {
+    background: none !important;
+    cursor: pointer;
+  }
+
+  /* Override DataTables default styles completely */
+  .dataTables_wrapper table.dataTable thead th,
+  .dataTables_wrapper table.dataTable thead td {
+    background-image: none !important;
+  }
+
+  /* Force removal of all DataTable sorting arrows with multiple methods */
+  table.dataTable thead th.sorting:after,
+  table.dataTable thead th.sorting:before,
+  table.dataTable thead th.sorting_asc:after,
+  table.dataTable thead th.sorting_asc:before,
+  table.dataTable thead th.sorting_desc:after,
+  table.dataTable thead th.sorting_desc:before,
+  table.dataTable thead th.sorting_asc_disabled:after,
+  table.dataTable thead th.sorting_asc_disabled:before,
+  table.dataTable thead th.sorting_desc_disabled:after,
+  table.dataTable thead th.sorting_desc_disabled:before {
+    display: none !important;
+    content: none !important;
+  }
+
+  /* Remove background images from all possible DataTable header states */
+  table.dataTable thead th.sorting,
+  table.dataTable thead th.sorting_asc,
+  table.dataTable thead th.sorting_desc,
+  table.dataTable thead th.sorting_asc_disabled,
+  table.dataTable thead th.sorting_desc_disabled {
+    background-image: none !important;
+    background: none !important;
+    cursor: pointer;
+    padding-right: 8px !important;
+  }
+
+  /* Additional overrides for various DataTable versions */
+  .dataTables_wrapper .dataTables_processing,
+  .dataTables_wrapper .dataTables_length,
+  .dataTables_wrapper .dataTables_filter,
+  .dataTables_wrapper .dataTables_info,
+  .dataTables_wrapper .dataTables_paginate,
+  .dataTables_wrapper .dataTables_scroll {
+    background: none !important;
+  }
+
+  /* Ensure all table headers have no sorting indicators */
+  #overallRecordsTable thead th,
+  #topWinnersTable thead th,
+  #streaksTable thead th,
+  #recentGamesTable thead th {
+    background-image: none !important;
+    background: none !important;
+  }
+</style>
+{% endblock %} {% block scripts %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    // Initialize DataTables for all tables
+    const tableConfigs = {
+      overallRecordsTable: {
+        order: [[5, "desc"]],
+        pageLength: 25,
+      },
+      topWinnersTable: {
+        order: [[3, "desc"]],
+        pageLength: 10,
+      },
+      streaksTable: {
+        order: [[1, "desc"]],
+        pageLength: 10,
+      },
+      recentGamesTable: {
+        order: [[3, "desc"]],
+        pageLength: 25,
+        lengthMenu: [
+          [10, 25, 50, 100],
+          [10, 25, 50, 100],
+        ],
+        columnDefs: [
+          {
+            targets: 0,
+            className: "details-control",
+            orderable: false,
+            data: null,
+            defaultContent: "",
+          },
+        ],
+      },
+    };
+
+    // Initialize tooltips only on desktop
+    if (window.innerWidth > 768) {
+      var tooltipTriggerList = [].slice.call(
+        document.querySelectorAll('[data-bs-toggle="tooltip"]')
+      );
+      var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+      });
+    } else {
+      // Remove tooltip attributes on mobile
+      document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((el) => {
+        el.removeAttribute("data-bs-toggle");
+        el.removeAttribute("data-bs-placement");
+        el.removeAttribute("title");
+      });
+    }
+
+    // Initialize each table with its specific configuration
+    Object.entries(tableConfigs).forEach(([tableId, config]) => {
+      window[tableId] = $(`#${tableId}`).DataTable({
+        ...config,
+        responsive: true,
+        dom: '<"d-flex justify-content-between align-items-center"lf>rtip',
+        language: {
+          search: "Search:",
+          lengthMenu: "Show _MENU_ entries",
+        },
+        ordering: true,
+        bSortClasses: false,
+        drawCallback: function () {
+          $(this)
+            .find("thead th")
+            .removeClass("sorting sorting_asc sorting_desc");
+        },
+        initComplete: function () {
+          $(this)
+            .find("thead th")
+            .removeClass(
+              "sorting sorting_asc sorting_desc sorting_asc_disabled sorting_desc_disabled"
+            );
+          $(this).find("thead th").css({
+            "background-image": "none",
+            background: "none",
+            "padding-right": "8px",
+          });
+        },
+      });
+
+      setTimeout(() => {
+        $(`#${tableId} thead th`).removeClass(
+          "sorting sorting_asc sorting_desc sorting_asc_disabled sorting_desc_disabled"
+        );
+        $(`#${tableId} thead th`).css({
+          "background-image": "none !important",
+          background: "none !important",
+        });
+      }, 100);
+    });
+
+    document.querySelectorAll('.accordion-collapse').forEach(function (el) {
+      el.addEventListener('shown.bs.collapse', function () {
+        var tables = $($.fn.dataTable.tables(true)).DataTable();
+        tables.columns.adjust();
+        if (tables.responsive) tables.responsive.recalc();
+      });
+    });
+
+    // Function to format game details for expansion
+    function formatGameDetails(gameData) {
+      return `
+        <div class="game-details">
+          <div class="row">
+            <div class="col-md-6">
+              <h5>Game Summary</h5>
+              <p><strong>Game:</strong> ${gameData.game_number}</p>
+              <p><strong>Game ID:</strong> ${gameData.game_id}</p>
+              <p><strong>Date:</strong> ${gameData.date}</p>
+              <p><strong>Players:</strong> ${gameData.players}</p>
+              <p><strong>Winner:</strong> ${gameData.winner}</p>
+              <p><strong>Winning Score:</strong> ${gameData.score}</p>
+            </div>
+            <div class="col-md-6">
+              <h5>Final Scores</h5>
+              <div class="table-responsive">
+                <table class="table table-sm score-table">
+                  <thead>
+                    <tr>
+                      <th>Player</th>
+                      <th>Total Score</th>
+                    </tr>
+                  </thead>
+                  <tbody id="final-scores-${gameData.game_id}">
+                    <tr><td colspan="2">Loading...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Add event listener for expanding/collapsing details
+    $("#recentGamesTable tbody").on("click", "td.details-control", function () {
+      const tr = $(this).closest("tr");
+      const row = window.recentGamesTable.row(tr);
+
+      if (row.child.isShown()) {
+        row.child.hide();
+        tr.removeClass("shown");
+      } else {
+        const gameData = {
+          game_id: tr.find(".round-by-round-btn").data("game-id"),
+          game_number: tr.find("td:eq(1)").text().trim(),
+          game_name: tr.find("td:eq(2)").text().trim(),
+          date: tr.find("td:eq(3)").text(),
+          players: tr.find("td:eq(4)").text(),
+          winner: tr.find("td:eq(5)").text(),
+          score: tr.find("td:eq(6)").text(),
+        };
+
+        row.child(formatGameDetails(gameData)).show();
+        tr.addClass("shown");
+
+        loadFinalScores(gameData.game_id);
+      }
+    });
+
+    // Function to load final scores for a game
+    function loadFinalScores(gameId) {
+      fetch(`/api/games/${gameId}/final-scores`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            let scoresHtml = "";
+            data.scores.forEach((score) => {
+              scoresHtml += `
+                <tr>
+                  <td>${score.player_name}</td>
+                  <td>${score.total_score}</td>
+                </tr>
+              `;
+            });
+            $(`#final-scores-${gameId}`).html(scoresHtml);
+          } else {
+            $(`#final-scores-${gameId}`).html(
+              '<tr><td colspan="2">No scores available</td></tr>'
+            );
+          }
+        })
+        .catch((error) => {
+          console.error("Error loading final scores:", error);
+          $(`#final-scores-${gameId}`).html(
+            '<tr><td colspan="2">Error loading scores</td></tr>'
+          );
+        });
+    }
+
+    let currentGameId = null;
+    let allGameIds = [];
+    let currentGameIndex = -1;
+
+    function getAllGameIds() {
+      const gameIds = [];
+      window.recentGamesTable.rows().every(function () {
+        const gameId = $(this.node())
+          .find(".round-by-round-btn")
+          .data("game-id");
+        if (gameId) {
+          gameIds.push(gameId);
+        }
+      });
+      return gameIds;
+    }
+
+    function loadRoundByRoundScores(gameId) {
+      const modalContent = document.getElementById("roundByRoundContent");
+
+      modalContent.innerHTML = `
+        <div class="text-center">
+          <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      `;
+
+      fetch(`/api/games/${gameId}/round-by-round`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            modalContent.innerHTML = data.html;
+
+            const gameDate = document.getElementById("gameDate");
+            gameDate.innerHTML = data.game_date;
+
+            const gameInfo = document.getElementById("gameInfo");
+            gameInfo.innerHTML = `<strong>Game #${data.game_id}</strong>`;
+
+            currentGameId = gameId;
+            currentGameIndex = allGameIds.indexOf(gameId);
+
+            const prevBtn = document.getElementById("prevGameBtn");
+            const nextBtn = document.getElementById("nextGameBtn");
+
+            prevBtn.style.display = currentGameIndex > 0 ? "block" : "none";
+            nextBtn.style.display =
+              currentGameIndex < allGameIds.length - 1 ? "block" : "none";
+          } else {
+            modalContent.innerHTML =
+              '<p class="text-danger">Error loading round-by-round scores.</p>';
+          }
+        })
+        .catch((error) => {
+          console.error("Error:", error);
+          modalContent.innerHTML =
+            '<p class="text-danger">Error loading round-by-round scores.</p>';
+        });
+    }
+
+    $("#prevGameBtn").on("click", function () {
+      if (currentGameIndex > 0) {
+        const prevGameId = allGameIds[currentGameIndex - 1];
+        loadRoundByRoundScores(prevGameId);
+      }
+    });
+
+    $("#nextGameBtn").on("click", function () {
+      if (currentGameIndex < allGameIds.length - 1) {
+        const nextGameId = allGameIds[currentGameIndex + 1];
+        loadRoundByRoundScores(nextGameId);
+      }
+    });
+
+    $(document).on("keydown", function (e) {
+      if ($("#roundByRoundModal").hasClass("show")) {
+        if (e.key === "ArrowLeft" && currentGameIndex > 0) {
+          e.preventDefault();
+          $("#prevGameBtn").click();
+        } else if (
+          e.key === "ArrowRight" &&
+          currentGameIndex < allGameIds.length - 1
+        ) {
+          e.preventDefault();
+          $("#nextGameBtn").click();
+        }
+      }
+    });
+
+    $(document).on("click", ".round-by-round-btn", function () {
+      const gameId = $(this).data("game-id");
+      const modal = new bootstrap.Modal(
+        document.getElementById("roundByRoundModal")
+      );
+
+      if (window.innerWidth <= 768) {
+        $(".tooltip").remove();
+        $('[data-bs-toggle="tooltip"]').tooltip("hide");
+      }
+
+      allGameIds = getAllGameIds();
+
+      modal.show();
+      loadRoundByRoundScores(gameId);
+    });
+  });
+</script>
+{% endblock %}

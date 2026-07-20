@@ -1,0 +1,127 @@
+{% extends "base.html" %} {% block title %}Resend Verification Email - {{
+config.APP_NAME }}{% endblock %} {% block content %}
+<div class="container mt-5">
+  <div class="row justify-content-center">
+    <div class="col-md-6 col-lg-4">
+      <div class="card shadow">
+        <div class="card-body p-5">
+          <div class="text-center mb-4">
+            <h2 class="card-title">Resend Verification Email</h2>
+            <p class="text-muted">
+              Enter your email to receive a new verification link
+            </p>
+          </div>
+
+          <form method="POST">
+            <div class="mb-3">
+              <label for="email" class="form-label">Email Address</label>
+              <input
+                type="email"
+                class="form-control"
+                id="email"
+                name="email"
+                required
+                autofocus
+                placeholder="Enter your email address"
+              />
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100 mb-3">
+              Send Verification Email
+            </button>
+          </form>
+
+          <div class="text-center">
+            <p class="mb-2">
+              <a
+                href="{{ url_for('auth.login') }}"
+                class="text-decoration-none"
+              >
+                Back to Login
+              </a>
+            </p>
+            <p>
+              Don't have an account?
+              <a
+                href="{{ url_for('auth.register') }}"
+                class="text-decoration-none"
+              >
+                Register here
+              </a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Info section -->
+<div class="container mt-4">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="alert alert-info">
+        <h5><i class="fas fa-info-circle"></i> About Email Verification</h5>
+        <ul class="mb-0">
+          <li>Verification links expire after 24 hours for security</li>
+          <li>Check your spam folder if you don't see the email</li>
+          <li>You can only log in after verifying your email address</li>
+          <li>Contact support if you continue having issues</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block styles %}
+<style>
+  .card {
+    border: none;
+    border-radius: 15px;
+  }
+
+  .card-body {
+    background: var(--df-card-header);
+    background-clip: padding-box;
+    border-radius: 15px;
+    color: var(--df-dt-header-text);
+  }
+
+  .form-control {
+    background: rgba(255, 255, 255, 0.9);
+    border: none;
+    border-radius: 10px;
+  }
+
+  .form-control:focus {
+    background: white;
+    box-shadow: 0 0 0 0.2rem rgba(255, 255, 255, 0.25);
+  }
+
+  .btn-primary {
+    background: rgba(255, 255, 255, 0.2);
+    border: 2px solid white;
+    border-radius: 10px;
+    color: white;
+    font-weight: bold;
+  }
+
+  .btn-primary:hover {
+    background: white;
+    color: var(--df-accent);
+  }
+
+  a {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  a:hover {
+    color: white;
+  }
+
+  .alert-info {
+    background: rgba(102, 126, 234, 0.1);
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: 10px;
+  }
+</style>
+{% endblock %}

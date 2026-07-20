@@ -1,0 +1,294 @@
+{% extends "base.html" %} {% block title %}Profile{% endblock %} {% block
+content %}
+<div class="container">
+  <div class="row justify-content-center">
+    <div class="col-lg-10">
+      <div class="card shadow">
+        <div
+          class="card-header d-flex justify-content-between align-items-center"
+          style="background: var(--df-card-header) !important; color: var(--df-dt-header-text);"
+        >
+          <h3 class="mb-0"><i class="fas fa-user-circle"></i> My Profile</h3>
+          <div>
+            <a
+              href="{{ url_for('auth.change_password') }}"
+              class="btn btn-light btn-sm"
+            >
+              <i class="fas fa-key"></i> Change Password
+            </a>
+          </div>
+        </div>
+        <div class="card-body">
+          <!-- Account Information -->
+          <div class="row mb-4">
+            <div class="col-md-6">
+              <div class="card bg-light">
+                <div class="card-body">
+                  <h5 class="card-title text-primary">
+                    <i class="fas fa-info-circle"></i> Account Information
+                  </h5>
+                  <table class="table table-borderless">
+                    <tr>
+                      <td><strong>Email:</strong></td>
+                      <td>{{ user.email }}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Role:</strong></td>
+                      <td>
+                        <span class="badge bg-secondary"
+                          >{{ user.role|title }}</span
+                        >
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><strong>Verified:</strong></td>
+                      <td>
+                        {% if user.is_verified %}
+                        <span class="badge bg-success">
+                          <i class="fas fa-check"></i> Verified
+                        </span>
+                        {% else %}
+                        <span class="badge bg-warning">
+                          <i class="fas fa-exclamation-triangle"></i> Unverified
+                        </span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><strong>Member Since:</strong></td>
+                      <td>
+                        {{ user.created_at.strftime('%B %d, %Y') if
+                        user.created_at else 'Unknown' }}
+                      </td>
+                    </tr>
+                    {% if user.last_login %}
+                    <tr>
+                      <td><strong>Last Login:</strong></td>
+                      <td>
+                        {{ user.last_login.strftime('%B %d, %Y at %I:%M %p') }}
+                      </td>
+                    </tr>
+                    {% endif %}
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="card bg-light">
+                <div class="card-body">
+                  <h5 class="card-title text-primary">
+                    <i class="fas fa-chart-line"></i> Statistics
+                  </h5>
+                  <table class="table table-borderless">
+                    <tr>
+                      <td><strong>Achievements:</strong></td>
+                      <td>
+                        {% if user.achievements %}
+                        <span class="badge bg-success"
+                          >{{ user.achievements|length }}</span
+                        >
+                        {% else %}
+                        <span class="badge bg-secondary">0</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><strong>Account Status:</strong></td>
+                      <td>
+                        {% if user.is_active %}
+                        <span class="badge bg-success">Active</span>
+                        {% else %}
+                        <span class="badge bg-danger">Inactive</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Profile Form -->
+          <form method="POST" action="{{ url_for('auth.update_profile') }}">
+            <h5 class="text-primary mb-3">
+              <i class="fas fa-edit"></i> Edit Profile Information
+            </h5>
+
+            <div class="row">
+              <div class="col-md-4">
+                <div class="mb-3">
+                  <label for="first_name" class="form-label">
+                    <i class="fas fa-user"></i> First Name *
+                  </label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="first_name"
+                    name="first_name"
+                    value="{{ user.first_name or '' }}"
+                    required
+                  />
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="mb-3">
+                  <label for="last_name" class="form-label">
+                    <i class="fas fa-user"></i> Last Name *
+                  </label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="last_name"
+                    name="last_name"
+                    value="{{ user.last_name or '' }}"
+                    required
+                  />
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="mb-3">
+                  <label for="family_name" class="form-label">
+                    <i class="fas fa-home"></i> Family Name *
+                  </label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="family_name"
+                    name="family_name"
+                    value="{{ user.family_name or '' }}"
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-8">
+                <div class="mb-3">
+                  <label for="address" class="form-label">
+                    <i class="fas fa-map-marker-alt"></i> Address
+                  </label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="address"
+                    name="address"
+                    value="{{ user.address or '' }}"
+                    placeholder="123 Main Street"
+                  />
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="mb-3">
+                  <label for="phone_number" class="form-label">
+                    <i class="fas fa-phone"></i> Phone Number
+                  </label>
+                  <input
+                    type="tel"
+                    class="form-control"
+                    id="phone_number"
+                    name="phone_number"
+                    value="{{ user.phone_number or '' }}"
+                    placeholder="(555) 123-4567"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-4">
+                <div class="mb-3">
+                  <label for="city" class="form-label">
+                    <i class="fas fa-city"></i> City
+                  </label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="city"
+                    name="city"
+                    value="{{ user.city or '' }}"
+                    placeholder="New York"
+                  />
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="mb-3">
+                  <label for="state" class="form-label">
+                    <i class="fas fa-flag"></i> State
+                  </label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="state"
+                    name="state"
+                    value="{{ user.state or '' }}"
+                    placeholder="NY"
+                    maxlength="2"
+                  />
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="mb-3">
+                  <label for="zipcode" class="form-label">
+                    <i class="fas fa-mail-bulk"></i> ZIP Code
+                  </label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="zipcode"
+                    name="zipcode"
+                    value="{{ user.zipcode or '' }}"
+                    placeholder="12345"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mt-4">
+              <small class="text-muted">
+                <i class="fas fa-info-circle"></i>
+                Fields marked with * are required
+              </small>
+              <div>
+                <a
+                  href="{{ url_for('main.dashboard') }}"
+                  class="btn btn-secondary me-2"
+                >
+                  <i class="fas fa-times"></i> Cancel
+                </a>
+                <button type="submit" class="btn btn-primary">
+                  <i class="fas fa-save"></i> Update Profile
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script>
+  // Auto-format phone number
+  document
+    .getElementById("phone_number")
+    .addEventListener("input", function (e) {
+      let value = e.target.value.replace(/\D/g, "");
+      if (value.length >= 6) {
+        value = `(${value.slice(0, 3)}) ${value.slice(3, 6)}-${value.slice(
+          6,
+          10
+        )}`;
+      } else if (value.length >= 3) {
+        value = `(${value.slice(0, 3)}) ${value.slice(3)}`;
+      }
+      e.target.value = value;
+    });
+
+  // Auto-uppercase state
+  document.getElementById("state").addEventListener("input", function (e) {
+    e.target.value = e.target.value.toUpperCase();
+  });
+</script>
+{% endblock %}

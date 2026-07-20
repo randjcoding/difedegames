@@ -1,0 +1,998 @@
+{% extends "base.html" %} {% block title %}Trouble{% endblock %} {% block
+content %}
+<div class="trouble-container">
+  {% if not active_game %}
+  <div class="new-game-section">
+    <h2>Trouble</h2>
+
+    {% if paused_games %}
+    <div class="paused-games mb-4">
+      <h3>In-Progress Games</h3>
+      <div class="list-group">
+        {% for game in paused_games %}
+        <div
+          class="list-group-item d-flex justify-content-between align-items-center py-2"
+        >
+          <div class="small">
+            <h6 class="mb-1">Game #{{ game.id }}</h6>
+            <p class="mb-1 text-muted">Players: {{ game.player_names }}</p>
+            <small>Started: {{ game.start_time }}</small>
+          </div>
+          <div>
+            <button
+              class="btn btn-sm resume-game me-2"
+              style="background-color: #FFD700; color: #1a1a1a; border-color: #FFD700; font-weight:600;"
+              data-game-id="{{ game.id }}"
+            >
+              Resume
+            </button>
+            <button
+              class="btn btn-sm complete-paused-game"
+              style="background-color: #E31937; color: white; border-color: #E31937;"
+              data-game-id="{{ game.id }}"
+            >
+              End Game
+            </button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %} {% if completed_games %}
+    <div class="completed-games mb-4">
+      <div class="d-flex justify-content-between align-items-center">
+        <h3>Recent Completed Games</h3>
+        <button id="clearCompletedGames" class="btn btn-sm" style="background-color:#E31937;color:white;">
+          Clear History
+        </button>
+      </div>
+      <div class="list-group">
+        {% for game in completed_games %}
+        <div class="list-group-item py-2">
+          <div class="small">
+            <h6 class="mb-1">Game #{{ game.game_number or game.id }}</h6>
+            <p class="mb-1">Players: {{ game.player_names }}</p>
+            {% if game.winner and game.winning_score %}
+            <p class="mb-1 text-success">
+              <strong>Winner: {{ game.winner }}</strong>
+              <span class="sow-clickable" title="Strength of Win">
+                SOW: {{ game.winning_score }}
+              </span>
+            </p>
+            {% else %}
+            <p class="mb-1 text-muted">
+              <em>Game incomplete</em>
+            </p>
+            {% endif %}
+            <small class="text-muted"
+              >Completed: {{ game.start_time.strftime('%Y-%m-%d %H:%M') if
+              game.start_time else 'Unknown' }}</small
+            >
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="new-game-section">
+      <h3>Start New Game</h3>
+      <form id="newGameForm" class="mt-4">
+        <div class="mb-3">
+          <label for="playerCount" class="form-label"
+            >Number of Players ({{ game_def.min_players }}-{{
+            game_def.max_players }})</label
+          >
+          <select class="form-select" id="playerCount" required>
+            {% for i in range(game_def.min_players, game_def.max_players + 1) %}
+            <option value="{{ i }}" {% if i == 2 %}selected{% endif %}>{{ i }} Players</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div id="playerSelections"></div>
+        <div class="mt-2 mb-1">
+          <small class="text-muted">Tap a color circle to assign / swap colors</small>
+        </div>
+        <button type="submit" class="btn mt-3 w-100 py-2" style="background-color:#E31937;color:white;font-weight:600;"><i class="fas fa-play me-2"></i>Start Game</button>
+      </form>
+    </div>
+  </div>
+  {% else %}
+  <div
+    class="game-board trouble-board"
+    data-game-id="{{ active_game.id }}"
+  >
+    <div class="game-header-container position-relative mb-3">
+      <h2 class="game-title text-center mb-0">Trouble - Game in Progress</h2>
+      <button
+        type="button"
+        class="btn btn-link p-1 game-info-btn position-absolute"
+        style="border:none;background:none;top:0;right:0;z-index:10;color:#FFD700;"
+        data-game-id="trouble"
+        data-bs-toggle="tooltip"
+        data-bs-placement="top"
+        title="View game rules and information"
+      >
+        <i class="fas fa-info-circle fa-lg"></i>
+      </button>
+    </div>
+
+    <div class="players-display">
+      <h4 class="text-center mb-3" style="color:#FFD700;">Players</h4>
+      <div class="d-flex flex-wrap justify-content-center gap-3 mb-4">
+        {% for player in game_players %}
+        <div class="player-card text-center" data-player-id="{{ player.id }}">
+          <div class="player-peg clickable-peg" data-player-id="{{ player.id }}" style="background: {{ ['#E31937','#0072BC','#00A651','#FFD700'][loop.index0 % 4] }};"></div>
+          <div class="player-name">{{ player.display_name }}</div>
+          <div class="color-picker-row d-none" data-player-id="{{ player.id }}"></div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="text-center mb-4">
+      <p style="color:#ccc; font-size:0.9rem;">Play your game of Trouble, then record the results when finished.</p>
+    </div>
+
+    <div class="results-section" id="resultsSection" style="display:none;">
+      <div class="results-card">
+        <h4 class="text-center mb-3">Record Results</h4>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Who Won?</label>
+          <select class="form-select" id="winnerSelect" required>
+            <option value="">Select Winner</option>
+            {% for player in game_players %}
+            <option value="{{ player.id }}">{{ player.display_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div id="loserPegEntries"></div>
+
+        <div class="sow-summary mt-3 p-3" id="sowSummary" style="display:none;">
+          <h5 class="text-center mb-2" style="color:#FFD700;">
+            <span class="sow-clickable" title="Strength of Win">SOW</span> Breakdown
+          </h5>
+          <div id="sowDetails"></div>
+          <div class="text-center mt-2">
+            <strong style="font-size:1.2rem; color:#FFD700;">Total: <span id="sowTotal">25</span> pts</strong>
+          </div>
+        </div>
+
+        <button id="submitResults" class="btn w-100 mt-3 py-2" style="background-color:#E31937;color:white;font-weight:600;" disabled>
+          <i class="fas fa-check me-2"></i>Complete Game
+        </button>
+      </div>
+    </div>
+
+    <div class="text-center mt-3 d-flex flex-wrap justify-content-center gap-2">
+      <button id="recordResults" class="btn btn-lg" style="background-color: #FFD700; color: #1a1a1a; font-weight:700;">
+        <i class="fas fa-flag-checkered me-2"></i>Game Over - Record Results
+      </button>
+      <a href="{{ url_for('main.trouble', new='1') }}" class="btn btn-outline-info btn-sm">
+        <i class="fas fa-plus-circle"></i> New Game
+      </a>
+      <button id="deleteGame" class="btn btn-outline-danger btn-sm" data-game-id="{{ active_game.id }}">
+        <i class="fas fa-trash"></i> Delete
+      </button>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Add Player Modal -->
+<div class="modal fade" id="addPlayerModal">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Add New Player</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="addPlayerForm">
+          <div class="mb-3">
+            <label for="firstName" class="form-label">First Name</label>
+            <input type="text" class="form-control" id="firstName" required />
+          </div>
+          <div class="mb-3">
+            <label for="lastName" class="form-label">Last Name</label>
+            <input type="text" class="form-control" id="lastName" required />
+          </div>
+          <div class="mb-3">
+            <label for="displayName" class="form-label">Display Name (Optional)</label>
+            <input type="text" class="form-control" id="displayName" />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="savePlayer">Save Player</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Game Info Modal -->
+<div class="modal fade" id="gameInfoModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Game Information</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="gameInfoContent">
+        <div class="text-center">
+          <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %} {% block styles %}
+<style>
+  .trouble-container {
+    background: #1a0a0a;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(227,25,55,0.08) 0%, transparent 50%),
+      radial-gradient(circle at 80% 70%, rgba(0,114,188,0.06) 0%, transparent 50%),
+      radial-gradient(circle at 50% 50%, rgba(255,215,0,0.04) 0%, transparent 60%);
+    position: relative;
+    padding: 2rem;
+    border-radius: 10px;
+    margin: 20px auto;
+    max-width: 800px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    border-top: 4px solid #E31937;
+    border-bottom: 4px solid #FFD700;
+  }
+
+  .new-game-section,
+  .game-board {
+    position: relative;
+    z-index: 2;
+  }
+
+  .score-sheet,
+  .new-game-section {
+    background-color: white;
+    color: #212529;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    margin-bottom: 1rem;
+  }
+
+  .new-game-section h2 {
+    color: #E31937;
+    margin-bottom: 1.5rem;
+  }
+
+  .new-game-section h3 {
+    color: #333;
+  }
+
+  .game-board h2,
+  .game-title {
+    color: white;
+    margin-bottom: 1.5rem;
+    text-align: center;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  }
+
+  .game-header-container {
+    position: relative;
+    z-index: 3;
+  }
+
+  .player-card {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px;
+    padding: 1rem 1.5rem;
+    min-width: 100px;
+  }
+
+  .player-peg {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    margin: 0 auto 0.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    border: 3px solid rgba(255,255,255,0.3);
+    transition: transform 0.15s;
+  }
+
+  .player-peg.clickable-peg { cursor: pointer; }
+  .player-peg.clickable-peg:hover { transform: scale(1.15); }
+
+  .player-name {
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+
+  .color-picker-row {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 0.4rem;
+  }
+
+  .color-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.4);
+    transition: transform 0.12s, box-shadow 0.12s;
+  }
+  .color-dot:hover { transform: scale(1.2); }
+  .color-dot.taken {
+    opacity: 0.25;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .setup-color-row {
+    display: inline-flex;
+    gap: 6px;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+  }
+
+  .setup-color-dot {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #ccc;
+    display: inline-block;
+    transition: transform 0.12s;
+  }
+  .setup-color-dot:hover { transform: scale(1.15); }
+  .setup-color-dot.selected { border: 3px solid #333; box-shadow: 0 0 6px rgba(0,0,0,0.4); }
+  .setup-color-dot.taken { opacity: 0.2; cursor: not-allowed; pointer-events: none; }
+
+  .sow-clickable {
+    cursor: pointer;
+    text-decoration: underline dotted;
+  }
+
+  .results-card {
+    background: white;
+    color: #212529;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  }
+
+  .loser-entry {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    border-left: 4px solid #E31937;
+  }
+
+  .loser-entry .loser-name {
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 0.5rem;
+  }
+
+  .peg-input-group {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .peg-input-group label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #555;
+    min-width: 60px;
+  }
+
+  .peg-input-group input {
+    width: 55px;
+    text-align: center;
+    font-weight: 700;
+  }
+
+  .peg-total {
+    font-size: 0.78rem;
+    color: #888;
+    margin-top: 0.25rem;
+  }
+
+  .peg-total.invalid {
+    color: #E31937;
+    font-weight: 700;
+  }
+
+  .sow-summary {
+    background: #1a0a0a;
+    border-radius: 8px;
+    border: 1px solid #E31937;
+    color: #e0e0e0;
+  }
+
+  .sow-line {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.25rem 0;
+    font-size: 0.9rem;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .sow-line:last-child {
+    border-bottom: none;
+  }
+
+  @media (max-width: 768px) {
+    .trouble-container { padding: 0.75rem; }
+    .player-card { min-width: 80px; padding: 0.75rem 1rem; }
+    .player-peg { width: 32px; height: 32px; }
+    .peg-input-group { gap: 0.3rem; }
+    .peg-input-group input { width: 48px; }
+  }
+</style>
+{% endblock %} {% block scripts %}
+<script>
+  $(document).ready(function () {
+    let players = [];
+    const GAME_ID = {{ game_def.id }};
+    const TROUBLE_COLORS = [
+      { name: 'Red', hex: '#E31937' },
+      { name: 'Blue', hex: '#0072BC' },
+      { name: 'Green', hex: '#00A651' },
+      { name: 'Yellow', hex: '#FFD700' }
+    ];
+    var setupColorAssignments = {};
+    const GAME_PLAYERS = [
+      {% for player in game_players %}
+      { id: {{ player.id }}, name: "{{ player.display_name }}" }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ];
+    var boardColorAssignments = {};
+    {% for player in game_players %}
+    boardColorAssignments[{{ player.id }}] = '{{ ['#E31937','#0072BC','#00A651','#FFD700'][loop.index0 % 4] }}';
+    {% endfor %}
+
+    function loadPlayers() {
+      $.get("/api/players", function (data) {
+        players = data;
+        updatePlayerSelections();
+      });
+    }
+
+    function refreshSetupColorDots() {
+      $(".setup-color-dot").each(function () {
+        var hex = $(this).data("color");
+        var playerNum = $(this).closest(".player-row").find(".player-select").data("player-num");
+        var assignedTo = null;
+        for (var k in setupColorAssignments) {
+          if (setupColorAssignments[k] === hex) { assignedTo = parseInt(k); break; }
+        }
+        $(this).removeClass("selected taken");
+        if (assignedTo === playerNum) {
+          $(this).addClass("selected");
+        } else if (assignedTo !== null) {
+          $(this).addClass("taken");
+        }
+      });
+    }
+
+    function updatePlayerSelections() {
+      const count = parseInt($("#playerCount").val());
+      const container = $("#playerSelections");
+      container.empty();
+      setupColorAssignments = {};
+
+      for (let i = 1; i <= count; i++) {
+        if (i <= TROUBLE_COLORS.length) {
+          setupColorAssignments[i] = TROUBLE_COLORS[i - 1].hex;
+        }
+
+        const div = $("<div>").addClass("mb-3 player-row");
+        const labelRow = $("<div>").addClass("d-flex align-items-center justify-content-between mb-1");
+        labelRow.append($("<label>").addClass("form-label mb-0").text("Player " + i));
+
+        var colorRow = $("<span>").addClass("setup-color-row");
+        TROUBLE_COLORS.forEach(function (c) {
+          var dot = $("<span>").addClass("setup-color-dot")
+            .css("background", c.hex)
+            .attr("data-color", c.hex)
+            .attr("title", c.name);
+          colorRow.append(dot);
+        });
+        labelRow.append(colorRow);
+        div.append(labelRow);
+
+        const select = $("<select>")
+          .addClass("form-select player-select")
+          .attr("required", true)
+          .attr("data-player-num", i);
+
+        select.append($("<option>").val("").text("Select Player"));
+        select.append($("<option>").val("new").text("+ Add New Player"));
+
+        var familyPlayers = players.filter(function(p) { return !p.is_guest; });
+        var crewPlayers = players.filter(function(p) { return p.is_guest; });
+        var crewGroups = {};
+        crewPlayers.forEach(function(p) {
+          var gn = p.guest_family_name || "Other";
+          if (!crewGroups[gn]) crewGroups[gn] = [];
+          crewGroups[gn].push(p);
+        });
+
+        function playerLabel(p) {
+          return p.display_name + (p.has_duplicate ? " (" + p.first_name + " " + p.last_name + ")" : "");
+        }
+
+        if (familyPlayers.length) {
+          var grp = $("<optgroup>").attr("label", "Your Family");
+          familyPlayers.forEach(function(p) { grp.append($("<option>").val(p.id).text(playerLabel(p))); });
+          select.append(grp);
+        }
+        Object.keys(crewGroups).sort().forEach(function(name) {
+          var grp = $("<optgroup>").attr("label", "Crew - " + name);
+          crewGroups[name].forEach(function(p) { grp.append($("<option>").val(p.id).text(playerLabel(p))); });
+          select.append(grp);
+        });
+
+        div.append(select);
+        container.append(div);
+      }
+
+      refreshSetupColorDots();
+
+      $(document).off("click", ".setup-color-dot").on("click", ".setup-color-dot", function () {
+        var hex = $(this).data("color");
+        var playerNum = $(this).closest(".player-row").find(".player-select").data("player-num");
+        var currentOwner = null;
+        for (var k in setupColorAssignments) {
+          if (setupColorAssignments[k] === hex) { currentOwner = parseInt(k); break; }
+        }
+        if (currentOwner === playerNum) return;
+        var myOldColor = setupColorAssignments[playerNum];
+        if (currentOwner !== null && myOldColor) {
+          setupColorAssignments[currentOwner] = myOldColor;
+        } else if (currentOwner !== null) {
+          delete setupColorAssignments[currentOwner];
+        }
+        setupColorAssignments[playerNum] = hex;
+        refreshSetupColorDots();
+      });
+
+      $(".player-select").change(function () {
+        if ($(this).val() === "new") {
+          window.currentPlayerSelect = $(this);
+          $("#addPlayerForm")[0].reset();
+          new bootstrap.Modal($("#addPlayerModal")).show();
+          $(this).val("");
+        }
+      });
+
+      if (count === 2) {
+        var kim = players.find(function (p) { return p.display_name === "Kim"; });
+        var joe = players.find(function (p) { return p.display_name === "Joe"; });
+        if (kim) $(".player-select[data-player-num='1']").val(kim.id);
+        if (joe) $(".player-select[data-player-num='2']").val(joe.id);
+      }
+    }
+
+    $("#playerCount").change(updatePlayerSelections);
+    loadPlayers();
+
+    $("#savePlayer").click(function () {
+      var firstName = $("#firstName").val();
+      var lastName = $("#lastName").val();
+      var displayName = $("#displayName").val();
+
+      $.ajax({
+        url: "/api/players",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({ first_name: firstName, last_name: lastName, display_name: displayName }),
+        success: function (response) {
+          bootstrap.Modal.getInstance($("#addPlayerModal")).hide();
+          var playerText = response.display_name + (response.has_duplicate ? " (" + response.first_name + " " + response.last_name + ")" : "");
+          $(".player-select").each(function () {
+            $(this).find('option[value="new"]').before($("<option>").val(response.id).text(playerText));
+          });
+          if (window.currentPlayerSelect) {
+            window.currentPlayerSelect.val(response.id);
+            window.currentPlayerSelect = null;
+          }
+        },
+        error: function (xhr) {
+          AppModal.error("Error", xhr.responseJSON?.error || "Failed to add player");
+        },
+      });
+    });
+
+    $("#newGameForm").submit(function (e) {
+      e.preventDefault();
+      var playerIds = $(".player-select").map(function () { return $(this).val(); }).get();
+
+      if (playerIds.some(function (id) { return !id; })) {
+        AppModal.warning("Missing Players", "Please select all players before starting.");
+        return;
+      }
+
+      var uniqueIds = new Set(playerIds);
+      if (uniqueIds.size !== playerIds.length) {
+        AppModal.warning("Duplicate Players", "Each player can only be selected once!");
+        return;
+      }
+
+      $.ajax({
+        url: "/api/games/new",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          game_id: GAME_ID,
+          player_ids: playerIds,
+          scoring_direction: "high_wins",
+          target_score: null,
+        }),
+        success: function (response) {
+          window.location.href = "{{ url_for('main.trouble') }}?game_id=" + response.id;
+        },
+        error: function (xhr) {
+          AppModal.error("Error", xhr.responseJSON?.error || "Failed to create game");
+        },
+      });
+    });
+
+    // ===================== ACTIVE GAME: RECORD RESULTS =====================
+
+    $("#recordResults").click(function () {
+      $(this).hide();
+      $("#resultsSection").slideDown();
+    });
+
+    $("#winnerSelect").change(function () {
+      var winnerId = parseInt($(this).val());
+      var container = $("#loserPegEntries");
+      container.empty();
+
+      if (!winnerId) {
+        $("#sowSummary").hide();
+        $("#submitResults").prop("disabled", true);
+        return;
+      }
+
+      var losers = GAME_PLAYERS.filter(function(p) { return p.id !== winnerId; });
+
+      losers.forEach(function(loser) {
+        var html = '<div class="loser-entry" data-player-id="' + loser.id + '">' +
+          '<div class="loser-name">' + loser.name + '</div>' +
+          '<div class="peg-input-group">' +
+          '<label>Finish:</label>' +
+          '<input type="number" class="form-control form-control-sm peg-finish" min="0" max="4" value="0" inputmode="numeric">' +
+          '<label>Board:</label>' +
+          '<input type="number" class="form-control form-control-sm peg-board" min="0" max="4" value="0" inputmode="numeric">' +
+          '<label>Home:</label>' +
+          '<input type="number" class="form-control form-control-sm peg-home" value="4" readonly tabindex="-1" style="background:#e9ecef;">' +
+          '</div>' +
+          '<div class="peg-total">Home auto-fills from the 4 pegs. Set Finish and Board.</div>' +
+          '</div>';
+        container.append(html);
+      });
+
+      calculateSOW();
+    });
+
+    $(document).on("input", ".peg-finish, .peg-board", function () {
+      var entry = $(this).closest(".loser-entry");
+      var finish = parseInt(entry.find(".peg-finish").val()) || 0;
+      var board = parseInt(entry.find(".peg-board").val()) || 0;
+
+      finish = Math.max(0, Math.min(4, finish));
+      board = Math.max(0, Math.min(4, board));
+
+      if (finish + board > 4) {
+        if ($(this).hasClass("peg-finish")) {
+          board = 4 - finish;
+          entry.find(".peg-board").val(board);
+        } else {
+          finish = 4 - board;
+          entry.find(".peg-finish").val(finish);
+        }
+      }
+
+      var home = 4 - finish - board;
+      entry.find(".peg-home").val(home);
+
+      calculateSOW();
+    });
+
+    function calculateSOW() {
+      var winnerId = parseInt($("#winnerSelect").val());
+      if (!winnerId) return;
+
+      var basePoints = 25;
+      var boardPoints = 0;
+      var homePoints = 0;
+      var details = '<div class="sow-line"><span>Base win</span><span>25 pts</span></div>';
+
+      $(".loser-entry").each(function () {
+        var name = $(this).find(".loser-name").text();
+        var finish = parseInt($(this).find(".peg-finish").val()) || 0;
+        var board = parseInt($(this).find(".peg-board").val()) || 0;
+        var home = 4 - finish - board;
+
+        if (board > 0) {
+          boardPoints += board * 5;
+          details += '<div class="sow-line"><span>' + name + ': ' + board + ' on board</span><span>+' + (board * 5) + ' pts</span></div>';
+        }
+        if (home > 0) {
+          homePoints += home * 10;
+          details += '<div class="sow-line"><span>' + name + ': ' + home + ' in Home</span><span>+' + (home * 10) + ' pts</span></div>';
+        }
+      });
+
+      var totalSOW = basePoints + boardPoints + homePoints;
+
+      $("#sowDetails").html(details);
+      $("#sowTotal").text(totalSOW);
+      $("#sowSummary").show();
+      $("#submitResults").prop("disabled", false);
+    }
+
+    $("#submitResults").click(function () {
+      var winnerId = parseInt($("#winnerSelect").val());
+      if (!winnerId) return;
+
+      var gameId = $(".game-board").data("game-id");
+      var loserData = [];
+
+      $(".loser-entry").each(function () {
+        var playerId = parseInt($(this).data("player-id"));
+        var finish = parseInt($(this).find(".peg-finish").val()) || 0;
+        var board = parseInt($(this).find(".peg-board").val()) || 0;
+        var home = 4 - finish - board;
+
+        loserData.push({
+          player_id: playerId,
+          pegs_finish: finish,
+          pegs_board: board,
+          pegs_home: home
+        });
+      });
+
+      $.ajax({
+        url: "/api/games/trouble/complete",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          game_id: gameId,
+          winner_id: winnerId,
+          loser_data: loserData
+        }),
+        success: function (response) {
+          if (response.summary) {
+            AppModal.show({
+              title: "Game Complete!",
+              body: '<pre class="mb-0" style="white-space: pre-wrap; font-family: inherit;">' + response.summary + "</pre>",
+              type: "success",
+            });
+            var modalEl = document.getElementById("appModal");
+            $(modalEl).on("hidden.bs.modal.reload", function () {
+              $(modalEl).off("hidden.bs.modal.reload");
+              window.location.reload();
+            });
+          } else {
+            window.location.reload();
+          }
+        },
+        error: function (xhr) {
+          AppModal.error("Error", xhr.responseJSON?.error || "Failed to complete game");
+        },
+      });
+    });
+
+    // ===================== GAME ACTIONS =====================
+
+    window.redirectToTrouble = function () {
+      window.location.href = "{{ url_for('main.trouble') }}";
+    };
+
+    $(".resume-game").click(function () {
+      var gameId = $(this).data("game-id");
+      $.ajax({
+        url: "/api/games/resume/" + gameId,
+        method: "POST",
+        success: function () {
+          AppModal.show({ title: "Game Resumed", body: "<p>Loading game...</p>", type: "success" });
+          setTimeout(function () { window.redirectToTrouble(); }, 1000);
+        },
+        error: function (xhr) {
+          AppModal.error("Error", xhr.responseJSON?.error || "Failed to resume game");
+        },
+      });
+    });
+
+    $(".complete-paused-game").click(function () {
+      var gameId = $(this).data("game-id");
+      AppModal.confirm("End Game", "End this game without recording results?",
+        function () {
+          $.ajax({
+            url: "/api/games/complete/" + gameId,
+            method: "POST",
+            success: function () { window.location.reload(); },
+            error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to end game"); },
+          });
+        },
+        { confirmText: "End Game", cancelText: "Cancel" }
+      );
+    });
+
+    $("#deleteGame").click(function () {
+      var gid = $(this).data("game-id");
+      AppModal.confirm("Delete Game", "Are you sure you want to permanently delete this game?", function () {
+        $.ajax({
+          url: "/api/games/delete/" + gid,
+          method: "POST",
+          success: function () { window.location.href = "{{ url_for('main.trouble') }}"; },
+          error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to delete game"); }
+        });
+      });
+    });
+
+    $("#clearCompletedGames").click(function () {
+      AppModal.confirm("Clear History", "Clear all completed game history?",
+        function () {
+          $.ajax({
+            url: "/api/games/five-crowns/clear-history",
+            method: "POST",
+            contentType: "application/json",
+            data: JSON.stringify({ game_id: {{ game_def.id }} }),
+            success: function () { window.location.reload(); },
+            error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to clear history"); },
+          });
+        },
+        { confirmText: "Clear History", cancelText: "Cancel" }
+      );
+    });
+
+    // ===================== SOCKETIO =====================
+
+    function initializeSocket() {
+      if (typeof io === "undefined") { setTimeout(initializeSocket, 100); return; }
+      var socket = io({ transports: ["websocket"], cors: { origin: "*" } });
+      socket.on("connect", function () {
+        {% if active_game %}
+        socket.emit('join_game', {game_id: {{ active_game.id }}});
+        {% endif %}
+      });
+      window.addEventListener('beforeunload', function() {
+        {% if active_game %}
+        socket.emit('leave_game', {game_id: {{ active_game.id }}});
+        {% endif %}
+      });
+
+      socket.on("game_completed", function (data) {
+        AppModal.show({
+          title: "Game Complete",
+          body: '<pre style="white-space: pre-wrap; font-family: inherit;">' + data.summary + "</pre>",
+          type: "success",
+        });
+        var modalEl = document.getElementById("appModal");
+        $(modalEl).on("hidden.bs.modal.reload", function () {
+          $(modalEl).off("hidden.bs.modal.reload");
+          window.location.reload();
+        });
+      });
+    }
+
+    initializeSocket();
+
+    // ===================== GAME INFO =====================
+
+    function showGameInfo(gameId) {
+      var modal = new bootstrap.Modal(document.getElementById("gameInfoModal"));
+      var content = document.getElementById("gameInfoContent");
+      content.innerHTML = '<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+      modal.show();
+
+      fetch("/api/game-details/" + gameId)
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.success) {
+            var html = '';
+            if (data.details.rules) html += '<div class="mb-3">' + data.details.rules + '</div>';
+            if (data.details.scoring_system) html += '<hr><div>' + data.details.scoring_system + '</div>';
+            content.innerHTML = html || "<p>No game information available.</p>";
+          } else {
+            content.innerHTML = '<p class="text-danger">Error loading game information.</p>';
+          }
+        })
+        .catch(function () {
+          content.innerHTML = '<p class="text-danger">Error loading game information.</p>';
+        });
+    }
+
+    $(document).on("click", ".game-info-btn", function () {
+      showGameInfo($(this).data("game-id"));
+    });
+
+    // ===================== BOARD COLOR PICKER =====================
+
+    $(document).on("click", ".clickable-peg", function () {
+      var pid = $(this).data("player-id");
+      var row = $(".color-picker-row[data-player-id='" + pid + "']");
+      if (row.hasClass("d-none")) {
+        $(".color-picker-row").addClass("d-none").empty();
+        TROUBLE_COLORS.forEach(function (c) {
+          var taken = false;
+          for (var k in boardColorAssignments) {
+            if (boardColorAssignments[k] === c.hex && parseInt(k) !== pid) { taken = true; break; }
+          }
+          var dot = $("<span>").addClass("color-dot" + (taken ? " taken" : ""))
+            .css("background", c.hex)
+            .attr("data-color", c.hex)
+            .attr("data-player-id", pid)
+            .attr("title", c.name);
+          row.append(dot);
+        });
+        row.removeClass("d-none");
+      } else {
+        row.addClass("d-none").empty();
+      }
+    });
+
+    $(document).on("click", ".color-dot", function () {
+      var hex = $(this).data("color");
+      var pid = $(this).data("player-id");
+      var oldOwner = null;
+      for (var k in boardColorAssignments) {
+        if (boardColorAssignments[k] === hex) { oldOwner = parseInt(k); break; }
+      }
+      if (oldOwner === pid) return;
+      var myOld = boardColorAssignments[pid];
+      if (oldOwner !== null && myOld) {
+        boardColorAssignments[oldOwner] = myOld;
+        $(".clickable-peg[data-player-id='" + oldOwner + "']").css("background", myOld);
+      }
+      boardColorAssignments[pid] = hex;
+      $(".clickable-peg[data-player-id='" + pid + "']").css("background", hex);
+      $(".color-picker-row").addClass("d-none").empty();
+    });
+
+    // ===================== SOW TOOLTIP =====================
+
+    $(document).on("click", ".sow-clickable", function (e) {
+      e.preventDefault();
+      AppModal.show({
+        title: "Strength of Win (SOW)",
+        body: "<p><strong>SOW</strong> measures how dominant a victory was.</p>" +
+          "<ul>" +
+          "<li><strong>Base win:</strong> 25 points</li>" +
+          "<li><strong>+5 points</strong> per opponent peg still on the board</li>" +
+          "<li><strong>+10 points</strong> per opponent peg still in Home (never moved)</li>" +
+          "<li>Pegs in Finish = 0 bonus points</li>" +
+          "</ul>" +
+          "<p>Higher SOW = the losers got crushed.</p>",
+        type: "info"
+      });
+    });
+
+    // ===================== TOOLTIPS =====================
+
+    if (window.innerWidth > 768) {
+      [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(function (el) {
+        return new bootstrap.Tooltip(el);
+      });
+    }
+  });
+</script>
+{% endblock %}

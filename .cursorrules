@@ -1,0 +1,64 @@
+# DiFede Games App - AI Development Rules
+
+## Project Overview
+DiFede Games (DiFedeAppV2) is a family game night score tracker built with Flask, PostgreSQL, Flask-SocketIO, and Bootstrap 5. It tracks scores for card and board games across multiple families with a crew/alliance system. It is NOT a rules engine -- it records scores only.
+
+**Expert docs (read these first):**
+- `APPLICATION_EXPERT_GUIDE.md` -- full architecture, all games, APIs, pitfalls (paste into new AI sessions)
+- `CREATINGANEWGAME.MD` -- step-by-step new game checklist including image creation
+- `README.md` -- service management, backup, troubleshooting
+
+## Critical Rules
+
+### Code Style
+- NEVER use emojis in code, comments, templates, or UI text. No exceptions.
+- NEVER add comments that just narrate what the code does. Comments should only explain non-obvious intent or trade-offs.
+- Keep code clean, readable, and DRY. If you see duplication, refactor it.
+
+### UX Philosophy
+- **Common sense over cleverness.** The best interface is one nobody has to learn. If a user has to think about how something works, it's wrong.
+- Labels must be clear and self-explanatory. Avoid jargon. "Who Wins?" beats "Scoring Direction".
+- Mobile-first. Everything must look good and work perfectly on an iPhone.
+- Match the active theme everywhere. No hardcoded colors - use CSS variables (--df-*).
+- Every action should save immediately. Users should never lose data.
+
+### Architecture
+- PostgreSQL is the single source of truth. Scores save to DB on every entry.
+- `game_scores` table is the unified score table for UNO games. `five_crowns_scores` is legacy (read-only fallback).
+- The `/api/scores` endpoint handles all score persistence.
+- Game types are defined in the `games` table. Adding a new game means: insert into `games`, create a template, add to SLUG_TO_URL mapping, add route alias, add dashboard slug cases (6 places). See CREATINGANEWGAME.MD.
+- Family-based multi-tenancy: players belong to families, games belong to families, alliances connect families.
+
+### Database
+- V1 (difedeapp on port 5001) is the production database. V2 (difedeappv2 on port 5002) is the development database.
+- ALWAYS back up the V2 database before making schema changes or data migrations.
+- When syncing from V1, treat V1 data as sacred. Never modify V1.
+- Use transactions for multi-step DB operations.
+
+### Themes
+- All themes are defined as CSS custom properties in base.html under [data-theme="..."] selectors.
+- Key variables: --df-bg, --df-surface, --df-card, --df-text, --df-text-card, --df-accent, --df-accent-gradient, --df-border, --df-muted.
+- NEVER use hardcoded colors in templates. Always reference --df-* variables.
+- **CRITICAL: Light-on-light text bug.** Dark themes set body color to a LIGHT value (--df-text). Any element with a white/light background MUST explicitly set `color: #212529` or `color: var(--df-text-card)`. See `.cursor/rules/theme-text-contrast.mdc` for full details and protected classes.
+
+### Testing Changes
+- After code changes, kill ALL stale Python processes on port 5002 before restarting.
+- Multiple processes on the same port = stale code being served. Always verify with `lsof -i :5002`.
+- Clear browser cache aggressively when debugging visual issues.
+
+### Server
+- App runs on port 5002 via `python run.py` (binds to 0.0.0.0).
+- Config is in config.py. DB credentials: user=difedeapp, password=Password, db=difedeappv2.
+- Admin user: joe_71@yahoo.com (super_admin).
+
+### File Structure
+- Templates: app/templates/ (base.html, dashboard.html, five_crowns.html, uno_classic.html, gin_rummy.html, sevens.html, etc.)
+- Routes: app/routes.py (main blueprint), app/auth_routes.py (auth blueprint)
+- Config: config.py
+- Entry point: run.py
+
+### Quality Standards
+- Enterprise-level thinking. Build it right, not fast.
+- Handle edge cases. What happens with 0 players? 10 players? Empty data?
+- Permission checks on every API endpoint. Family leads vs members vs super admin.
+- Responsive design is not optional - it's required.

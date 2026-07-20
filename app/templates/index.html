@@ -1,0 +1,260 @@
+{% extends "base.html" %} {% block title %}Welcome - {{ config.APP_NAME }}{%
+endblock %} {% block content %} {% if current_user %}
+<!-- Authenticated users see a redirect message -->
+<div class="container mt-5 text-center">
+  <h2>Welcome back, {{ current_user.first_name }}!</h2>
+  <p>Redirecting to your dashboard...</p>
+  <script>
+    window.location.href = "{{ url_for('main.dashboard') }}";
+  </script>
+</div>
+{% else %}
+<!-- Landing page for unauthenticated users -->
+<div class="hero-section">
+  <div class="container">
+    <div class="row align-items-center min-vh-100">
+      <div class="col-lg-6">
+        <h1 class="display-4 fw-bold text-primary mb-4">
+          Welcome to DiFede Games
+        </h1>
+        <p class="lead mb-4">
+          Track your family's game nights, compete for the top spots, and create
+          lasting memories with our comprehensive game tracking platform.
+        </p>
+
+        <div class="feature-list mb-5">
+          <div class="d-flex align-items-center mb-3">
+            <i class="fas fa-gamepad text-primary me-3 fa-2x"></i>
+            <div>
+              <h5 class="mb-1">Multiple Games</h5>
+              <p class="text-muted mb-0">
+                Track scores for Five Crowns and more games coming soon
+              </p>
+            </div>
+          </div>
+
+          <div class="d-flex align-items-center mb-3">
+            <i class="fas fa-trophy text-warning me-3 fa-2x"></i>
+            <div>
+              <h5 class="mb-1">Leaderboards & Stats</h5>
+              <p class="text-muted mb-0">
+                See who's winning and track your family's gaming history
+              </p>
+            </div>
+          </div>
+
+          <div class="d-flex align-items-center mb-3">
+            <i class="fas fa-users text-success me-3 fa-2x"></i>
+            <div>
+              <h5 class="mb-1">Family-Focused</h5>
+              <p class="text-muted mb-0">
+                Each family has their own private gaming environment
+              </p>
+            </div>
+          </div>
+
+          <div class="d-flex align-items-center mb-3">
+            <i class="fas fa-mobile-alt text-info me-3 fa-2x"></i>
+            <div>
+              <h5 class="mb-1">Mobile Friendly</h5>
+              <p class="text-muted mb-0">
+                Play and track games from any device, anywhere
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="d-flex flex-column flex-sm-row gap-3">
+          <a
+            href="{{ url_for('auth.register') }}"
+            class="btn btn-primary btn-lg"
+          >
+            <i class="fas fa-user-plus me-2"></i>Get Started
+          </a>
+          <a
+            href="{{ url_for('auth.login') }}"
+            class="btn btn-outline-primary btn-lg"
+          >
+            <i class="fas fa-sign-in-alt me-2"></i>Sign In
+          </a>
+        </div>
+      </div>
+
+      <div class="col-lg-6 text-center">
+        <div class="game-preview">
+          <div class="card shadow-lg border-0">
+            <div class="card-body p-5">
+              <h3 class="text-primary mb-4">
+                <i class="fas fa-crown"></i> Five Crowns
+              </h3>
+              <p class="text-muted mb-4">
+                Our most popular tracked game! A strategic rummy-style card game
+                perfect for family game nights.
+              </p>
+
+              <!-- Sample score display -->
+              <div class="table-responsive">
+                <table class="table table-sm">
+                  <thead class="table-dark">
+                    <tr>
+                      <th>Player</th>
+                      <th>3</th>
+                      <th>4</th>
+                      <th>5</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>Alice</strong></td>
+                      <td>15</td>
+                      <td>12</td>
+                      <td>8</td>
+                      <td class="text-success"><strong>35</strong></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Bob</strong></td>
+                      <td>18</td>
+                      <td>22</td>
+                      <td>15</td>
+                      <td>55</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Carol</strong></td>
+                      <td>12</td>
+                      <td>16</td>
+                      <td>19</td>
+                      <td>47</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="alert alert-success mt-3" role="alert">
+                <i class="fas fa-trophy me-2"></i>Alice wins with 35 points!
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Features Section -->
+<div class="bg-light py-5">
+  <div class="container">
+    <div class="text-center mb-5">
+      <h2 class="display-6 fw-bold">Why Choose DiFede Games?</h2>
+      <p class="lead text-muted">Built by families, for families</p>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-md-4">
+        <div class="card border-0 h-100 text-center">
+          <div class="card-body p-4">
+            <i class="fas fa-lock fa-3x text-primary mb-3"></i>
+            <h5>Private & Secure</h5>
+            <p class="text-muted">
+              Your family's game data stays private. Each family has their own
+              secure portal.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card border-0 h-100 text-center">
+          <div class="card-body p-4">
+            <i class="fas fa-chart-line fa-3x text-success mb-3"></i>
+            <h5>Track Progress</h5>
+            <p class="text-muted">
+              See improvement over time with detailed statistics and win/loss
+              records.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card border-0 h-100 text-center">
+          <div class="card-body p-4">
+            <i class="fas fa-heart fa-3x text-danger mb-3"></i>
+            <h5>Family Fun</h5>
+            <p class="text-muted">
+              Bring families together through friendly competition and shared
+              memories.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %} {% endblock %} {% block styles %}
+<style>
+  .hero-section {
+    background: var(--df-card-header);
+    color: white;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+  }
+
+  .hero-section .text-primary {
+    color: white !important;
+  }
+
+  .hero-section .text-muted {
+    color: rgba(255, 255, 255, 0.8) !important;
+  }
+
+  .game-preview .card {
+    border-radius: 20px;
+    transform: perspective(1000px) rotateY(-5deg);
+    transition: transform 0.3s ease;
+  }
+
+  .game-preview .card:hover {
+    transform: perspective(1000px) rotateY(0deg);
+  }
+
+  .feature-list .fas {
+    width: 40px;
+  }
+
+  .fa-3x {
+    font-size: 2.5rem;
+  }
+
+  .btn-lg {
+    padding: 0.75rem 2rem;
+    font-size: 1.125rem;
+    border-radius: 10px;
+  }
+
+  .card {
+    transition: transform 0.2s ease;
+  }
+
+  .card:hover {
+    transform: translateY(-5px);
+  }
+
+  @media (max-width: 768px) {
+    .hero-section {
+      min-height: auto;
+      padding: 4rem 0;
+    }
+
+    .display-4 {
+      font-size: 2.5rem;
+    }
+
+    .game-preview .card {
+      transform: none;
+      margin-top: 2rem;
+    }
+  }
+</style>
+{% endblock %}

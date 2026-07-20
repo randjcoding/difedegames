@@ -1,0 +1,2052 @@
+{% extends "base.html" %} {% block title %}Five Crowns{% endblock %} {% block
+content %}
+<div class="five-crowns-container">
+  {% if not active_game %}
+  <div class="new-game-section">
+    <h2>Five Crowns Games</h2>
+
+    {% if paused_games %}
+    <div class="paused-games mb-4">
+      <h3>Paused Games</h3>
+      <div class="list-group">
+        {% for game in paused_games %}
+        <div
+          class="list-group-item d-flex justify-content-between align-items-center py-2"
+        >
+          <div class="small">
+            <h6 class="mb-1">Game #{{ game.id }}</h6>
+            <p class="mb-1 text-muted">Players: {{ game.player_names }}</p>
+            <small>Started: {{ game.start_time }}</small>
+          </div>
+          <div>
+            <button
+              class="btn btn-sm btn-primary resume-game me-2"
+              data-game-id="{{ game.id }}"
+            >
+              Resume
+            </button>
+            <button
+              class="btn btn-sm btn-danger complete-paused-game"
+              data-game-id="{{ game.id }}"
+            >
+              End Game
+            </button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %} {% if completed_games %}
+    <div class="completed-games mb-4">
+      <div class="d-flex justify-content-between align-items-center">
+        <h3>Recent Completed Games</h3>
+        <button id="clearCompletedGames" class="btn btn-sm btn-success">
+          Clear History
+        </button>
+      </div>
+      <div class="list-group">
+        {% for game in completed_games %}
+        <div class="list-group-item py-2">
+          <div class="small">
+            <h6 class="mb-1">Game #{{ game.game_number or game.id }}</h6>
+            <p class="mb-1">Players: {{ game.player_names }}</p>
+            {% if game.winner and game.winning_score %}
+            <p class="mb-1 text-success">
+              <strong
+                >Winner: {{ game.winner }} (Score: {{ game.winning_score
+                }})</strong
+              >
+            </p>
+            {% else %}
+            <p class="mb-1 text-muted">
+              <em>Game incomplete - no scores recorded</em>
+            </p>
+            {% endif %}
+            <small class="text-muted"
+              >Completed: {{ game.start_time.strftime('%Y-%m-%d %H:%M') if
+              game.start_time else 'Unknown' }}</small
+            >
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="new-game-section">
+      <h3>Start New Game</h3>
+      <form id="newGameForm" class="mt-4">
+        <div class="mb-3">
+          <label for="playerCount" class="form-label"
+            >Number of Players ({{ game_def.min_players }}-{{ game_def.max_players }})</label
+          >
+          <select class="form-select" id="playerCount" required>
+            {% for i in range(game_def.min_players, game_def.max_players + 1) %}
+            <option value="{{ i }}">{{ i }} Players</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div id="playerSelections"></div>
+        <div class="alert alert-info mt-3" style="font-size: 0.9rem">
+          <i class="fas fa-info-circle"></i> <strong>Dealer Order:</strong> The
+          order in which you select players will determine the dealing order.
+          Player 1 deals first, then Player 2, etc.
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Start Game</button>
+      </form>
+    </div>
+  </div>
+  {% else %}
+  <div class="game-board five-crowns-board" data-game-id="{{ active_game.id }}">
+    <div class="game-header-container position-relative mb-3">
+      <h2 class="game-title text-center mb-0">Five Crowns - Active Game</h2>
+      <button
+        type="button"
+        class="btn btn-link p-1 game-info-btn position-absolute"
+        style="
+          border: none;
+          background: none;
+          top: 0;
+          right: 0;
+          z-index: 10;
+          color: #ffc107;
+        "
+        data-game-id="five_crowns"
+        data-bs-toggle="tooltip"
+        data-bs-placement="top"
+        title="View game rules and information"
+      >
+        <i class="fas fa-info-circle fa-lg"></i>
+      </button>
+    </div>
+
+    <!-- Round-by-Round Entry View (hidden by default, toggled on mobile) -->
+    <div class="round-entry-view" id="roundEntryView">
+      <div class="round-entry-card">
+        <div class="round-entry-header">
+          <span id="reRoundLabel">Round 3</span>
+          <span id="reRoundProgress">1 / 11</span>
+        </div>
+        <div class="round-entry-body" id="rePlayerList"></div>
+      </div>
+      <div class="round-nav-btns">
+        <button class="btn" id="rePrev" onclick="reNavigate(-1)">
+          <i class="fas fa-chevron-left"></i> Prev
+        </button>
+        <button class="btn" id="reSaveRound" onclick="reSaveCurrentRound()">
+          <i class="fas fa-check me-1"></i>Save Round
+        </button>
+        <button class="btn" id="reNext" onclick="reNavigate(1)">
+          Next <i class="fas fa-chevron-right"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Default Table View -->
+    <div class="default-table-view" id="defaultTableView">
+    <div class="score-sheet">
+      <div class="table-responsive">
+        <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
+          <thead>
+            <tr class="crown-header">
+              <th class="round-header">Round</th>
+              {% for player in game_players %}
+              <th class="player-header">
+                <span class="player-name">{{ player.display_name }}</span>
+                {% if game_family_id and player.family_id and player.family_id != game_family_id %}
+                <br/><small class="text-warning">({{ player.family_name }})</small>
+                {% endif %}
+              </th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for round_info in [ (3, "3"), (4, "4"), (5, "5"), (6, "6"), (7,
+            "7"), (8, "8"), (9, "9"), (10, "10"), (11, "J"), (12, "Q"), (13,
+            "K") ] %}
+            <tr>
+              <td class="round-cell">{{ round_info[1] }}</td>
+              {% for player in game_players %}
+              <td
+                class="score-cell"
+                data-player="{{ player.id }}"
+                data-round="{{ round_info[0] }}"
+              >
+                {{ scores.get((player.id, round_info[0]), '') }}
+              </td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+            <tr class="total-row">
+              <td>Total</td>
+              {% for player in game_players %}
+              <td class="total-cell" data-player="{{ player.id }}">0</td>
+              {% endfor %}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    </div><!-- /default-table-view -->
+
+    <div class="game-actions">
+      <button
+        id="dealerToggle"
+        class="btn btn-outline-secondary btn-sm"
+        style="background-color:rgba(248,249,250,0.9);border-color:rgba(108,117,125,0.3);color:#495057;font-weight:bold;"
+        data-active="true"
+      >Hide Dealer</button>
+      <!-- View toggle: only visible on mobile -->
+      <div class="mobile-view-toggle" id="mobileViewToggle">
+        <button class="btn btn-sm view-toggle-btn active" id="btnTableView" onclick="switchMobileView('table')">
+          <i class="fas fa-table"></i> Table
+        </button>
+        <button class="btn btn-sm view-toggle-btn" id="btnRoundView" onclick="switchMobileView('round')">
+          <i class="fas fa-list-ol"></i> Round
+        </button>
+        <button class="btn btn-sm view-toggle-btn" id="btnFullView" onclick="openFullscreenTable()">
+          <i class="fas fa-expand"></i>
+        </button>
+      </div>
+      <button id="pauseGame" class="btn btn-danger btn-sm">
+        <strong>Pause</strong>
+      </button>
+      <button id="completeGame" class="btn btn-warning btn-sm">
+        <strong>Complete</strong>
+      </button>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Fullscreen Editable Table Modal (MUST be outside .five-crowns-container to avoid stacking context trap) -->
+<div class="modal fade" id="fullscreenTableModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content" style="background:var(--df-surface, #1e1e3a);">
+      <div class="modal-header py-2" style="background:linear-gradient(135deg,#5d2d91,#7c3aed);color:white;">
+        <h6 class="modal-title mb-0">Five Crowns - Full View</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-2" id="fullscreenBody" style="overflow:auto;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Player Modal -->
+<div class="modal fade" id="addPlayerModal">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Add New Player</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <form id="addPlayerForm">
+          <div class="mb-3">
+            <label for="firstName" class="form-label">First Name</label>
+            <input type="text" class="form-control" id="firstName" required />
+          </div>
+          <div class="mb-3">
+            <label for="lastName" class="form-label">Last Name</label>
+            <input type="text" class="form-control" id="lastName" required />
+          </div>
+          <div class="mb-3">
+            <label for="displayName" class="form-label"
+              >Display Name (Optional)</label
+            >
+            <input type="text" class="form-control" id="displayName" />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-primary" id="savePlayer">
+          Save Player
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="completeGameModal">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-warning">
+        <h5 class="modal-title">Complete Game</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <p>
+          Are you sure you want to complete this game? This cannot be undone.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-warning" id="confirmComplete">
+          Complete Game
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="clearHistoryModal">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-success text-white">
+        <h5 class="modal-title">Clear History</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to clear all completed games history?</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-success" id="confirmClearHistory">
+          Clear History
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="endPausedGameModal">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title">End Paused Game</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <p>
+          Are you sure you want to end this paused game? This cannot be undone.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-danger" id="confirmEndPaused">
+          End Game
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Game Info Modal -->
+<div
+  class="modal fade"
+  id="gameInfoModal"
+  tabindex="-1"
+  aria-labelledby="gameInfoModalLabel"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="gameInfoModalLabel">Game Information</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body" id="gameInfoContent">
+        <div class="text-center">
+          <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %} {% block styles %}
+<style>
+  /* ── Container & background ── */
+  .five-crowns-container {
+    background-color: #5d2d91;
+    position: relative;
+    padding: 2rem;
+    border-radius: 10px;
+    margin: 20px auto;
+    max-width: 1000px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    overflow: visible;
+  }
+
+  .new-game-section,
+  .game-board {
+    position: relative;
+    z-index: 2;
+  }
+
+  .background-pattern {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .suit-pattern {
+    position: absolute;
+    font-size: 36px;
+    color: rgba(255, 255, 255, 0.15);
+    user-select: none;
+  }
+
+  /* ── Panels ── */
+  .new-game-section {
+    background-color: white;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    margin-bottom: 1rem;
+  }
+
+  .new-game-section h2 {
+    color: #5d2d91;
+    margin-bottom: 1.5rem;
+  }
+
+  .game-board {
+    max-width: 100%;
+    margin: 0 auto;
+    padding: 1rem;
+  }
+
+  .game-board h2,
+  .game-title {
+    color: white;
+    margin-bottom: 1.5rem;
+    text-align: center;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  .game-header-container {
+    position: relative;
+    z-index: 3;
+  }
+
+  /* ── Score sheet & table scroll container ── */
+  .score-sheet {
+    background: white;
+    padding: 1rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    margin: 1rem 0;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
+
+  .table-responsive {
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+  }
+
+  /* ── Table base ── */
+  #scoreTable {
+    width: 100%;
+    margin: 0;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 2px solid #333;
+    table-layout: fixed;
+  }
+
+  #scoreTable th,
+  #scoreTable td {
+    text-align: center;
+    padding: 8px 4px;
+    border: 1px solid #dee2e6;
+    box-sizing: border-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── First column (Round) – always sticky ── */
+  #scoreTable th:first-child,
+  #scoreTable td:first-child {
+    width: 80px;
+    min-width: 80px;
+    position: sticky;
+    left: 0;
+    z-index: 4;
+  }
+
+  /* ── Player columns ── */
+  #scoreTable th:not(:first-child),
+  #scoreTable td:not(:first-child) {
+    min-width: 100px;
+    width: calc((100% - 80px) / var(--player-count, 2));
+  }
+
+  /* ── Header row ── */
+  .crown-header th {
+    background: #5d2d91 !important;
+    color: white;
+    font-weight: bold;
+    padding: 8px 4px;
+    vertical-align: middle;
+    border: 1px solid #333;
+    border-top: 2px solid #333;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
+  .crown-header th:first-child {
+    border-left: 2px solid #333;
+    z-index: 6;
+  }
+
+  .crown-header th:last-child {
+    border-right: 2px solid #333;
+  }
+
+  .crown-header small {
+    font-size: 0.8em;
+    opacity: 0.9;
+    display: block;
+    white-space: nowrap;
+  }
+
+  .player-name {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+
+  /* ── Body cells ── */
+  #scoreTable tbody td {
+    border: 1px solid #dee2e6;
+    position: relative;
+    padding: 8px 4px;
+  }
+
+  .round-cell {
+    background: linear-gradient(45deg, #8344c5, #9b59d3) !important;
+    color: white;
+    font-weight: bold;
+    text-align: center;
+    border: 1px solid #5d2d91 !important;
+  }
+
+  .score-cell {
+    background-color: rgba(93, 45, 145, 0.05);
+    cursor: pointer;
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  .score-cell.editing {
+    padding: 0 !important;
+    z-index: 3;
+    background-color: rgba(93, 45, 145, 0.1);
+    box-shadow: inset 0 0 0 1px #5d2d91;
+  }
+
+  .score-cell.editing input {
+    width: 100%;
+    height: 100%;
+    border: none;
+    padding: 0.5rem;
+    text-align: center;
+    outline: 2px solid #683ab7;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  /* ── Total row ── */
+  .total-row td {
+    background: linear-gradient(45deg, #e6d5ff, #f0e6ff);
+    font-weight: bold;
+    text-align: center;
+    border-top: 2px solid #5d2d91 !important;
+  }
+
+  .total-row td:first-child {
+    background: #ede7f6;
+    color: #000;
+  }
+
+  /* ── Game action buttons ── */
+  .game-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: center;
+    align-items: center;
+    margin-top: 1rem;
+  }
+
+  .game-actions .btn {
+    padding: 8px 16px;
+    font-size: 0.95rem;
+  }
+
+  /* ── Dealer highlighting ── */
+  .dealer-column {
+    background-color: rgba(139, 92, 246, 0.12) !important;
+    border-left: 3px solid #9b59d3 !important;
+    border-right: 3px solid #9b59d3 !important;
+  }
+
+  .dealer-column th {
+    background-color: #7c3aed !important;
+    color: #fff !important;
+    position: relative;
+    border-left: 3px solid #7c3aed !important;
+    border-right: 3px solid #7c3aed !important;
+  }
+
+  .dealer-column th::after {
+    content: " (D)";
+    font-size: 0.8em;
+  }
+
+  /* ── Round-by-round & Toggle: HIDDEN on desktop ── */
+  .round-entry-view { display: none; }
+  .mobile-view-toggle { display: none !important; }
+
+  /* ── Fullscreen editable table ── */
+  .fs-tbl input:focus {
+    background: #f0e6ff !important;
+    color: #1a0a30 !important;
+    caret-color: #1a0a30 !important;
+    box-shadow: inset 0 0 0 2px #7c3aed;
+  }
+  .fs-tbl input::-webkit-inner-spin-button,
+  .fs-tbl input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .fs-tbl input[type=number] { -moz-appearance: textfield; }
+
+  /* ── Form validation ── */
+  .player-select.is-invalid {
+    border-color: #dc3545;
+    box-shadow: 0 0 0 0.25rem rgba(220, 53, 69, 0.25);
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' width='12' height='12' fill='none' stroke='%23dc3545'%3e%3ccircle cx='6' cy='6' r='4.5'/%3e%3cpath stroke-linejoin='round' d='M5.8 3.6h.4L6 6.5z'/%3e%3ccircle cx='6' cy='8.2' r='.6' fill='%23dc3545' stroke='none'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 16px 16px;
+  }
+
+  .invalid-feedback {
+    display: none;
+    width: 100%;
+    margin-top: 0.25rem;
+    font-size: 0.875em;
+    color: #dc3545;
+  }
+
+  .is-invalid ~ .invalid-feedback {
+    display: block;
+  }
+
+  /* ── Modals ── */
+  .modal-dialog {
+    display: flex;
+    align-items: center;
+    min-height: calc(100% - 1rem);
+  }
+
+  .modal-content {
+    background-color: white;
+    color: #212529;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .tooltip {
+    z-index: 1070;
+  }
+
+  /* ── Player-count alignment helpers ── */
+  .five-crowns-board #scoreTable.players-2 th:not(:first-child),
+  .five-crowns-board #scoreTable.players-3 th:not(:first-child),
+  .five-crowns-board #scoreTable.players-4 th:not(:first-child),
+  .five-crowns-board #scoreTable.players-5 th:not(:first-child),
+  .five-crowns-board #scoreTable.players-6 th:not(:first-child),
+  .five-crowns-board #scoreTable.players-7 th:not(:first-child) {
+    max-width: calc((100% - 80px) / var(--player-count, 2)) !important;
+    width: calc((100% - 80px) / var(--player-count, 2)) !important;
+    box-sizing: border-box !important;
+  }
+
+  .five-crowns-board #scoreTable th:first-child {
+    max-width: 80px !important;
+    width: 80px !important;
+    box-sizing: border-box !important;
+  }
+
+  /* ═══════════════════════════════════════════
+     MOBILE: <= 768px
+     Table width is calculated from player count.
+     Horizontal scroll for 5+ players.
+     ═══════════════════════════════════════════ */
+  @media (max-width: 768px) {
+    .five-crowns-container {
+      padding: 0.35rem;
+      margin: 0;
+      border-radius: 6px;
+      max-width: 100%;
+    }
+    .game-board { padding: 0; }
+    .game-header-container { margin-bottom: 0.3rem !important; }
+    .game-title { font-size: 1rem; margin-bottom: 0.2rem !important; }
+
+    .score-sheet {
+      padding: 0;
+      margin: 0;
+      border-radius: 0;
+      box-shadow: none;
+      overflow: visible;
+    }
+
+    .table-responsive {
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      margin: 0;
+      border: 2px solid #5d2d91;
+      border-radius: 4px;
+    }
+
+    #scoreTable {
+      table-layout: fixed;
+      width: calc(36px + var(--pc, 2) * 64px);
+      min-width: 100%;
+      margin: 0;
+      border: none;
+      border-collapse: collapse;
+    }
+
+    #scoreTable th:first-child,
+    #scoreTable td:first-child {
+      width: 34px; min-width: 34px; max-width: 34px;
+      position: sticky; left: 0; z-index: 4;
+      background: #5d2d91; color: white;
+      font-size: 0.72rem; font-weight: bold;
+      padding: 2px 1px;
+      border-right: 2px solid #4a2375; text-align: center;
+    }
+
+    #scoreTable th:not(:first-child),
+    #scoreTable td:not(:first-child) {
+      padding: 2px 1px; font-size: 0.78rem; text-align: center;
+    }
+
+    .crown-header th {
+      background: #5d2d91 !important; color: white;
+      padding: 3px 1px; font-size: 0.65rem; font-weight: 700;
+      border-bottom: 2px solid #4a2375;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .crown-header th:first-child { z-index: 6; }
+
+    .player-name {
+      display: block; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+      font-size: 0.65rem; line-height: 1.1;
+      max-width: 58px; margin: 0 auto;
+    }
+
+    .round-cell {
+      background: #6b35a8 !important; color: white; font-weight: bold;
+    }
+
+    .score-cell {
+      min-height: 34px; height: 34px;
+      vertical-align: middle; cursor: pointer; background: #fff;
+    }
+
+    .score-cell.editing input {
+      min-height: 34px; font-size: 0.95rem;
+      width: 100%; padding: 0; text-align: center;
+      border: 2px solid #7c3aed; border-radius: 2px;
+    }
+
+    input[type="number"] { min-height: 34px; }
+
+    .total-row td {
+      background: #ede7f6 !important;
+      border-top: 2px solid #5d2d91;
+      font-weight: bold; font-size: 0.78rem;
+    }
+    .total-row td:first-child {
+      background: #7c3aed !important; color: #fff; z-index: 5;
+    }
+
+    .game-actions {
+      gap: 0.25rem; margin-top: 0.25rem;
+      flex-wrap: wrap; justify-content: center;
+    }
+    .game-actions .btn { padding: 4px 8px; font-size: 0.72rem; }
+    .game-info-btn { min-width: 32px; min-height: 32px; }
+    .dealer-column { border-width: 2px !important; }
+
+    /* ── Mobile View Toggle: OVERRIDE desktop hidden ── */
+    .mobile-view-toggle { display: inline-flex !important; gap: 2px; }
+    .view-toggle-btn {
+      background: rgba(255,255,255,0.15) !important;
+      color: #e0d4f5 !important;
+      border: 1px solid rgba(255,255,255,0.2) !important;
+      border-radius: 6px !important;
+      padding: 3px 8px !important;
+      font-size: 0.68rem !important;
+      font-weight: 600 !important;
+    }
+    .view-toggle-btn.active {
+      background: rgba(124,58,237,0.8) !important;
+      color: white !important;
+      border-color: #9b59d3 !important;
+    }
+
+    /* ── Round-by-Round Entry View ── */
+    .round-entry-view.active { display: block; }
+    .default-table-view.hidden { display: none; }
+
+    .round-entry-card {
+      background: var(--df-surface, #1e1e3a);
+      border: 2px solid #7c3aed;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .round-entry-header {
+      background: linear-gradient(135deg, #5d2d91, #7c3aed);
+      color: white;
+      padding: 10px 14px;
+      font-weight: bold;
+      font-size: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .round-entry-header #reRoundProgress {
+      font-size: 0.75rem;
+      opacity: 0.8;
+    }
+    .round-entry-body { padding: 6px 10px; }
+    .round-player-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 4px;
+      border-bottom: 1px solid rgba(124,58,237,0.2);
+    }
+    .round-player-row:last-child { border-bottom: none; }
+    .round-player-name {
+      flex: 1;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--df-text, #e0e0e0);
+    }
+    .round-player-score {
+      width: 72px;
+      text-align: center;
+      font-size: 1.1rem;
+      font-weight: 600;
+      padding: 8px 4px;
+      border: 2px solid #7c3aed;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #212529;
+    }
+    .round-player-score:focus {
+      border-color: #a78bfa;
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(124,58,237,0.3);
+    }
+    .round-player-total {
+      width: 45px;
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--df-text, #aaa);
+      opacity: 0.7;
+      font-weight: 600;
+    }
+    .round-nav-btns {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      margin-top: 8px;
+    }
+    .round-nav-btns .btn {
+      padding: 8px 16px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      border-radius: 8px;
+    }
+    #rePrev, #reNext {
+      background: rgba(93, 45, 145, 0.3);
+      color: #e0e0e0;
+      border: 1px solid #7c3aed;
+    }
+    #rePrev:hover, #reNext:hover {
+      background: rgba(93, 45, 145, 0.5);
+      color: #fff;
+    }
+    #rePrev:disabled, #reNext:disabled {
+      background: rgba(93, 45, 145, 0.1);
+      color: rgba(255,255,255,0.3);
+      border-color: rgba(124,58,237,0.3);
+    }
+    #reSaveRound {
+      background: linear-gradient(135deg, #5d2d91, #7c3aed);
+      color: white;
+      border: none;
+    }
+  }
+</style>
+{% endblock %} {% block scripts %}
+<script>
+  $(document).ready(function () {
+    let players = [];
+
+    function loadPlayers() {
+      $.get("/api/players", function (data) {
+        players = data;
+        updatePlayerSelections();
+      });
+    }
+
+    function updatePlayerSelections() {
+      const count = parseInt($("#playerCount").val());
+      const container = $("#playerSelections");
+      container.empty();
+
+      for (let i = 1; i <= count; i++) {
+        const div = $("<div>").addClass("mb-3");
+        div.append($("<label>").addClass("form-label").text(`Player ${i}`));
+
+        const select = $("<select>")
+          .addClass("form-select player-select")
+          .attr("required", true)
+          .attr("data-player-num", i);
+
+        select.append($("<option>").val("").text("Select Player"));
+        select.append($("<option>").val("new").text("+ Add New Player"));
+
+        const playerLabel = (p) => p.display_name + (p.has_duplicate ? ` (${p.first_name} ${p.last_name})` : '');
+        const familyPlayers = players.filter(p => !p.is_guest);
+        const crewPlayers = players.filter(p => p.is_guest);
+        const crewGroups = {};
+        crewPlayers.forEach(p => {
+          const gn = p.guest_family_name || 'Other';
+          if (!crewGroups[gn]) crewGroups[gn] = [];
+          crewGroups[gn].push(p);
+        });
+
+        if (familyPlayers.length) {
+          const grp = $('<optgroup>').attr('label', 'Your Family');
+          familyPlayers.forEach(p => grp.append($('<option>').val(p.id).text(playerLabel(p))));
+          select.append(grp);
+        }
+        Object.keys(crewGroups).sort().forEach(name => {
+          const grp = $('<optgroup>').attr('label', 'Crew - ' + name);
+          crewGroups[name].forEach(p => grp.append($('<option>').val(p.id).text(playerLabel(p))));
+          select.append(grp);
+        });
+
+        div.append(select);
+        container.append(div);
+      }
+
+      $(".player-select").change(function () {
+        if ($(this).val() === "new") {
+          window.currentPlayerSelect = $(this);
+          $("#addPlayerForm")[0].reset();
+          new bootstrap.Modal($("#addPlayerModal")).show();
+          $(this).val("");
+        }
+      });
+
+      if (count === 2) {
+        const kimPlayer = players.find(p => p.display_name === "Kim");
+        const joePlayer = players.find(p => p.display_name === "Joe");
+        if (kimPlayer) {
+          $(".player-select[data-player-num='1']").val(kimPlayer.id);
+        }
+        if (joePlayer) {
+          $(".player-select[data-player-num='2']").val(joePlayer.id);
+        }
+      }
+    }
+
+    $("#playerCount").change(updatePlayerSelections);
+    loadPlayers();
+    updatePlayerSelections();
+
+    $("#savePlayer").click(function () {
+      const firstName = $("#firstName").val();
+      const lastName = $("#lastName").val();
+      const displayName = $("#displayName").val();
+
+      $.ajax({
+        url: "/api/players",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          first_name: firstName,
+          last_name: lastName,
+          display_name: displayName,
+        }),
+        success: function (response) {
+          bootstrap.Modal.getInstance($("#addPlayerModal")).hide();
+
+          const playerText =
+            response.display_name +
+            (response.has_duplicate
+              ? ` (${response.first_name} ${response.last_name})`
+              : "");
+
+          $(".player-select").each(function () {
+            $(this)
+              .find('option[value="new"]')
+              .before($("<option>").val(response.id).text(playerText));
+          });
+
+          if (window.currentPlayerSelect) {
+            window.currentPlayerSelect.val(response.id);
+            window.currentPlayerSelect = null;
+          }
+        },
+      });
+    });
+
+    $("#newGameForm").submit(function (e) {
+      e.preventDefault();
+
+      const playerIds = $(".player-select")
+        .map(function () {
+          return $(this).val();
+        })
+        .get();
+
+      const uniqueIds = new Set(playerIds);
+      if (uniqueIds.size !== playerIds.length) {
+        AppModal.warning('Duplicate Player', 'Each player can only be selected once!');
+        return;
+      }
+
+      $.ajax({
+        url: "/api/games/five-crowns/new",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          player_ids: playerIds,
+        }),
+        success: function (response) {
+          window.location.href = "{{ url_for('main.five_crowns') }}?game_id=" + response.id;
+        },
+        error: function (xhr) {
+          AppModal.error('Error', xhr.responseJSON?.error || 'Failed to create game');
+        },
+      });
+    });
+
+    const playerCount = $("#scoreTable th").length - 1;
+    $("#scoreTable").addClass(`players-${playerCount}`);
+    document.documentElement.style.setProperty("--player-count", playerCount);
+
+    /* ── Mobile View Toggle Logic ── */
+    var FC_ROUNDS = [
+      {num: 3, label: "3"}, {num: 4, label: "4"}, {num: 5, label: "5"},
+      {num: 6, label: "6"}, {num: 7, label: "7"}, {num: 8, label: "8"},
+      {num: 9, label: "9"}, {num: 10, label: "10"}, {num: 11, label: "J"},
+      {num: 12, label: "Q"}, {num: 13, label: "K"}
+    ];
+    var reCurrentIdx = 0;
+    var rePlayers = [];
+    $("#scoreTable .crown-header th:not(:first-child)").each(function () {
+      var txt = $(this).find(".player-name").text().trim() || $(this).text().trim();
+      var pid = null;
+      var firstScoreCell = $("#scoreTable tbody tr:first td.score-cell[data-player]").eq(rePlayers.length);
+      if (firstScoreCell.length) pid = firstScoreCell.data("player");
+      rePlayers.push({ name: txt, id: pid });
+    });
+
+    $(window).on("resize", function () {
+      if (window.innerWidth > 768) {
+        switchMobileView("table");
+      }
+    });
+
+    window.switchMobileView = function (mode) {
+      $(".view-toggle-btn").removeClass("active");
+      if (mode === "table") {
+        $("#btnTableView").addClass("active");
+        $("#defaultTableView").removeClass("hidden");
+        $("#roundEntryView").removeClass("active");
+      } else if (mode === "round") {
+        $("#btnRoundView").addClass("active");
+        $("#defaultTableView").addClass("hidden");
+        $("#roundEntryView").addClass("active");
+        reRenderRound();
+      }
+    };
+
+    window.openFullscreenTable = function () {
+      var body = document.getElementById("fullscreenBody");
+      var pc = rePlayers.length;
+      var colW = pc <= 4 ? '70px' : pc <= 6 ? '58px' : '48px';
+      var fontSize = pc <= 4 ? '0.88rem' : pc <= 6 ? '0.78rem' : '0.7rem';
+      var pad = pc <= 4 ? '6px 8px' : '4px 5px';
+      var inputPad = pc <= 4 ? '6px 3px' : '4px 2px';
+
+      var tbl = '<div style="overflow:auto;-webkit-overflow-scrolling:touch;width:100%;height:100%;">';
+      tbl += '<table class="fs-tbl" style="table-layout:fixed;width:100%;border-collapse:collapse;margin:0;">';
+      tbl += '<colgroup><col style="width:52px;">';
+      for (var i = 0; i < pc; i++) tbl += '<col style="width:' + colW + ';">';
+      tbl += '</colgroup>';
+      tbl += '<thead><tr style="background:#5d2d91;color:#fff;position:sticky;top:0;z-index:2;">';
+      tbl += '<th style="padding:' + pad + ';font-size:' + fontSize + ';font-weight:700;text-align:center;position:sticky;left:0;background:#5d2d91;z-index:3;">Rnd</th>';
+      rePlayers.forEach(function(p) {
+        var short = p.name.length > 6 ? p.name.substring(0, 5) + '.' : p.name;
+        tbl += '<th style="padding:' + pad + ';font-size:' + fontSize + ';font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + p.name + '">' + short + '</th>';
+      });
+      tbl += '</tr></thead><tbody>';
+
+      FC_ROUNDS.forEach(function(rd) {
+        tbl += '<tr style="border-bottom:1px solid rgba(93,45,145,0.15);">';
+        tbl += '<td style="background:#6b35a8;color:#fff;font-weight:700;text-align:center;padding:' + pad + ';font-size:' + fontSize + ';position:sticky;left:0;z-index:1;">' + rd.label + '</td>';
+        rePlayers.forEach(function(p) {
+          var origCell = $('#scoreTable .score-cell[data-player="' + p.id + '"][data-round="' + rd.num + '"]');
+          var val = origCell.length ? origCell.text().trim() : '';
+          tbl += '<td style="padding:0;text-align:center;background:#1a1a2e;">';
+          tbl += '<input type="number" inputmode="numeric" class="fs-score-input" data-pid="' + p.id + '" data-rnd="' + rd.num + '" value="' + val + '" style="width:100%;border:none;text-align:center;font-size:' + fontSize + ';padding:' + inputPad + ';background:transparent;color:#e0e0e0;font-weight:600;outline:none;caret-color:#e0e0e0;">';
+          tbl += '</td>';
+        });
+        tbl += '</tr>';
+      });
+
+      tbl += '<tr style="border-top:3px solid #5d2d91;position:sticky;bottom:0;z-index:2;">';
+      tbl += '<td style="background:#7c3aed;color:#fff;font-weight:700;text-align:center;padding:' + pad + ';font-size:' + fontSize + ';position:sticky;left:0;z-index:3;">Total</td>';
+      rePlayers.forEach(function(p) {
+        tbl += '<td class="fs-total" data-pid="' + p.id + '" style="font-weight:800;text-align:center;padding:' + pad + ';font-size:' + fontSize + ';color:#c4b5fd;background:#1a1030;">0</td>';
+      });
+      tbl += '</tr></tbody></table></div>';
+
+      body.innerHTML = tbl;
+      fsUpdateTotals();
+
+      $(body).off("change input", ".fs-score-input").on("change", ".fs-score-input", function() {
+        var $inp = $(this);
+        var pid = $inp.data("pid");
+        var rnd = $inp.data("rnd");
+        var val = $inp.val().trim();
+        var origCell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rnd + '"]');
+        if (origCell.length) {
+          updateScore(origCell, val, origCell.text().trim());
+          setTimeout(function() {
+            $inp.val(origCell.text().trim());
+            fsUpdateTotals();
+          }, 500);
+        }
+      });
+
+      var fsModal = bootstrap.Modal.getOrCreateInstance(document.getElementById("fullscreenTableModal"));
+      fsModal.show();
+    };
+
+    function fsUpdateTotals() {
+      rePlayers.forEach(function(p) {
+        var total = 0;
+        $(".fs-score-input[data-pid='" + p.id + "']").each(function() {
+          var v = parseInt($(this).val());
+          if (!isNaN(v)) total += v;
+        });
+        $(".fs-total[data-pid='" + p.id + "']").text(total);
+      });
+    }
+
+    function reRenderRound() {
+      var rd = FC_ROUNDS[reCurrentIdx];
+      $("#reRoundLabel").text("Round " + rd.label);
+      $("#reRoundProgress").text((reCurrentIdx + 1) + " / " + FC_ROUNDS.length);
+      $("#rePrev").prop("disabled", reCurrentIdx === 0);
+      $("#reNext").prop("disabled", reCurrentIdx === FC_ROUNDS.length - 1);
+
+      var html = "";
+      rePlayers.forEach(function (p) {
+        var existingScore = "";
+        var totalScore = 0;
+        var cell = $('#scoreTable .score-cell[data-player="' + p.id + '"][data-round="' + rd.num + '"]');
+        if (cell.length) existingScore = cell.text().trim();
+        var totalCell = $('#scoreTable .total-cell[data-player="' + p.id + '"]');
+        if (totalCell.length) totalScore = totalCell.text().trim();
+
+        html += '<div class="round-player-row">'
+          + '<span class="round-player-name">' + p.name + '</span>'
+          + '<input type="number" class="round-player-score" data-pid="' + p.id + '" value="' + existingScore + '" inputmode="numeric" pattern="[0-9]*">'
+          + '<span class="round-player-total">' + totalScore + '</span>'
+          + '</div>';
+      });
+      $("#rePlayerList").html(html);
+    }
+
+    window.reNavigate = function (dir) {
+      reSaveCurrentRound();
+      reCurrentIdx = Math.max(0, Math.min(FC_ROUNDS.length - 1, reCurrentIdx + dir));
+      reRenderRound();
+    };
+
+    window.reSaveCurrentRound = function () {
+      var rd = FC_ROUNDS[reCurrentIdx];
+      var gameId = $(".game-board").data("game-id");
+      $(".round-player-score").each(function () {
+        var pid = $(this).data("pid");
+        var val = $(this).val().trim();
+        var cell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rd.num + '"]');
+        var oldVal = cell.text().trim();
+        if (val !== oldVal && val !== "") {
+          cell.text(val);
+          $.ajax({
+            url: "/api/scores",
+            method: "POST",
+            contentType: "application/json",
+            data: JSON.stringify({ game_id: gameId, player_id: pid, round_number: rd.num, score: parseInt(val) })
+          });
+        }
+      });
+      updateTotals();
+    };
+
+    let updateTimer;
+
+    function updateScore(cell, newValue, originalValue) {
+      const gameId = $(".game-board").data("game-id");
+
+      if (newValue !== "" && !isNaN(newValue)) {
+        $.ajax({
+          url: "/api/scores",
+          method: "POST",
+          contentType: "application/json",
+          data: JSON.stringify({
+            game_id: gameId,
+            player_id: cell.data("player"),
+            round_number: cell.data("round"),
+            score: parseInt(newValue),
+          }),
+          success: function () {
+            cell.removeClass("editing");
+            cell.text(newValue);
+            updateTotals();
+            highlightDealer();
+          },
+          error: function (xhr) {
+            AppModal.error('Error', xhr.responseJSON?.error || 'Failed to save score');
+            cell.removeClass("editing");
+            cell.text(originalValue || "");
+          },
+        });
+      } else {
+        $.ajax({
+          url: "/api/scores",
+          method: "POST",
+          contentType: "application/json",
+          data: JSON.stringify({
+            game_id: gameId,
+            player_id: cell.data("player"),
+            round_number: cell.data("round"),
+            score: null,
+          }),
+          success: function () {
+            cell.removeClass("editing");
+            cell.text("");
+            updateTotals();
+            highlightDealer();
+          },
+          error: function (xhr) {
+            AppModal.error('Error', xhr.responseJSON?.error || 'Failed to delete score');
+            cell.removeClass("editing");
+            cell.text(originalValue || "");
+          },
+        });
+      }
+    }
+
+    $(".score-cell").on("click", function () {
+      const cell = $(this);
+      if (!cell.hasClass("editing")) {
+        const currentValue = cell.text().trim();
+        cell.data("original-value", currentValue);
+        cell.addClass("editing");
+        cell.html(`<input type="number"
+                class="form-control form-control-sm border-0"
+                value="${currentValue}"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                style="width: 100%; text-align: center; background: transparent; box-shadow: none;">`);
+        const input = cell.find("input");
+        input.focus();
+        input.select();
+
+        input.on("blur", function () {
+          updateScore(cell, input.val(), currentValue);
+        });
+
+        input.on("input", function () {
+          clearTimeout(updateTimer);
+          updateTimer = setTimeout(function () {
+            updateScore(cell, input.val(), currentValue);
+          }, 4000);
+        });
+
+        input.on("keypress", function (e) {
+          if (e.which === 13) {
+            updateScore(cell, input.val(), currentValue);
+          }
+        });
+      }
+    });
+
+    function updateTotals() {
+      $(".total-cell").each(function () {
+        const playerId = $(this).data("player");
+        let total = 0;
+        $(`.score-cell[data-player="${playerId}"]`).each(function () {
+          const scoreText = $(this).text().trim();
+          if (scoreText !== "" && !isNaN(parseInt(scoreText))) {
+            total += parseInt(scoreText);
+          }
+        });
+        $(this).text(total);
+      });
+    }
+
+    function highlightDealer() {
+      $("#scoreTable th, #scoreTable td").removeClass("dealer-column");
+
+      if ($("#dealerToggle").data("active") !== true) {
+        return;
+      }
+
+      const rounds = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+      let completedRounds = 0;
+
+      rounds.forEach((round) => {
+        let allPlayersHaveScores = true;
+        $(`.score-cell[data-round="${round}"]`).each(function () {
+          const score = $(this).text().trim();
+          if (score === "" || isNaN(parseInt(score))) {
+            allPlayersHaveScores = false;
+            return false;
+          }
+        });
+        if (allPlayersHaveScores) {
+          completedRounds++;
+        }
+      });
+
+      const playerCount = $("#scoreTable th:not(:first-child)").length;
+      if (playerCount > 0) {
+        const dealerIndex = completedRounds % playerCount;
+        const dealerColumnIndex = dealerIndex + 2;
+        $(
+          `#scoreTable th:nth-child(${dealerColumnIndex}), #scoreTable td:nth-child(${dealerColumnIndex})`
+        ).addClass("dealer-column");
+      }
+    }
+
+    $("#dealerToggle").click(function () {
+      const button = $(this);
+      const isActive = button.data("active");
+
+      if (isActive) {
+        button.data("active", false);
+        button.text("Show Dealer");
+        button.css({
+          "background-color": "rgba(248, 249, 250, 0.5)",
+          color: "#6c757d",
+        });
+      } else {
+        button.data("active", true);
+        button.text("Hide Dealer");
+        button.css({
+          "background-color": "rgba(248, 249, 250, 0.9)",
+          color: "#495057",
+        });
+      }
+
+      highlightDealer();
+    });
+
+    updateTotals();
+    highlightDealer();
+
+    let gameCompletedByCurrentUser = false;
+
+    function initializeSocket() {
+      if (typeof io === "undefined") {
+        console.error("Socket.IO not loaded yet");
+        setTimeout(initializeSocket, 100);
+        return;
+      }
+
+      const socket = io({
+        transports: ["websocket"],
+        cors: {
+          origin: "*",
+        },
+      });
+
+      socket.on("connect", function () {
+        console.log("Connected to server");
+        {% if active_game %}
+        socket.emit('join_game', {game_id: {{ active_game.id }}});
+        {% endif %}
+      });
+      window.addEventListener('beforeunload', function() {
+        {% if active_game %}
+        socket.emit('leave_game', {game_id: {{ active_game.id }}});
+        {% endif %}
+      });
+
+      socket.on("score_update", function (data) {
+        const cell = $(
+          `.score-cell[data-player="${data.player_id}"][data-round="${data.round_number}"]`
+        );
+        if (!cell.hasClass("editing")) {
+          cell.text(data.score === null || data.score === "" ? "" : data.score);
+          updateTotals();
+          highlightDealer();
+        }
+        updateTableLayout();
+      });
+
+      socket.on("game_completed", function (data) {
+        if (!gameCompletedByCurrentUser) {
+          const summaryModal = `
+            <div class="modal fade" id="gameSummaryModalRemote" data-bs-backdrop="static">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">Game Complete</h5>
+                  </div>
+                  <div class="modal-body">
+                    <pre style="white-space: pre-wrap; font-family: inherit;">${data.summary}</pre>
+                  </div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="window.location.reload()">Close</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+          $("body").append(summaryModal);
+          const modal = new bootstrap.Modal(
+            document.getElementById("gameSummaryModalRemote")
+          );
+          modal.show();
+        } else {
+          gameCompletedByCurrentUser = false;
+        }
+      });
+
+      socket.on("game_paused", function (data) {
+        showOtherUserPausedModal();
+      });
+
+      function showOtherUserPausedModal() {
+        const modalHtml = `
+          <div class="modal fade" id="otherUserPausedModal" data-bs-backdrop="static" data-bs-keyboard="false">
+            <div class="modal-dialog modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header bg-info text-white">
+                  <h5 class="modal-title">Game Paused by Another Player</h5>
+                </div>
+                <div class="modal-body text-center">
+                  <p class="mb-3">Another player has paused this game.</p>
+                  <p>Returning to main page in <span id="otherCountdown">3</span> seconds...</p>
+                  <div class="progress">
+                    <div class="progress-bar bg-info" role="progressbar" style="width: 100%" id="otherProgressBar"></div>
+                  </div>
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-primary" onclick="redirectToFiveCrowns()">
+                    OK, Go Now
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        $("body").append(modalHtml);
+        const modal = new bootstrap.Modal(
+          document.getElementById("otherUserPausedModal")
+        );
+        modal.show();
+
+        let countdown = 3;
+        const countdownElement = document.getElementById("otherCountdown");
+        const progressBar = document.getElementById("otherProgressBar");
+
+        const countdownInterval = setInterval(() => {
+          countdown--;
+          countdownElement.textContent = countdown;
+          progressBar.style.width = (countdown / 3) * 100 + "%";
+
+          if (countdown <= 0) {
+            clearInterval(countdownInterval);
+            redirectToFiveCrowns();
+          }
+        }, 1000);
+      }
+
+      socket.on("game_resumed", function (data) {
+        showOtherUserResumedModal();
+      });
+
+      function showOtherUserResumedModal() {
+        const modalHtml = `
+          <div class="modal fade" id="otherUserResumedModal" data-bs-backdrop="static" data-bs-keyboard="false">
+            <div class="modal-dialog modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                  <h5 class="modal-title">▶️ Game Resumed by Another Player</h5>
+                </div>
+                <div class="modal-body text-center">
+                  <p class="mb-3">Another player has resumed this game.</p>
+                  <p>Loading game board in <span id="otherResumeCountdown">3</span> seconds...</p>
+                  <div class="progress">
+                    <div class="progress-bar bg-success" role="progressbar" style="width: 100%" id="otherResumeProgressBar"></div>
+                  </div>
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-primary" onclick="redirectToFiveCrowns()">
+                    OK, Go Now
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        $("body").append(modalHtml);
+        const modal = new bootstrap.Modal(
+          document.getElementById("otherUserResumedModal")
+        );
+        modal.show();
+
+        let countdown = 3;
+        const countdownElement = document.getElementById("otherResumeCountdown");
+        const progressBar = document.getElementById("otherResumeProgressBar");
+
+        const countdownInterval = setInterval(() => {
+          countdown--;
+          countdownElement.textContent = countdown;
+          progressBar.style.width = (countdown / 3) * 100 + "%";
+
+          if (countdown <= 0) {
+            clearInterval(countdownInterval);
+            redirectToFiveCrowns();
+          }
+        }, 1000);
+      }
+    }
+
+    initializeSocket();
+
+    function updateTableLayout() {
+      const playerCount = document.querySelectorAll(
+        "#scoreTable th:not(:first-child)"
+      ).length;
+      document.documentElement.style.setProperty("--player-count", playerCount);
+    }
+
+    updateTableLayout();
+
+    let resizeTimeout;
+    $(window).on("resize", function () {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(function () {
+        updateTableLayout();
+      }, 250);
+    });
+
+    $(".modal").on("hidden.bs.modal", function () {
+      updateTableLayout();
+    });
+
+    function navigateToCell(currentCell, direction, isTab = false) {
+      let targetCell;
+      const row = currentCell.parent("tr");
+      const cellIndex = currentCell.index();
+
+      switch (direction) {
+        case "left":
+          targetCell = currentCell.prev(".score-cell");
+          break;
+        case "right":
+          targetCell = currentCell.next(".score-cell");
+          if (!targetCell.length && isTab) {
+            const nextRow = row.next("tr");
+            if (nextRow.length && !nextRow.hasClass("total-row")) {
+              targetCell = nextRow.find(".score-cell").first();
+            }
+          }
+          break;
+        case "up":
+          const prevRow = row.prev("tr");
+          if (prevRow.length) {
+            targetCell = prevRow.find(".score-cell").eq(cellIndex - 1);
+          }
+          break;
+        case "down":
+          const nextRow = row.next("tr");
+          if (nextRow.length && !nextRow.hasClass("total-row")) {
+            targetCell = nextRow.find(".score-cell").eq(cellIndex - 1);
+          }
+          break;
+      }
+
+      if (targetCell && targetCell.length) {
+        targetCell.click();
+        return true;
+      }
+      return false;
+    }
+
+    $(document).on("keydown", ".score-cell input", function (e) {
+      const cell = $(this).closest(".score-cell");
+      const currentValue = cell.data("original-value");
+      const newValue = $(this).val();
+
+      switch (e.which) {
+        case 9: // Tab
+          e.preventDefault();
+          updateScore(cell, newValue, currentValue);
+          const moved = navigateToCell(
+            cell,
+            e.shiftKey ? "left" : "right",
+            true
+          );
+          if (!moved) {
+            $(this).blur();
+          }
+          break;
+        case 13: // Enter
+          e.preventDefault();
+          updateScore(cell, newValue, currentValue);
+          navigateToCell(cell, "down");
+          break;
+        case 37: // Left Arrow
+          if (!$(this).val() || this.selectionStart === 0) {
+            e.preventDefault();
+            updateScore(cell, newValue, currentValue);
+            navigateToCell(cell, "left");
+          }
+          break;
+        case 38: // Up Arrow
+          e.preventDefault();
+          updateScore(cell, newValue, currentValue);
+          navigateToCell(cell, "up");
+          break;
+        case 39: // Right Arrow
+          if (this.selectionStart === this.value.length) {
+            e.preventDefault();
+            updateScore(cell, newValue, currentValue);
+            navigateToCell(cell, "right");
+          }
+          break;
+        case 40: // Down Arrow
+          e.preventDefault();
+          updateScore(cell, newValue, currentValue);
+          navigateToCell(cell, "down");
+          break;
+      }
+    });
+
+    $("#scoreTable").on("keydown", function (e) {
+      if (e.which === 9 && $(".score-cell.editing").length) {
+        e.preventDefault();
+      }
+    });
+
+    $("#completeGame").click(function () {
+      const modal = new bootstrap.Modal(
+        document.getElementById("completeGameModal")
+      );
+      modal.show();
+    });
+
+    $("#confirmComplete").click(function () {
+      const gameId = $(".game-board").data("game-id");
+      gameCompletedByCurrentUser = true;
+
+      $.ajax({
+        url: "/api/games/five-crowns/complete",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          game_id: gameId,
+        }),
+        success: function (response) {
+          if (response.summary) {
+            const summaryModal = `
+              <div class="modal fade" id="gameSummaryModalLocal">
+                <div class="modal-dialog">
+                  <div class="modal-content">
+                    <div class="modal-header bg-success text-white">
+                      <h5 class="modal-title">Game Complete</h5>
+                      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                      <pre class="mb-0">${response.summary}</pre>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-primary" onclick="window.location.reload()">
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>`;
+
+            $(summaryModal).modal("show");
+          } else {
+            window.location.reload();
+          }
+        },
+        error: function (xhr) {
+          gameCompletedByCurrentUser = false;
+          AppModal.error('Error', xhr.responseJSON?.error || 'Failed to complete game');
+        },
+      });
+    });
+
+    $("#pauseGame").click(function () {
+      $.ajax({
+        url: "/api/games/five-crowns/pause",
+        method: "POST",
+        success: function () {
+          showGamePausedModal();
+        },
+      });
+    });
+
+    function showGamePausedModal() {
+      const modalHtml = `
+        <div class="modal fade" id="gamePausedModal" data-bs-backdrop="static" data-bs-keyboard="false">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header bg-warning">
+                <h5 class="modal-title">Game Paused</h5>
+              </div>
+              <div class="modal-body text-center">
+                <p class="mb-3">The game has been paused successfully.</p>
+                <p>Returning to main page in <span id="countdown">3</span> seconds...</p>
+                <div class="progress">
+                  <div class="progress-bar bg-warning" role="progressbar" style="width: 100%" id="progressBar"></div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-primary" onclick="redirectToFiveCrowns()">
+                  OK, Go Now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      $("body").append(modalHtml);
+      const modal = new bootstrap.Modal(
+        document.getElementById("gamePausedModal")
+      );
+      modal.show();
+
+      let countdown = 3;
+      const countdownElement = document.getElementById("countdown");
+      const progressBar = document.getElementById("progressBar");
+
+      const countdownInterval = setInterval(() => {
+        countdown--;
+        countdownElement.textContent = countdown;
+        progressBar.style.width = (countdown / 3) * 100 + "%";
+
+        if (countdown <= 0) {
+          clearInterval(countdownInterval);
+          redirectToFiveCrowns();
+        }
+      }, 1000);
+    }
+
+    function redirectToFiveCrowns() {
+      window.location.href = "{{ url_for('main.five_crowns') }}";
+    }
+
+    $(".resume-game").click(function () {
+      const gameId = $(this).data("game-id");
+      $.ajax({
+        url: `/api/games/five-crowns/resume/${gameId}`,
+        method: "POST",
+        success: function () {
+          showGameResumedModal();
+        },
+      });
+    });
+
+    $("#deleteGame").click(function () {
+      var gid = $(this).data("game-id");
+      AppModal.confirm("Delete Game", "Are you sure you want to permanently delete this game? All scores will be lost.", function () {
+        $.ajax({
+          url: "/api/games/delete/" + gid,
+          method: "POST",
+          success: function () { window.location.href = "{{ url_for('main.five_crowns') }}"; },
+          error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to delete game"); }
+        });
+      });
+    });
+
+    function showGameResumedModal() {
+      const modalHtml = `
+        <div class="modal fade" id="gameResumedModal" data-bs-backdrop="static" data-bs-keyboard="false">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">▶️ Game Resumed</h5>
+              </div>
+              <div class="modal-body text-center">
+                <p class="mb-3">The game has been resumed successfully.</p>
+                <p>Loading game board in <span id="resumeCountdown">3</span> seconds...</p>
+                <div class="progress">
+                  <div class="progress-bar bg-success" role="progressbar" style="width: 100%" id="resumeProgressBar"></div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-primary" onclick="redirectToFiveCrowns()">
+                  OK, Go Now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      $("body").append(modalHtml);
+      const modal = new bootstrap.Modal(
+        document.getElementById("gameResumedModal")
+      );
+      modal.show();
+
+      let countdown = 3;
+      const countdownElement = document.getElementById("resumeCountdown");
+      const progressBar = document.getElementById("resumeProgressBar");
+
+      const countdownInterval = setInterval(() => {
+        countdown--;
+        countdownElement.textContent = countdown;
+        progressBar.style.width = (countdown / 3) * 100 + "%";
+
+        if (countdown <= 0) {
+          clearInterval(countdownInterval);
+          redirectToFiveCrowns();
+        }
+      }, 1000);
+    }
+
+    $("#clearCompletedGames").click(function () {
+      const modal = new bootstrap.Modal(
+        document.getElementById("clearHistoryModal")
+      );
+      modal.show();
+    });
+
+    $("#confirmClearHistory").click(function () {
+      $.ajax({
+        url: "/api/games/five-crowns/clear-history",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({ game_id: {{ game_def.id }} }),
+        success: function () {
+          window.location.reload();
+        },
+      });
+    });
+
+    $(".complete-paused-game").click(function () {
+      const gameId = $(this).data("game-id");
+      $("#confirmEndPaused").data("game-id", gameId);
+      const modal = new bootstrap.Modal(
+        document.getElementById("endPausedGameModal")
+      );
+      modal.show();
+    });
+
+    $("#confirmEndPaused").click(function () {
+      const gameId = $(this).data("game-id");
+      gameCompletedByCurrentUser = true;
+
+      $.ajax({
+        url: `/api/games/five-crowns/complete/${gameId}`,
+        method: "POST",
+        success: function (response) {
+          if (response.summary) {
+            const summaryModal = `
+              <div class="modal fade" id="gameSummaryModalPaused">
+                <div class="modal-dialog">
+                  <div class="modal-content">
+                    <div class="modal-header bg-success text-white">
+                      <h5 class="modal-title">Game Complete</h5>
+                      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                      <pre class="mb-0">${response.summary}</pre>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-primary" onclick="window.location.reload()">
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>`;
+
+            $(summaryModal).modal("show");
+          } else {
+            window.location.reload();
+          }
+        },
+        error: function (xhr) {
+          gameCompletedByCurrentUser = false;
+          AppModal.error('Error', xhr.responseJSON?.error || 'Failed to complete game');
+        },
+      });
+    });
+
+    function showGameInfo(gameId) {
+      const modal = new bootstrap.Modal(
+        document.getElementById("gameInfoModal")
+      );
+      const modalContent = document.getElementById("gameInfoContent");
+
+      modalContent.innerHTML = `
+          <div class="text-center">
+              <div class="spinner-border" role="status">
+                  <span class="visually-hidden">Loading...</span>
+              </div>
+          </div>
+      `;
+
+      modal.show();
+
+      fetch(`/api/game-details/${gameId}`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            modalContent.innerHTML =
+              data.details.notes || "<p>No game information available.</p>";
+          } else {
+            modalContent.innerHTML =
+              '<p class="text-danger">Error loading game information.</p>';
+          }
+        })
+        .catch((error) => {
+          console.error("Error:", error);
+          modalContent.innerHTML =
+            '<p class="text-danger">Error loading game information.</p>';
+        });
+    }
+
+    $(document).on("click", ".game-info-btn", function () {
+      const gameId = $(this).data("game-id");
+      showGameInfo(gameId);
+    });
+
+    if (window.innerWidth > 768) {
+      var tooltipTriggerList = [].slice.call(
+        document.querySelectorAll('[data-bs-toggle="tooltip"]')
+      );
+      var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+      });
+    } else {
+      document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((el) => {
+        el.removeAttribute("data-bs-toggle");
+        el.removeAttribute("data-bs-placement");
+        el.removeAttribute("title");
+      });
+    }
+
+    function createSuitPattern() {
+      const suits = ["♠", "♥", "♦", "♣", "★"];
+      const container = $(".five-crowns-container");
+
+      $(".background-pattern").remove();
+
+      const pattern = $("<div>").addClass("background-pattern");
+      container.prepend(pattern);
+
+      const gridSize = 50;
+      const width = container.width();
+      const height = container.height();
+      const cols = Math.ceil(width / gridSize) + 1;
+      const rows = Math.ceil(height / gridSize) + 1;
+
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const suit = suits[(row + col) % suits.length];
+          const rotation = ((row + col) % 4) * 90;
+
+          $("<div>")
+            .addClass("suit-pattern")
+            .text(suit)
+            .css({
+              left: col * gridSize + "px",
+              top: row * gridSize + "px",
+              transform: `rotate(${rotation}deg)`,
+              opacity: Math.random() * 0.2 + 0.1,
+            })
+            .appendTo(pattern);
+        }
+      }
+    }
+
+    $(window).on("load", createSuitPattern);
+
+    let resizeTimer;
+    $(window).on("resize", function () {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(createSuitPattern, 250);
+    });
+  });
+</script>
+{% endblock %}
