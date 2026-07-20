@@ -185,11 +185,28 @@ came over in the restore.
 
 ## Day-2 operations
 
+**Scale web replicas (traffic / SocketIO-safe):**
+
+The stack includes Redis + an nginx proxy on `127.0.0.1:5002`. Scale only the `web` service:
+
+```bash
+cd /home/joe/difedegames
+
+# 2 or 3 app pods behind the proxy (tunnel URL stays localhost:5002)
+docker compose up -d --scale web=2
+# or
+docker compose up -d --scale web=3
+
+docker compose ps
+```
+
+Do **not** scale `db`, `redis`, or `proxy`. Cloudflare still points at `localhost:5002`.
+
 **Update the app after code changes:**
 
 ```bash
 git pull            # or re-copy the code
-docker compose up -d --build
+docker compose up -d --build --scale web=2
 ```
 
 **Back up the containerized database:**

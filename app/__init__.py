@@ -1,11 +1,22 @@
+import os
+
 from flask import Flask, g, session
 from config import Config
 from flask_socketio import SocketIO
 from flask_session import Session
 from .database import get_db_connection
 
+# Redis message queue lets SocketIO work across scaled web replicas.
+_redis_url = os.environ.get("REDIS_URL") or None
+
 # Initialize SocketIO with cors_allowed_origins to allow all origins
-socketio = SocketIO(cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
+socketio = SocketIO(
+    cors_allowed_origins="*",
+    async_mode="eventlet",
+    logger=True,
+    engineio_logger=True,
+    message_queue=_redis_url,
+)
 
 def init_db():
     conn = get_db_connection()
@@ -54,8 +65,12 @@ def create_app():
     app.register_blueprint(events)
     app.register_blueprint(auth_bp)
     
-    # Initialize SocketIO with the app
-    socketio.init_app(app, cors_allowed_origins="*")
+    # Initialize SocketIO with the app (Redis queue when REDIS_URL is set)
+    socketio.init_app(
+        app,
+        cors_allowed_origins="*",
+        message_queue=_redis_url,
+    )
     
     # Add context processor for authentication
     @app.context_processor
