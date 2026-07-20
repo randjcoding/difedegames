@@ -6,7 +6,7 @@ from .auth import (
     create_verification_token, verify_email_token, resend_verification_email,
     login_required, admin_required, load_current_user
 )
-from .email_utils import send_verification_email, send_registration_notification
+from .email_utils import send_verification_email, send_registration_notification, APP_BASE_URL
 import logging
 from datetime import datetime
 
@@ -230,7 +230,7 @@ def register():
             # Create verification token
             try:
                 token = create_verification_token(user_id)
-                verification_link = f"http://192.168.68.72:5002/auth/verify/{token}"
+                verification_link = f"{APP_BASE_URL}/auth/verify/{token}"
                 
                 # Try to send verification email
                 email_sent = False
@@ -561,7 +561,7 @@ def resend_verification():
         
         if success:
             # Send new verification email
-            verification_link = f"http://192.168.68.72:5002/auth/verify/{result['token']}"
+            verification_link = f"{APP_BASE_URL}/auth/verify/{result['token']}"
             
             email_sent = send_verification_email(result['email'], result['first_name'], verification_link)
             
