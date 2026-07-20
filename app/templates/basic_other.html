@@ -793,7 +793,7 @@ $(document).ready(function () {
       method: "POST",
       success: function () {
         AppModal.show({ title: "Game Resumed", body: "<p>Loading game...</p>", type: "success" });
-        setTimeout(function () { window.location.href = "{{ url_for('main.basic_other') }}"; }, 1000);
+        setTimeout(function () { window.location.href = "{{ url_for('main.basic_other') }}?game_id=" + gameId; }, 1000);
       },
       error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to resume game"); }
     });

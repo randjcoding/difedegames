@@ -285,7 +285,7 @@
               </span>
             </div>
             <div class="mt-auto d-flex gap-2">
-              <a href="{{ slug_to_url.get(game.slug, '/game/' + game.slug) }}" class="btn btn-play flex-fill">
+              <a href="/game/{{ game.slug }}" class="btn btn-play flex-fill">
                 <i class="fas fa-play me-1"></i> Play
               </a>
               <button type="button" class="btn btn-rules flex-fill" onclick="showRulesModal('{{ game.slug }}', '{{ game.name }}')">
@@ -349,7 +349,7 @@
                 </span>
               </div>
               <div class="mt-auto d-flex gap-2">
-                <a href="{{ slug_to_url.get(game.slug, '/game/' + game.slug) }}" class="btn btn-play flex-fill">
+                <a href="/game/{{ game.slug }}" class="btn btn-play flex-fill">
                   <i class="fas fa-play me-1"></i> Play
                 </a>
                 <button type="button" class="btn btn-rules flex-fill" onclick="showRulesModal('{{ game.slug }}', '{{ game.name }}')">

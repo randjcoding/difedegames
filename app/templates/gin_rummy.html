@@ -468,13 +468,13 @@ $(document).ready(function(){
   $("#pauseGame").click(function(){
     var gid=$(".game-board").data("game-id");
     $.ajax({url:"/api/games/pause/"+gid,method:"POST",
-      success:function(){AppModal.show({title:"Game Paused",body:"<p>Returning to Gin Rummy...</p>",type:"info"});setTimeout(function(){window.location.href="{{ url_for('main.gin_rummy') }}";},1500);},
+      success:function(){AppModal.show({title:"Game Paused",body:"<p>Returning to Gin Rummy...</p>",type:"info"});setTimeout(function(){window.location.href="/game/gin-rummy";},1500);},
       error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to pause game");}
     });
   });
 
   // ===== COMMON =====
-  $(".resume-game").click(function(){var gid=$(this).data("game-id");$.ajax({url:"/api/games/resume/"+gid,method:"POST",success:function(){AppModal.show({title:"Game Resumed",body:"<p>Loading game...</p>",type:"success"});setTimeout(function(){window.location.href="{{ url_for('main.gin_rummy') }}";},1000);},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to resume game");}});});
+  $(".resume-game").click(function(){var gid=$(this).data("game-id");$.ajax({url:"/api/games/resume/"+gid,method:"POST",success:function(){AppModal.show({title:"Game Resumed",body:"<p>Loading game...</p>",type:"success"});setTimeout(function(){window.location.href="{{ url_for('main.gin_rummy') }}?game_id="+gid;},1000);},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to resume game");}});});
 
   $(".complete-paused-game").click(function(){var gid=$(this).data("game-id");AppModal.confirm("End Game","End this game without recording results?",function(){$.ajax({url:"/api/games/complete/"+gid,method:"POST",success:function(){window.location.reload();},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to end game");}});},{confirmText:"End Game",cancelText:"Cancel"});});
 

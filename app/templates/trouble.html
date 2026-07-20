@@ -802,8 +802,13 @@ content %}
 
     // ===================== GAME ACTIONS =====================
 
-    window.redirectToTrouble = function () {
-      window.location.href = "{{ url_for('main.trouble') }}";
+    window.redirectToTrouble = function (gameId) {
+      gameId = gameId || $(".game-board").data("game-id");
+      if (gameId) {
+        window.location.href = "{{ url_for('main.trouble') }}?game_id=" + gameId;
+      } else {
+        window.location.href = "/game/trouble";
+      }
     };
 
     $(".resume-game").click(function () {
@@ -813,7 +818,7 @@ content %}
         method: "POST",
         success: function () {
           AppModal.show({ title: "Game Resumed", body: "<p>Loading game...</p>", type: "success" });
-          setTimeout(function () { window.redirectToTrouble(); }, 1000);
+          setTimeout(function () { window.redirectToTrouble(gameId); }, 1000);
         },
         error: function (xhr) {
           AppModal.error("Error", xhr.responseJSON?.error || "Failed to resume game");

@@ -56,6 +56,36 @@ def execute_modify(conn, query, params=None):
         conn.commit()
         return cursor.rowcount
 
+def family_access_clause(user, alias='ag'):
+    """SQL fragment + params: started by user, same family, or all (super_admin)."""
+    if user.get('role') == 'super_admin':
+        return 'TRUE', []
+    family_id = user.get('family_id')
+    if family_id is not None:
+        return f'({alias}.user_id = %s OR {alias}.family_id = %s)', [user['id'], family_id]
+    return f'{alias}.user_id = %s', [user['id']]
+
+def fetch_accessible_game(conn, game_id, user, extra_where='', extra_params=None):
+    """Load an active_games row if the user may access it (family-shared)."""
+    clause, params = family_access_clause(user, 'ag')
+    sql = f'SELECT ag.* FROM active_games ag WHERE ag.id = %s AND {clause}'
+    all_params = [game_id] + list(params)
+    if extra_where:
+        sql += ' AND ' + extra_where
+        if extra_params:
+            all_params.extend(extra_params)
+    return execute_query_one(conn, sql, tuple(all_params))
+
+def user_can_access_active_game(user, game):
+    if not user or not game:
+        return False
+    if user.get('role') == 'super_admin':
+        return True
+    if game.get('user_id') == user.get('id'):
+        return True
+    fam = user.get('family_id')
+    return fam is not None and game.get('family_id') == fam
+
 def get_family_players(family_id, include_crew=False):
     """Get all players for a family, optionally including crew family players"""
     conn = get_db_connection()
@@ -105,7 +135,11 @@ def get_family_players(family_id, include_crew=False):
         conn.close()
 
 def game_page(slug, game_id):
-    """Generic game page handler for any game type"""
+    """Generic game page handler for any game type.
+
+    Never auto-opens a session. Open a score sheet only when ?game_id= is present
+    (Resume / Continue). Otherwise show the new-game form plus family paused/completed lists.
+    """
     conn = get_db_connection()
     user = get_current_user()
     
@@ -113,41 +147,32 @@ def game_page(slug, game_id):
     
     specific_game_id = request.args.get('game_id')
     force_new = request.args.get('new') == '1'
+    access_sql, access_params = family_access_clause(user, 'ag')
     
     active_game = None
     if specific_game_id and not force_new:
-        active_game = execute_query_one(conn, '''
-            SELECT * FROM active_games 
-            WHERE id = %s AND user_id = %s AND is_complete = FALSE
-        ''', (specific_game_id, user['id']))
-        if active_game and active_game.get('is_paused'):
-            execute_modify(conn, 'UPDATE active_games SET is_paused = FALSE WHERE id = %s', (active_game['id'],))
-            conn.commit()
-            active_game = execute_query_one(conn, 'SELECT * FROM active_games WHERE id = %s', (active_game['id'],))
-    elif not force_new:
-        active_game = execute_query_one(conn, '''
-            SELECT * FROM active_games 
-            WHERE game_id = %s AND user_id = %s AND is_complete = FALSE
-            ORDER BY is_paused ASC, start_time DESC LIMIT 1
-        ''', (game_id, user['id']))
+        active_game = fetch_accessible_game(
+            conn, specific_game_id, user,
+            extra_where='ag.is_complete = FALSE AND ag.game_id = %s',
+            extra_params=[game_id])
         if active_game and active_game.get('is_paused'):
             execute_modify(conn, 'UPDATE active_games SET is_paused = FALSE WHERE id = %s', (active_game['id'],))
             conn.commit()
             active_game = execute_query_one(conn, 'SELECT * FROM active_games WHERE id = %s', (active_game['id'],))
     
-    paused_games = execute_query(conn, '''
+    paused_games = execute_query(conn, f'''
         SELECT ag.id, ag.start_time, ag.custom_game_name,
             string_agg(COALESCE(p.display_name, p.first_name), ', ' ORDER BY agp.id) as player_names,
             COUNT(DISTINCT agp.player_id) as player_count
         FROM active_games ag
         JOIN active_game_players agp ON ag.id = agp.active_game_id
         JOIN players p ON agp.player_id = p.id
-        WHERE ag.game_id = %s AND ag.user_id = %s AND ag.is_complete = FALSE AND ag.is_paused = TRUE
+        WHERE ag.game_id = %s AND {access_sql} AND ag.is_complete = FALSE AND ag.is_paused = TRUE
         GROUP BY ag.id, ag.start_time, ag.custom_game_name
         ORDER BY ag.start_time DESC LIMIT 5
-    ''', (game_id, user['id']))
+    ''', tuple([game_id] + list(access_params)))
     
-    completed_games = execute_query(conn, '''
+    completed_games = execute_query(conn, f'''
         SELECT ag.id, ag.start_time, ag.completion_time, ag.custom_game_name,
             string_agg(COALESCE(p.display_name, p.first_name), ', ' ORDER BY agp.id) as player_names,
             gs_sub.winner, gs_sub.winning_score,
@@ -161,12 +186,12 @@ def game_page(slug, game_id):
             WHERE gs.game_id = ag.id LIMIT 1
         ) gs_sub ON TRUE
         LEFT JOIN game_sessions_numbered gsn ON gsn.id = ag.id
-        WHERE ag.game_id = %s AND ag.user_id = %s AND ag.is_complete = TRUE
+        WHERE ag.game_id = %s AND {access_sql} AND ag.is_complete = TRUE
         GROUP BY ag.id, ag.start_time, ag.completion_time, ag.custom_game_name,
             gs_sub.winner, gs_sub.winning_score,
             gsn.game_number, gsn.family_game_number
         ORDER BY ag.start_time DESC LIMIT 5
-    ''', (game_id, user['id']))
+    ''', tuple([game_id] + list(access_params)))
     
     game_players = []
     scores = {}
@@ -225,7 +250,8 @@ def dashboard():
     user = get_current_user()
     conn = get_db_connection()
     try:
-        active_games = execute_query(conn, '''
+        access_sql, access_params = family_access_clause(user, 'ag')
+        active_games = execute_query(conn, f'''
             SELECT ag.id, ag.start_time, ag.is_paused, ag.game_id, ag.scoring_direction, ag.target_score,
                 COALESCE(ag.custom_game_name, g.name) as game_name, g.slug,
                 string_agg(COALESCE(p.display_name, p.first_name), ', ' ORDER BY agp.id) as player_names,
@@ -234,11 +260,11 @@ def dashboard():
             JOIN games g ON ag.game_id = g.id
             JOIN active_game_players agp ON ag.id = agp.active_game_id
             JOIN players p ON agp.player_id = p.id
-            WHERE ag.user_id = %s AND ag.is_complete = FALSE
+            WHERE {access_sql} AND ag.is_complete = FALSE
             GROUP BY ag.id, ag.start_time, ag.is_paused, ag.game_id, ag.scoring_direction, ag.target_score,
                 ag.custom_game_name, g.name, g.slug
             ORDER BY ag.is_paused ASC, ag.start_time DESC
-        ''', (user['id'],))
+        ''', tuple(access_params))
         return render_template('dashboard.html', user=user, active_games=active_games)
     finally:
         conn.close()
@@ -684,17 +710,18 @@ def game_landing(slug):
 
         rules = execute_query(conn, "SELECT * FROM game_details WHERE game_id = %s ORDER BY id", (game_def['id'],))
 
-        active_games = execute_query(conn, '''
+        access_sql, access_params = family_access_clause(user, 'ag')
+        active_games = execute_query(conn, f'''
             SELECT ag.id, ag.start_time, ag.is_paused,
                 string_agg(COALESCE(p.display_name, p.first_name), ', ' ORDER BY agp.id) as player_names,
                 COUNT(DISTINCT agp.player_id) as player_count
             FROM active_games ag
             JOIN active_game_players agp ON ag.id = agp.active_game_id
             JOIN players p ON agp.player_id = p.id
-            WHERE ag.game_id = %s AND ag.user_id = %s AND ag.is_complete = FALSE
+            WHERE ag.game_id = %s AND {access_sql} AND ag.is_complete = FALSE
             GROUP BY ag.id, ag.start_time, ag.is_paused
             ORDER BY ag.is_paused, ag.start_time DESC
-        ''', (game_def['id'], user['id']))
+        ''', tuple([game_def['id']] + list(access_params)))
 
         total_games = execute_query_one(conn, "SELECT COUNT(*) as c FROM active_games WHERE game_id = %s AND is_complete = TRUE", (game_def['id'],))
         family_games = execute_query_one(conn, "SELECT COUNT(*) as c FROM active_games WHERE game_id = %s AND family_id = %s AND is_complete = TRUE", (game_def['id'], user.get('family_id')))
@@ -847,11 +874,12 @@ def update_score():
         # Single transaction so the FOR UPDATE row locks actually hold until commit.
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         try:
-            cursor.execute('''
-                SELECT id, is_complete FROM active_games 
-                WHERE id = %s AND user_id = %s
-                FOR UPDATE
-            ''', (game_id, user['id']))
+            access_sql, access_params = family_access_clause(user, 'ag')
+            cursor.execute(f'''
+                SELECT ag.id, ag.is_complete FROM active_games ag
+                WHERE ag.id = %s AND {access_sql}
+                FOR UPDATE OF ag
+            ''', tuple([game_id] + list(access_params)))
             game = cursor.fetchone()
 
             if not game:
@@ -1130,15 +1158,20 @@ def complete_five_crowns_game():
     conn = get_db_connection()
     user = get_current_user()
     try:
-        game = execute_query_one(conn, '''
-            SELECT id FROM active_games 
-            WHERE game_id = 1 
-            AND user_id = %s
-            AND is_complete = FALSE 
-            AND is_paused = FALSE 
-            ORDER BY start_time DESC 
-            LIMIT 1
-        ''', (user['id'],))
+        data = request.get_json(silent=True) or {}
+        specific_id = data.get('game_id')
+        if specific_id:
+            game = fetch_accessible_game(
+                conn, specific_id, user,
+                extra_where='ag.game_id = 1 AND ag.is_complete = FALSE')
+        else:
+            access_sql, access_params = family_access_clause(user, 'ag')
+            game = execute_query_one(conn, f'''
+                SELECT ag.id FROM active_games ag
+                WHERE ag.game_id = 1 AND {access_sql}
+                AND ag.is_complete = FALSE AND ag.is_paused = FALSE
+                ORDER BY ag.start_time DESC LIMIT 1
+            ''', tuple(access_params))
         
         if game:
             scores = execute_query(conn, '''
@@ -1243,15 +1276,20 @@ def pause_five_crowns_game():
     conn = get_db_connection()
     user = get_current_user()
     try:
-        game = execute_query_one(conn, '''
-            SELECT id FROM active_games 
-            WHERE game_id = 1 
-            AND user_id = %s
-            AND is_complete = FALSE 
-            AND is_paused = FALSE 
-            ORDER BY start_time DESC 
-            LIMIT 1
-        ''', (user['id'],))
+        data = request.get_json(silent=True) or {}
+        specific_id = data.get('game_id') or request.args.get('game_id')
+        if specific_id:
+            game = fetch_accessible_game(
+                conn, specific_id, user,
+                extra_where='ag.game_id = 1 AND ag.is_complete = FALSE AND ag.is_paused = FALSE')
+        else:
+            access_sql, access_params = family_access_clause(user, 'ag')
+            game = execute_query_one(conn, f'''
+                SELECT ag.id FROM active_games ag
+                WHERE ag.game_id = 1 AND {access_sql}
+                AND ag.is_complete = FALSE AND ag.is_paused = FALSE
+                ORDER BY ag.start_time DESC LIMIT 1
+            ''', tuple(access_params))
         
         if game:
             execute_modify(conn, '''
@@ -1276,10 +1314,9 @@ def resume_five_crowns_game(game_id):
     conn = get_db_connection()
     user = get_current_user()
     try:
-        game = execute_query_one(conn, '''
-            SELECT id FROM active_games 
-            WHERE id = %s AND user_id = %s AND game_id = 1 AND is_paused = TRUE AND is_complete = FALSE
-        ''', (game_id, user['id']))
+        game = fetch_accessible_game(
+            conn, game_id, user,
+            extra_where='ag.game_id = 1 AND ag.is_paused = TRUE AND ag.is_complete = FALSE')
         
         if not game:
             conn.close()
@@ -1308,10 +1345,9 @@ def pause_game_generic(game_id):
     conn = get_db_connection()
     user = get_current_user()
     try:
-        game = execute_query_one(conn, '''
-            SELECT id FROM active_games 
-            WHERE id = %s AND user_id = %s AND is_complete = FALSE AND is_paused = FALSE
-        ''', (game_id, user['id']))
+        game = fetch_accessible_game(
+            conn, game_id, user,
+            extra_where='ag.is_complete = FALSE AND ag.is_paused = FALSE')
         if not game:
             return jsonify({'error': 'Game not found'}), 404
         execute_modify(conn, 'UPDATE active_games SET is_paused = TRUE WHERE id = %s', (game_id,))
@@ -1333,10 +1369,9 @@ def resume_game_generic(game_id):
     conn = get_db_connection()
     user = get_current_user()
     try:
-        game = execute_query_one(conn, '''
-            SELECT id FROM active_games 
-            WHERE id = %s AND user_id = %s AND is_paused = TRUE AND is_complete = FALSE
-        ''', (game_id, user['id']))
+        game = fetch_accessible_game(
+            conn, game_id, user,
+            extra_where='ag.is_paused = TRUE AND ag.is_complete = FALSE')
         if not game:
             return jsonify({'error': 'Game not found or not paused'}), 404
         execute_modify(conn, 'UPDATE active_games SET is_paused = FALSE WHERE id = %s', (game_id,))
@@ -1355,10 +1390,7 @@ def complete_game_generic(game_id):
     conn = get_db_connection()
     user = get_current_user()
     try:
-        game = execute_query_one(conn, '''
-            SELECT ag.id, ag.scoring_direction FROM active_games ag
-            WHERE ag.id = %s AND ag.user_id = %s AND ag.is_complete = FALSE
-        ''', (game_id, user['id']))
+        game = fetch_accessible_game(conn, game_id, user, extra_where='ag.is_complete = FALSE')
         if not game:
             return jsonify({'error': 'Game not found'}), 404
         
@@ -1433,10 +1465,7 @@ def complete_trouble_game():
         winner_id = data.get('winner_id')
         loser_data = data.get('loser_data', [])
 
-        game = execute_query_one(conn, '''
-            SELECT ag.id, ag.user_id FROM active_games ag
-            WHERE ag.id = %s AND ag.user_id = %s AND ag.is_complete = FALSE
-        ''', (game_id, user['id']))
+        game = fetch_accessible_game(conn, game_id, user, extra_where='ag.is_complete = FALSE')
         if not game:
             return jsonify({'error': 'Game not found'}), 404
 
@@ -1529,10 +1558,7 @@ def complete_kings_corner_sow():
         winner_id = data.get('winner_id')
         loser_penalties = data.get('loser_penalties', [])
 
-        game = execute_query_one(conn, '''
-            SELECT ag.id, ag.user_id FROM active_games ag
-            WHERE ag.id = %s AND ag.user_id = %s AND ag.is_complete = FALSE
-        ''', (game_id, user['id']))
+        game = fetch_accessible_game(conn, game_id, user, extra_where='ag.is_complete = FALSE')
         if not game:
             return jsonify({'error': 'Game not found'}), 404
 
@@ -1638,10 +1664,7 @@ def complete_basic_quick():
         game_id = data.get('game_id')
         winner_id = data.get('winner_id')
 
-        game = execute_query_one(conn, '''
-            SELECT ag.id, ag.user_id FROM active_games ag
-            WHERE ag.id = %s AND ag.user_id = %s AND ag.is_complete = FALSE
-        ''', (game_id, user['id']))
+        game = fetch_accessible_game(conn, game_id, user, extra_where='ag.is_complete = FALSE')
         if not game:
             return jsonify({'error': 'Game not found'}), 404
 
@@ -1696,12 +1719,8 @@ def delete_game(game_id):
         if not game:
             return jsonify({'error': 'Game not found'}), 404
         
-        if game['user_id'] != user['id'] and user.get('role') != 'super_admin':
-            is_family_lead = (user.get('role') == 'family_admin'
-                              and user.get('family_id') is not None
-                              and user.get('family_id') == game.get('family_id'))
-            if not is_family_lead:
-                return jsonify({'error': 'Only game creator or family lead can delete games'}), 403
+        if not user_can_access_active_game(user, game):
+            return jsonify({'error': 'Access denied'}), 403
         
         execute_modify(conn, 'DELETE FROM game_scores WHERE active_game_id = %s', (game_id,))
         execute_modify(conn, 'DELETE FROM active_game_players WHERE active_game_id = %s', (game_id,))
@@ -1725,17 +1744,18 @@ def game_session_info(slug):
         if not game_def:
             return jsonify({'error': 'Game not found'}), 404
         
-        active_games = list(execute_query(conn, '''
+        access_sql, access_params = family_access_clause(user, 'ag')
+        active_games = list(execute_query(conn, f'''
             SELECT ag.id, ag.start_time, ag.is_paused,
                 string_agg(COALESCE(p.display_name, p.first_name), ', ' ORDER BY agp.id) as player_names,
                 COUNT(DISTINCT agp.player_id) as player_count
             FROM active_games ag
             JOIN active_game_players agp ON ag.id = agp.active_game_id
             JOIN players p ON agp.player_id = p.id
-            WHERE ag.game_id = %s AND ag.user_id = %s AND ag.is_complete = FALSE
+            WHERE ag.game_id = %s AND {access_sql} AND ag.is_complete = FALSE
             GROUP BY ag.id, ag.start_time, ag.is_paused
             ORDER BY ag.start_time DESC LIMIT 10
-        ''', (game_def['id'], user['id'])))
+        ''', tuple([game_def['id']] + list(access_params))))
         
         for g in active_games:
             g['start_time'] = g['start_time'].strftime('%b %d, %I:%M %p') if g.get('start_time') else ''
@@ -1760,13 +1780,9 @@ def complete_paused_game(game_id):
     conn = get_db_connection()
     user = get_current_user()
     try:
-        game = execute_query_one(conn, '''
-            SELECT id FROM active_games 
-            WHERE id = %s 
-            AND user_id = %s
-            AND game_id = 1 
-            AND is_complete = FALSE 
-        ''', (game_id, user['id']))
+        game = fetch_accessible_game(
+            conn, game_id, user,
+            extra_where='ag.game_id = 1 AND ag.is_complete = FALSE')
         
         if game:
             scores = execute_query(conn, '''
@@ -2216,10 +2232,7 @@ def delete_game_legacy(game_id):
     conn = get_db_connection()
     user = get_current_user()
     try:
-        game_check = execute_query_one(conn, '''
-            SELECT id FROM active_games 
-            WHERE id = %s AND user_id = %s
-        ''', (game_id, user['id']))
+        game_check = fetch_accessible_game(conn, game_id, user)
         
         if not game_check:
             return jsonify({'success': False, 'error': 'Game not found or access denied'}), 403

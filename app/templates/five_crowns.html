@@ -1753,9 +1753,12 @@ content %}
     });
 
     $("#pauseGame").click(function () {
+      var gameId = $(".game-board").data("game-id");
       $.ajax({
         url: "/api/games/five-crowns/pause",
         method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({ game_id: gameId }),
         success: function () {
           showGamePausedModal();
         },
@@ -1809,12 +1812,20 @@ content %}
       }, 1000);
     }
 
-    function redirectToFiveCrowns() {
-      window.location.href = "{{ url_for('main.five_crowns') }}";
+    var pendingFiveCrownsGameId = null;
+    function redirectToFiveCrowns(gameId) {
+      gameId = gameId || pendingFiveCrownsGameId || $(".game-board").data("game-id");
+      pendingFiveCrownsGameId = null;
+      if (gameId) {
+        window.location.href = "{{ url_for('main.five_crowns') }}?game_id=" + gameId;
+      } else {
+        window.location.href = "/game/five-crowns";
+      }
     }
 
     $(".resume-game").click(function () {
       const gameId = $(this).data("game-id");
+      pendingFiveCrownsGameId = gameId;
       $.ajax({
         url: `/api/games/five-crowns/resume/${gameId}`,
         method: "POST",
