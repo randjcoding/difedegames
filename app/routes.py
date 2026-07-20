@@ -86,8 +86,47 @@ def user_can_access_active_game(user, game):
     fam = user.get('family_id')
     return fam is not None and game.get('family_id') == fam
 
+def set_player_home_family(conn, player_id, target_family_id):
+    """Reassign a person's primary/home family via memberships (keeps the
+    one-primary invariant and, through the DB trigger, players.family_id).
+    Any prior *primary* membership is removed (a true move); other guest
+    memberships are preserved."""
+    current_primary = execute_query_one(conn, '''
+        SELECT family_id FROM player_family_memberships
+        WHERE player_id = %s AND is_primary
+    ''', (player_id,))
+    old_family_id = current_primary['family_id'] if current_primary else None
+    if old_family_id == target_family_id:
+        return
+    execute_modify(conn, '''
+        INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+        VALUES (%s, %s, FALSE, 'active', 'member')
+        ON CONFLICT (player_id, family_id) DO UPDATE SET status = 'active'
+    ''', (player_id, target_family_id))
+    execute_modify(conn, 'UPDATE player_family_memberships SET is_primary = FALSE WHERE player_id = %s', (player_id,))
+    execute_modify(conn, '''
+        UPDATE player_family_memberships SET is_primary = TRUE
+        WHERE player_id = %s AND family_id = %s
+    ''', (player_id, target_family_id))
+    if old_family_id is not None:
+        execute_modify(conn, '''
+            DELETE FROM player_family_memberships
+            WHERE player_id = %s AND family_id = %s
+        ''', (player_id, old_family_id))
+    execute_modify(conn, 'UPDATE users SET family_id = %s WHERE player_id = %s', (target_family_id, player_id))
+
+def is_family_lead(conn, user, family_id):
+    """True if the user leads the given family (or is super_admin)."""
+    if not user or not family_id:
+        return False
+    if user.get('role') == 'super_admin':
+        return True
+    fam = execute_query_one(conn, 'SELECT lead_user_id FROM families WHERE id = %s', (family_id,))
+    return bool(fam and fam.get('lead_user_id') == user.get('id'))
+
 def get_family_players(family_id, include_crew=False):
-    """Get all players for a family, optionally including crew family players"""
+    """Roster for a family from memberships (a person can belong to several
+    families), optionally including allied/crew family players as guests."""
     conn = get_db_connection()
     if not conn:
         return []
@@ -99,11 +138,13 @@ def get_family_players(family_id, include_crew=False):
                 FALSE as is_guest, NULL as guest_family_name,
                 p.family_id
             FROM players p
-            WHERE p.family_id = %s
+            JOIN player_family_memberships m ON m.player_id = p.id
+            WHERE m.family_id = %s AND m.status = 'active'
             ORDER BY p.first_name, p.last_name
         ''', (family_id,))
         
         result = list(family_players)
+        seen = {p['id'] for p in result}
         
         if include_crew and family_id:
             crew_families = execute_query(conn, '''
@@ -125,10 +166,14 @@ def get_family_players(family_id, include_crew=False):
                         TRUE as is_guest, %s as guest_family_name,
                         p.family_id
                     FROM players p
-                    WHERE p.family_id = %s
+                    JOIN player_family_memberships m ON m.player_id = p.id
+                    WHERE m.family_id = %s AND m.status = 'active'
                     ORDER BY p.first_name, p.last_name
                 ''', (cf['ally_name'], cf['ally_family_id']))
-                result.extend(list(crew_players))
+                for cp in crew_players:
+                    if cp['id'] not in seen:
+                        seen.add(cp['id'])
+                        result.append(cp)
         
         return result
     finally:
@@ -292,6 +337,20 @@ def admin():
     finally:
         conn.close()
 
+def notify_user(conn, user_id, ntype, title, message, data=None):
+    """Insert an in-app notification (best effort; caller commits)."""
+    if not user_id:
+        return
+    execute_modify(conn, '''
+        INSERT INTO notifications (user_id, type, title, message, data)
+        VALUES (%s, %s, %s, %s, %s)
+    ''', (user_id, ntype, title, message, json.dumps(data or {})))
+
+def notify_family_lead(conn, family_id, ntype, title, message, data=None):
+    lead = execute_query_one(conn, 'SELECT lead_user_id FROM families WHERE id = %s', (family_id,))
+    if lead and lead.get('lead_user_id'):
+        notify_user(conn, lead['lead_user_id'], ntype, title, message, data)
+
 @main.route('/my-team')
 @login_required
 def my_team():
@@ -303,15 +362,80 @@ def my_team():
             return redirect(url_for('main.dashboard'))
 
         family = execute_query_one(conn, 'SELECT * FROM families WHERE id = %s', (family_id,))
+        is_lead = is_family_lead(conn, user, family_id)
+        my_player_id = user.get('player_id')
+
+        # Active roster (people who belong to this family, home or guest).
         players = list(execute_query(conn, '''
             SELECT p.id, p.first_name, p.last_name,
                 COALESCE(p.display_name, p.first_name) as display_name,
-                p.user_id, p.email as player_email,
-                u.email as user_email, u.is_active, u.is_approved, u.role as user_role
-            FROM players p
-            LEFT JOIN users u ON p.user_id = u.id
-            WHERE p.family_id = %s
-            ORDER BY p.first_name, p.last_name
+                p.email as player_email,
+                m.is_primary AS is_home, m.role AS membership_role,
+                p.family_id AS home_family_id, hf.name AS home_family_name,
+                acc.id AS account_id, acc.email AS account_email
+            FROM player_family_memberships m
+            JOIN players p ON p.id = m.player_id
+            LEFT JOIN families hf ON hf.id = p.family_id
+            LEFT JOIN users acc ON acc.player_id = p.id
+            WHERE m.family_id = %s AND m.status = 'active'
+            ORDER BY m.is_primary DESC, p.first_name, p.last_name
+        ''', (family_id,)))
+
+        # Pending join/invite requests awaiting the lead's decision.
+        pending = list(execute_query(conn, '''
+            SELECT m.id AS membership_id, m.status, p.id AS player_id,
+                COALESCE(p.display_name, p.first_name) AS display_name,
+                hf.name AS home_family_name, acc.email AS account_email
+            FROM player_family_memberships m
+            JOIN players p ON p.id = m.player_id
+            LEFT JOIN families hf ON hf.id = p.family_id
+            LEFT JOIN users acc ON acc.player_id = p.id
+            WHERE m.family_id = %s AND m.status IN ('requested', 'invited')
+            ORDER BY m.joined_at DESC
+        ''', (family_id,)))
+
+        # The current user's own memberships (for switching primary family).
+        my_memberships = []
+        joinable_families = []
+        if my_player_id:
+            my_memberships = list(execute_query(conn, '''
+                SELECT m.id, m.family_id, f.name, m.is_primary, m.status
+                FROM player_family_memberships m
+                JOIN families f ON f.id = m.family_id
+                WHERE m.player_id = %s
+                ORDER BY m.is_primary DESC, f.name
+            ''', (my_player_id,)))
+            joinable_families = list(execute_query(conn, '''
+                SELECT id, name FROM families
+                WHERE id NOT IN (
+                    SELECT family_id FROM player_family_memberships WHERE player_id = %s
+                )
+                ORDER BY name
+            ''', (my_player_id,)))
+        else:
+            joinable_families = list(execute_query(conn,
+                'SELECT id, name FROM families ORDER BY name'))
+
+        # If the user has no identity yet, they can claim an unclaimed roster spot.
+        claimable = []
+        if not my_player_id:
+            claimable = list(execute_query(conn, '''
+                SELECT p.id, COALESCE(p.display_name, p.first_name) AS display_name
+                FROM player_family_memberships m
+                JOIN players p ON p.id = m.player_id
+                WHERE m.family_id = %s AND m.status = 'active'
+                  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.player_id = p.id)
+                ORDER BY display_name
+            ''', (family_id,)))
+
+        # Members with accounts are eligible to become lead.
+        lead_candidates = list(execute_query(conn, '''
+            SELECT acc.id AS user_id, COALESCE(p.display_name, p.first_name) AS display_name
+            FROM player_family_memberships m
+            JOIN players p ON p.id = m.player_id
+            JOIN users acc ON acc.player_id = p.id
+            WHERE m.family_id = %s AND m.status = 'active'
+            ORDER BY display_name
         ''', (family_id,)))
 
         alliances = list(execute_query(conn, '''
@@ -325,11 +449,13 @@ def my_team():
             AND (fa.requesting_family_id = %s OR fa.target_family_id = %s)
         ''', (family_id, family_id, family_id, family_id)))
 
-        is_lead = user.get('role') in ('family_admin', 'super_admin')
-
         return render_template('my_team.html',
             family=family, players=players, alliances=alliances,
-            is_lead=is_lead, user=user)
+            pending=pending, my_memberships=my_memberships,
+            joinable_families=joinable_families, claimable=claimable,
+            lead_candidates=lead_candidates,
+            lead_user_id=family.get('lead_user_id') if family else None,
+            my_player_id=my_player_id, is_lead=is_lead, user=user)
     finally:
         conn.close()
 
@@ -339,10 +465,10 @@ def team_add_player():
     conn = get_db_connection()
     user = get_current_user()
     try:
-        if user.get('role') not in ('family_admin', 'super_admin'):
-            return jsonify({'error': 'Only family leads can add players'}), 403
-        data = request.json
         family_id = user.get('family_id')
+        if not is_family_lead(conn, user, family_id):
+            return jsonify({'error': 'Only the family lead can add players'}), 403
+        data = request.json
         first_name = data.get('first_name', '').strip()
         last_name = data.get('last_name', '').strip()
         display_name = data.get('display_name', '').strip()
@@ -354,6 +480,11 @@ def team_add_player():
             INSERT INTO players (first_name, last_name, display_name, family_id, email)
             VALUES (%s, %s, %s, %s, %s) RETURNING id
         ''', (first_name, last_name, display_name, family_id, email))
+        execute_modify(conn, '''
+            INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+            VALUES (%s, %s, TRUE, 'active', 'member')
+            ON CONFLICT (player_id, family_id) DO NOTHING
+        ''', (new_player['id'], family_id))
         conn.commit()
         return jsonify({'id': new_player['id'], 'message': 'Player added'})
     except Exception as e:
@@ -368,20 +499,28 @@ def team_edit_player(player_id):
     conn = get_db_connection()
     user = get_current_user()
     try:
-        if user.get('role') not in ('family_admin', 'super_admin'):
-            return jsonify({'error': 'Only family leads can edit players'}), 403
-        player = execute_query_one(conn, 'SELECT * FROM players WHERE id = %s AND family_id = %s', (player_id, user.get('family_id')))
-        if not player:
+        family_id = user.get('family_id')
+        is_lead = is_family_lead(conn, user, family_id)
+        is_self = user.get('player_id') == player_id
+        if not is_lead and not is_self:
+            return jsonify({'error': 'You can only edit your own profile'}), 403
+        # Player must belong to this family (any membership).
+        member = execute_query_one(conn, '''
+            SELECT p.* FROM players p
+            JOIN player_family_memberships m ON m.player_id = p.id
+            WHERE p.id = %s AND m.family_id = %s
+        ''', (player_id, family_id))
+        if not member:
             return jsonify({'error': 'Player not found in your family'}), 404
 
         data = request.json
         execute_modify(conn, '''
             UPDATE players SET first_name = %s, last_name = %s, display_name = %s,
                 email = %s WHERE id = %s
-        ''', (data.get('first_name', player['first_name']),
-              data.get('last_name', player['last_name']),
-              data.get('display_name', player.get('display_name')),
-              data.get('email') or player.get('email'),
+        ''', (data.get('first_name', member['first_name']),
+              data.get('last_name', member['last_name']),
+              data.get('display_name', member.get('display_name')),
+              data.get('email') or member.get('email'),
               player_id))
         conn.commit()
         return jsonify({'message': 'Player updated'})
@@ -394,22 +533,60 @@ def team_edit_player(player_id):
 @main.route('/api/team/players/<int:player_id>', methods=['DELETE'])
 @login_required
 def team_remove_player(player_id):
+    """Remove a player's membership in the lead's family. If it was their only
+    family and they have no history, the player record is deleted too."""
     conn = get_db_connection()
     user = get_current_user()
     try:
-        if user.get('role') not in ('family_admin', 'super_admin'):
-            return jsonify({'error': 'Only family leads can remove players'}), 403
-        player = execute_query_one(conn, 'SELECT * FROM players WHERE id = %s AND family_id = %s', (player_id, user.get('family_id')))
-        if not player:
+        family_id = user.get('family_id')
+        if not is_family_lead(conn, user, family_id):
+            return jsonify({'error': 'Only the family lead can remove players'}), 403
+        membership = execute_query_one(conn, '''
+            SELECT m.*, p.first_name FROM player_family_memberships m
+            JOIN players p ON p.id = m.player_id
+            WHERE m.player_id = %s AND m.family_id = %s
+        ''', (player_id, family_id))
+        if not membership:
             return jsonify({'error': 'Player not found in your family'}), 404
+
         in_game = execute_query_one(conn, '''
             SELECT COUNT(*) as c FROM active_game_players agp
             JOIN active_games ag ON agp.active_game_id = ag.id
-            WHERE agp.player_id = %s AND ag.is_complete = FALSE
-        ''', (player_id,))
+            WHERE agp.player_id = %s AND ag.is_complete = FALSE AND ag.family_id = %s
+        ''', (player_id, family_id))
         if in_game and in_game['c'] > 0:
             return jsonify({'error': 'Cannot remove a player who is in an active game'}), 400
 
+        other = execute_query_one(conn, '''
+            SELECT COUNT(*) as c FROM player_family_memberships
+            WHERE player_id = %s AND family_id <> %s
+        ''', (player_id, family_id))
+        has_other_family = other and other['c'] > 0
+
+        # Drop the membership in this family.
+        execute_modify(conn, '''
+            DELETE FROM player_family_memberships WHERE player_id = %s AND family_id = %s
+        ''', (player_id, family_id))
+
+        if has_other_family:
+            # Ensure the person still has exactly one primary family.
+            remaining_primary = execute_query_one(conn, '''
+                SELECT 1 FROM player_family_memberships
+                WHERE player_id = %s AND is_primary AND status = 'active'
+            ''', (player_id,))
+            if not remaining_primary:
+                execute_modify(conn, '''
+                    UPDATE player_family_memberships SET is_primary = TRUE
+                    WHERE id = (
+                        SELECT id FROM player_family_memberships
+                        WHERE player_id = %s AND status = 'active'
+                        ORDER BY joined_at ASC, id ASC LIMIT 1
+                    )
+                ''', (player_id,))
+            conn.commit()
+            return jsonify({'message': 'Player removed from this family'})
+
+        # No other family: only delete the person if they have no history.
         history = execute_query_one(conn, '''
             SELECT 1 FROM game_scores WHERE player_id = %s
             UNION ALL
@@ -417,12 +594,292 @@ def team_remove_player(player_id):
             LIMIT 1
         ''', (player_id, player_id))
         if history:
-            return jsonify({'error': 'This player has recorded game history and cannot be removed. Their past games must be preserved.'}), 400
+            conn.rollback()
+            return jsonify({'error': 'This player has recorded game history and cannot be fully removed. Their past games must be preserved.'}), 400
 
         execute_modify(conn, 'DELETE FROM active_game_players WHERE player_id = %s', (player_id,))
+        execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (player_id,))
         execute_modify(conn, 'DELETE FROM players WHERE id = %s', (player_id,))
         conn.commit()
         return jsonify({'message': 'Player removed'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@main.route('/api/families', methods=['POST'])
+@login_required
+def create_family():
+    """Any user can start their own family and become its lead."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        data = request.json or {}
+        name = (data.get('name') or '').strip()
+        make_primary = bool(data.get('make_primary', True))
+        if not name:
+            return jsonify({'error': 'Family name is required'}), 400
+        existing = execute_query_one(conn, 'SELECT id FROM families WHERE lower(name) = lower(%s)', (name,))
+        if existing:
+            return jsonify({'error': 'A family with that name already exists'}), 400
+
+        new_family = execute_query_one(conn, '''
+            INSERT INTO families (name, lead_user_id, created_by_user_id)
+            VALUES (%s, %s, %s) RETURNING id
+        ''', (name, user['id'], user['id']))
+        new_family_id = new_family['id']
+
+        my_player_id = user.get('player_id')
+        if my_player_id:
+            if make_primary:
+                execute_modify(conn, '''
+                    UPDATE player_family_memberships SET is_primary = FALSE WHERE player_id = %s
+                ''', (my_player_id,))
+            execute_modify(conn, '''
+                INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+                VALUES (%s, %s, %s, 'active', 'lead')
+                ON CONFLICT (player_id, family_id)
+                DO UPDATE SET is_primary = EXCLUDED.is_primary, status = 'active', role = 'lead'
+            ''', (my_player_id, new_family_id, make_primary))
+            if make_primary:
+                execute_modify(conn, 'UPDATE users SET family_id = %s WHERE id = %s', (new_family_id, user['id']))
+        conn.commit()
+        return jsonify({'id': new_family_id, 'message': 'Family created'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@main.route('/api/families/<int:family_id>/request-join', methods=['POST'])
+@login_required
+def request_join_family(family_id):
+    """Ask a family's lead to add you (your player identity) to their roster."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        my_player_id = user.get('player_id')
+        if not my_player_id:
+            return jsonify({'error': 'Claim your player profile before joining other families'}), 400
+        family = execute_query_one(conn, 'SELECT id, name FROM families WHERE id = %s', (family_id,))
+        if not family:
+            return jsonify({'error': 'Family not found'}), 404
+        existing = execute_query_one(conn, '''
+            SELECT status FROM player_family_memberships WHERE player_id = %s AND family_id = %s
+        ''', (my_player_id, family_id))
+        if existing:
+            if existing['status'] == 'active':
+                return jsonify({'error': 'You are already a member of that family'}), 400
+            return jsonify({'error': 'A request is already pending'}), 400
+
+        execute_modify(conn, '''
+            INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+            VALUES (%s, %s, FALSE, 'requested', 'member')
+        ''', (my_player_id, family_id))
+        notify_family_lead(conn, family_id, 'family_join_request',
+            'New family join request',
+            f"{user.get('first_name','A player')} wants to join {family['name']}.",
+            {'player_id': my_player_id})
+        conn.commit()
+        return jsonify({'message': 'Request sent to the family lead'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@main.route('/api/memberships/<int:membership_id>/decide', methods=['POST'])
+@login_required
+def decide_membership(membership_id):
+    """Family lead approves or denies a pending join/invite request."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        decision = (request.json or {}).get('decision')
+        if decision not in ('approve', 'deny'):
+            return jsonify({'error': 'Invalid decision'}), 400
+        membership = execute_query_one(conn, '''
+            SELECT m.*, p.display_name, p.first_name FROM player_family_memberships m
+            JOIN players p ON p.id = m.player_id WHERE m.id = %s
+        ''', (membership_id,))
+        if not membership:
+            return jsonify({'error': 'Request not found'}), 404
+        if not is_family_lead(conn, user, membership['family_id']):
+            return jsonify({'error': 'Only the family lead can decide this'}), 403
+        if membership['status'] not in ('requested', 'invited'):
+            return jsonify({'error': 'This request was already handled'}), 400
+
+        target_account = execute_query_one(conn, 'SELECT id FROM users WHERE player_id = %s', (membership['player_id'],))
+        family = execute_query_one(conn, 'SELECT name FROM families WHERE id = %s', (membership['family_id'],))
+        if decision == 'approve':
+            execute_modify(conn, "UPDATE player_family_memberships SET status = 'active' WHERE id = %s", (membership_id,))
+            if target_account:
+                notify_user(conn, target_account['id'], 'family_join_approved',
+                    'Join request approved',
+                    f"You are now a member of {family['name']}.")
+            msg = 'Member added'
+        else:
+            execute_modify(conn, 'DELETE FROM player_family_memberships WHERE id = %s', (membership_id,))
+            if target_account:
+                notify_user(conn, target_account['id'], 'family_join_denied',
+                    'Join request declined',
+                    f"Your request to join {family['name']} was declined.")
+            msg = 'Request declined'
+        conn.commit()
+        return jsonify({'message': msg})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@main.route('/api/players/<int:player_id>/set-primary', methods=['POST'])
+@login_required
+def set_primary_family(player_id):
+    """Set which family is a person's primary/home. Allowed for the person
+    themselves or a lead of the target family."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        target_family_id = (request.json or {}).get('family_id')
+        if not target_family_id:
+            return jsonify({'error': 'family_id is required'}), 400
+        is_self = user.get('player_id') == player_id
+        if not is_self and not is_family_lead(conn, user, target_family_id):
+            return jsonify({'error': 'Not allowed'}), 403
+        membership = execute_query_one(conn, '''
+            SELECT id FROM player_family_memberships
+            WHERE player_id = %s AND family_id = %s AND status = 'active'
+        ''', (player_id, target_family_id))
+        if not membership:
+            return jsonify({'error': 'That person is not an active member of this family'}), 400
+
+        execute_modify(conn, 'UPDATE player_family_memberships SET is_primary = FALSE WHERE player_id = %s', (player_id,))
+        execute_modify(conn, 'UPDATE player_family_memberships SET is_primary = TRUE WHERE id = %s', (membership['id'],))
+        # Keep the person's account "home" pointer in step.
+        execute_modify(conn, 'UPDATE users SET family_id = %s WHERE player_id = %s', (target_family_id, player_id))
+        conn.commit()
+        return jsonify({'message': 'Primary family updated'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@main.route('/api/families/<int:family_id>/transfer-lead', methods=['POST'])
+@login_required
+def transfer_lead(family_id):
+    """Current lead (or super admin) hands leadership to another member."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        if not is_family_lead(conn, user, family_id):
+            return jsonify({'error': 'Only the current lead can transfer leadership'}), 403
+        new_lead_user_id = (request.json or {}).get('user_id')
+        if not new_lead_user_id:
+            return jsonify({'error': 'Choose a member to lead'}), 400
+        new_lead = execute_query_one(conn, '''
+            SELECT u.id, u.player_id FROM users u WHERE u.id = %s
+        ''', (new_lead_user_id,))
+        if not new_lead or not new_lead.get('player_id'):
+            return jsonify({'error': 'That account has no player profile'}), 400
+        member = execute_query_one(conn, '''
+            SELECT 1 FROM player_family_memberships
+            WHERE player_id = %s AND family_id = %s AND status = 'active'
+        ''', (new_lead['player_id'], family_id))
+        if not member:
+            return jsonify({'error': 'The new lead must be an active member of this family'}), 400
+
+        execute_modify(conn, 'UPDATE families SET lead_user_id = %s WHERE id = %s', (new_lead_user_id, family_id))
+        execute_modify(conn, "UPDATE player_family_memberships SET role = 'member' WHERE family_id = %s", (family_id,))
+        execute_modify(conn, "UPDATE player_family_memberships SET role = 'lead' WHERE family_id = %s AND player_id = %s", (family_id, new_lead['player_id']))
+        family = execute_query_one(conn, 'SELECT name FROM families WHERE id = %s', (family_id,))
+        notify_user(conn, new_lead_user_id, 'family_lead_transfer',
+            'You are now a family lead',
+            f"You have been made lead of {family['name']}.")
+        conn.commit()
+        return jsonify({'message': 'Leadership transferred'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@main.route('/api/players/<int:player_id>/claim', methods=['POST'])
+@login_required
+def claim_player(player_id):
+    """A logged-in user without a player identity requests to own an unclaimed
+    roster spot. The family lead must approve."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        if user.get('player_id'):
+            return jsonify({'error': 'Your account already owns a player profile'}), 400
+        player = execute_query_one(conn, '''
+            SELECT p.*, (SELECT COUNT(*) FROM users u WHERE u.player_id = p.id) AS claimed
+            FROM players p WHERE p.id = %s
+        ''', (player_id,))
+        if not player:
+            return jsonify({'error': 'Player not found'}), 404
+        if player['claimed']:
+            return jsonify({'error': 'That profile is already owned by another account'}), 400
+        # Must share a family with the profile.
+        shared = execute_query_one(conn, '''
+            SELECT m.family_id FROM player_family_memberships m
+            WHERE m.player_id = %s AND m.family_id = %s AND m.status = 'active'
+        ''', (player_id, user.get('family_id')))
+        if not shared:
+            return jsonify({'error': 'You can only claim a profile in your own family'}), 400
+
+        notify_family_lead(conn, user.get('family_id'), 'player_claim_request',
+            'Profile claim request',
+            f"{user.get('first_name','A user')} ({user.get('email')}) wants to own the profile "
+            f"\"{player.get('display_name') or player.get('first_name')}\".",
+            {'player_id': player_id, 'user_id': user['id']})
+        conn.commit()
+        return jsonify({'message': 'Claim request sent to your family lead'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@main.route('/api/players/<int:player_id>/approve-claim', methods=['POST'])
+@login_required
+def approve_claim(player_id):
+    """Family lead links a user account to a player profile (identity)."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        claim_user_id = (request.json or {}).get('user_id')
+        if not claim_user_id:
+            return jsonify({'error': 'user_id is required'}), 400
+        player = execute_query_one(conn, 'SELECT * FROM players WHERE id = %s', (player_id,))
+        if not player:
+            return jsonify({'error': 'Player not found'}), 404
+        if not is_family_lead(conn, user, player.get('family_id')):
+            return jsonify({'error': 'Only the family lead can approve claims'}), 403
+        already = execute_query_one(conn, 'SELECT id FROM users WHERE player_id = %s', (player_id,))
+        if already:
+            return jsonify({'error': 'That profile is already owned'}), 400
+        claimer = execute_query_one(conn, 'SELECT id, player_id FROM users WHERE id = %s', (claim_user_id,))
+        if not claimer:
+            return jsonify({'error': 'Account not found'}), 404
+        if claimer.get('player_id'):
+            return jsonify({'error': 'That account already owns a profile'}), 400
+
+        execute_modify(conn, 'UPDATE users SET player_id = %s WHERE id = %s', (player_id, claim_user_id))
+        execute_modify(conn, '''
+            INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+            VALUES (%s, %s, TRUE, 'active', 'member')
+            ON CONFLICT (player_id, family_id) DO UPDATE SET status = 'active'
+        ''', (player_id, player.get('family_id')))
+        notify_user(conn, claim_user_id, 'player_claim_approved',
+            'Profile claim approved',
+            'You now own your player profile and your stats follow you everywhere.')
+        conn.commit()
+        return jsonify({'message': 'Profile ownership granted'})
     except Exception as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 500
@@ -437,9 +894,126 @@ def move_player_family():
         data = request.json
         player_id = data['player_id']
         target_family_id = data['target_family_id']
-        execute_modify(conn, 'UPDATE players SET family_id = %s WHERE id = %s', (target_family_id, player_id))
+        set_player_home_family(conn, player_id, target_family_id)
         conn.commit()
         return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+def _player_history_counts(conn, player_id):
+    row = execute_query_one(conn, '''
+        SELECT
+            (SELECT COUNT(*) FROM game_scores WHERE player_id = %s) AS scores,
+            (SELECT COUNT(*) FROM game_stats WHERE winner_id = %s) AS wins,
+            (SELECT COUNT(DISTINCT active_game_id) FROM active_game_players WHERE player_id = %s) AS games,
+            (SELECT COUNT(*) FROM player_family_memberships WHERE player_id = %s) AS families,
+            (SELECT COUNT(*) FROM users WHERE player_id = %s) AS accounts
+    ''', (player_id, player_id, player_id, player_id, player_id))
+    return dict(row) if row else {}
+
+@main.route('/api/admin/merge-preview')
+@admin_required
+def merge_preview():
+    conn = get_db_connection()
+    try:
+        keep_id = request.args.get('keep_id', type=int)
+        dup_id = request.args.get('dup_id', type=int)
+        if not keep_id or not dup_id or keep_id == dup_id:
+            return jsonify({'error': 'Pick two different players'}), 400
+        def info(pid):
+            p = execute_query_one(conn, '''
+                SELECT p.id, COALESCE(p.display_name, p.first_name) AS display_name,
+                    p.first_name, p.last_name, f.name AS family_name
+                FROM players p LEFT JOIN families f ON f.id = p.family_id WHERE p.id = %s
+            ''', (pid,))
+            if not p:
+                return None
+            d = dict(p)
+            d['history'] = _player_history_counts(conn, pid)
+            return d
+        keep, dup = info(keep_id), info(dup_id)
+        if not keep or not dup:
+            return jsonify({'error': 'Player not found'}), 404
+        return jsonify({'keep': keep, 'dup': dup})
+    finally:
+        conn.close()
+
+@main.route('/api/admin/merge-players', methods=['POST'])
+@admin_required
+def merge_players():
+    """Merge a duplicate person into a canonical one. All history (scores,
+    wins, games, memberships) is repointed to the kept player, then the
+    duplicate is deleted. Irreversible."""
+    conn = get_db_connection()
+    try:
+        data = request.json or {}
+        keep_id = data.get('keep_id')
+        dup_id = data.get('dup_id')
+        if not keep_id or not dup_id:
+            return jsonify({'error': 'keep_id and dup_id are required'}), 400
+        if keep_id == dup_id:
+            return jsonify({'error': 'Cannot merge a player into itself'}), 400
+        keep = execute_query_one(conn, 'SELECT id FROM players WHERE id = %s', (keep_id,))
+        dup = execute_query_one(conn, 'SELECT id FROM players WHERE id = %s', (dup_id,))
+        if not keep or not dup:
+            return jsonify({'error': 'Player not found'}), 404
+
+        # Repoint score tables, dropping duplicate rows that would collide on
+        # the (game, player, round) unique keys.
+        for tbl in ('game_scores', 'five_crowns_scores'):
+            execute_modify(conn, f'''
+                DELETE FROM {tbl} a WHERE a.player_id = %s AND EXISTS (
+                    SELECT 1 FROM {tbl} b
+                    WHERE b.active_game_id = a.active_game_id
+                      AND b.round_number = a.round_number AND b.player_id = %s)
+            ''', (dup_id, keep_id))
+            execute_modify(conn, f'UPDATE {tbl} SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
+
+        # Roster rows: avoid two entries for the same game.
+        execute_modify(conn, '''
+            DELETE FROM active_game_players a WHERE a.player_id = %s AND EXISTS (
+                SELECT 1 FROM active_game_players b
+                WHERE b.active_game_id = a.active_game_id AND b.player_id = %s)
+        ''', (dup_id, keep_id))
+        execute_modify(conn, 'UPDATE active_game_players SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
+
+        execute_modify(conn, 'UPDATE game_stats SET winner_id = %s WHERE winner_id = %s', (keep_id, dup_id))
+
+        # Memberships: bring over families the kept player isn't already in.
+        execute_modify(conn, '''
+            INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+            SELECT %s, d.family_id, FALSE, d.status, 'member'
+            FROM player_family_memberships d
+            WHERE d.player_id = %s AND NOT EXISTS (
+                SELECT 1 FROM player_family_memberships k
+                WHERE k.player_id = %s AND k.family_id = d.family_id)
+        ''', (keep_id, dup_id, keep_id))
+        execute_modify(conn, 'DELETE FROM player_family_memberships WHERE player_id = %s', (dup_id,))
+
+        # Guarantee exactly one primary for the kept player.
+        has_primary = execute_query_one(conn, '''
+            SELECT 1 FROM player_family_memberships WHERE player_id = %s AND is_primary
+        ''', (keep_id,))
+        if not has_primary:
+            execute_modify(conn, '''
+                UPDATE player_family_memberships SET is_primary = TRUE
+                WHERE id = (SELECT id FROM player_family_memberships
+                            WHERE player_id = %s ORDER BY joined_at ASC, id ASC LIMIT 1)
+            ''', (keep_id,))
+
+        # Account identity: move an owning account if the kept player has none.
+        execute_modify(conn, '''
+            UPDATE users SET player_id = %s
+            WHERE player_id = %s AND NOT EXISTS (SELECT 1 FROM users WHERE player_id = %s)
+        ''', (keep_id, dup_id, keep_id))
+        execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (dup_id,))
+
+        execute_modify(conn, 'DELETE FROM players WHERE id = %s', (dup_id,))
+        conn.commit()
+        return jsonify({'success': True, 'message': 'Players merged'})
     except Exception as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 500
@@ -493,13 +1067,15 @@ def admin_update_player(player_id):
         
         display_name = data.get('display_name') or data.get('first_name', player['first_name'])
         execute_modify(conn, '''
-            UPDATE players SET first_name = %s, last_name = %s, display_name = %s, family_id = %s
+            UPDATE players SET first_name = %s, last_name = %s, display_name = %s
             WHERE id = %s
         ''', (data.get('first_name', player['first_name']),
               data.get('last_name', player['last_name']),
               display_name,
-              data.get('family_id', player['family_id']),
               player_id))
+        new_family_id = data.get('family_id')
+        if new_family_id and int(new_family_id) != player['family_id']:
+            set_player_home_family(conn, player_id, int(new_family_id))
         
         if data.get('create_account') and data.get('email'):
             from werkzeug.security import generate_password_hash
@@ -561,7 +1137,7 @@ def bulk_move_players():
         player_ids = data.get('player_ids', [])
         target_family_id = data.get('target_family_id')
         for pid in player_ids:
-            execute_modify(conn, 'UPDATE players SET family_id = %s WHERE id = %s', (target_family_id, pid))
+            set_player_home_family(conn, pid, target_family_id)
         conn.commit()
         return jsonify({'success': True, 'moved': len(player_ids)})
     except Exception as e:
@@ -631,51 +1207,49 @@ def family_page(family_id):
         
         leader = execute_query_one(conn, '''
             SELECT u.id, u.email, u.first_name, u.last_name, u.role
-            FROM users u WHERE u.family_id = %s AND u.role IN ('family_admin', 'super_admin')
-            ORDER BY u.role DESC, u.created_at ASC LIMIT 1
+            FROM users u
+            JOIN families f ON f.lead_user_id = u.id
+            WHERE f.id = %s
         ''', (family_id,))
         
         members = list(execute_query(conn, '''
             SELECT p.id, p.first_name, p.last_name,
                 COALESCE(p.display_name, p.first_name) as display_name,
-                p.user_id
-            FROM players p WHERE p.family_id = %s
-            ORDER BY p.first_name, p.last_name
+                m.is_primary AS is_home
+            FROM player_family_memberships m
+            JOIN players p ON p.id = m.player_id
+            WHERE m.family_id = %s AND m.status = 'active'
+            ORDER BY m.is_primary DESC, p.first_name, p.last_name
         ''', (family_id,)))
         
         stats = list(execute_query(conn, '''
-            WITH FamilyGames AS (
-                SELECT DISTINCT ag.id as game_id, g.name as game_name, g.slug
-                FROM active_games ag
-                JOIN active_game_players agp ON ag.id = agp.active_game_id
-                JOIN players p ON agp.player_id = p.id
-                JOIN games g ON ag.game_id = g.id
-                WHERE p.family_id = %s AND ag.is_complete = TRUE
-            )
-            SELECT game_name, slug, COUNT(*) as games_played
-            FROM FamilyGames GROUP BY game_name, slug ORDER BY games_played DESC
+            SELECT g.name as game_name, g.slug, COUNT(*) as games_played
+            FROM active_games ag
+            JOIN games g ON ag.game_id = g.id
+            WHERE ag.family_id = %s AND ag.is_complete = TRUE
+            GROUP BY g.name, g.slug ORDER BY games_played DESC
         ''', (family_id,)))
         
+        # Members ranked by their LIFETIME record (stats follow the person
+        # across every family they play in).
         top_players = list(execute_query(conn, '''
             SELECT p.id, COALESCE(p.display_name, p.first_name) as display_name,
                 COUNT(DISTINCT gs.game_id) as wins,
                 COUNT(DISTINCT agp.active_game_id) as total_games
-            FROM players p
-            JOIN active_game_players agp ON p.id = agp.player_id
-            JOIN active_games ag ON agp.active_game_id = ag.id AND ag.is_complete = TRUE
+            FROM player_family_memberships m
+            JOIN players p ON p.id = m.player_id
+            LEFT JOIN active_game_players agp ON agp.player_id = p.id
+            LEFT JOIN active_games ag ON agp.active_game_id = ag.id AND ag.is_complete = TRUE
             LEFT JOIN game_stats gs ON gs.game_id = ag.id AND gs.winner_id = p.id
-            WHERE p.family_id = %s
+            WHERE m.family_id = %s AND m.status = 'active'
             GROUP BY p.id, p.display_name
             ORDER BY wins DESC, total_games DESC
             LIMIT 10
         ''', (family_id,)))
         
         total_games = execute_query_one(conn, '''
-            SELECT COUNT(DISTINCT ag.id) as cnt
-            FROM active_games ag
-            JOIN active_game_players agp ON ag.id = agp.active_game_id
-            JOIN players p ON agp.player_id = p.id
-            WHERE p.family_id = %s AND ag.is_complete = TRUE
+            SELECT COUNT(*) as cnt FROM active_games ag
+            WHERE ag.family_id = %s AND ag.is_complete = TRUE
         ''', (family_id,))
         
         is_own_family = user.get('family_id') == family_id
@@ -806,6 +1380,13 @@ def players():
             RETURNING id
         ''', (data['first_name'], data['last_name'], display_name, user['id'], family_id))
         
+        if family_id:
+            execute_modify(conn, '''
+                INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+                VALUES (%s, %s, TRUE, 'active', 'member')
+                ON CONFLICT (player_id, family_id) DO NOTHING
+            ''', (player['id'], family_id))
+        
         player = execute_query_one(conn, '''
             SELECT p.id, p.first_name, p.last_name,
                 COALESCE(p.display_name, p.first_name) as display_name,
@@ -818,45 +1399,8 @@ def players():
         return jsonify(dict(player))
     
     include_crew = request.args.get('include_crew', 'false') == 'true'
-    
-    family_players = execute_query(conn, '''
-        SELECT p.id, p.first_name, p.last_name,
-            COALESCE(p.display_name, p.first_name) as display_name,
-            FALSE as is_guest, NULL as guest_family_name,
-            p.family_id
-        FROM players p
-        WHERE p.family_id = %s
-        ORDER BY p.first_name, p.last_name
-    ''', (family_id,))
-    
-    result = [dict(p) for p in family_players]
-    
-    if include_crew and family_id:
-        crew_families = execute_query(conn, '''
-            SELECT CASE WHEN requesting_family_id = %s THEN target_family_id
-                        ELSE requesting_family_id END as ally_family_id,
-                   CASE WHEN requesting_family_id = %s THEN tf.name
-                        ELSE rf.name END as ally_name
-            FROM family_alliances fa
-            JOIN families rf ON fa.requesting_family_id = rf.id
-            JOIN families tf ON fa.target_family_id = tf.id
-            WHERE fa.status = 'accepted'
-              AND (fa.requesting_family_id = %s OR fa.target_family_id = %s)
-        ''', (family_id, family_id, family_id, family_id))
-        
-        for cf in crew_families:
-            crew_players = execute_query(conn, '''
-                SELECT p.id, p.first_name, p.last_name,
-                    COALESCE(p.display_name, p.first_name) as display_name,
-                    TRUE as is_guest, %s as guest_family_name,
-                    p.family_id
-                FROM players p
-                WHERE p.family_id = %s
-                ORDER BY p.first_name, p.last_name
-            ''', (cf['ally_name'], cf['ally_family_id']))
-            result.extend([dict(cp) for cp in crew_players])
-    
     conn.close()
+    result = [dict(p) for p in get_family_players(family_id, include_crew=include_crew)]
     return jsonify(result)
 
 @main.route('/api/scores', methods=['POST'])

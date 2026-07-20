@@ -180,6 +180,7 @@ def register():
             # Find or create family
             cursor.execute('SELECT id FROM families WHERE name = %s', (family_name,))
             family_row = cursor.fetchone()
+            is_new_family = False
             if family_row:
                 family_id = family_row['id']
             else:
@@ -187,6 +188,7 @@ def register():
                     'INSERT INTO families (name) VALUES (%s) RETURNING id',
                     (family_name,))
                 family_id = cursor.fetchone()['id']
+                is_new_family = True
 
             # Create user account
             password_hash = generate_password_hash(password)
@@ -205,6 +207,24 @@ def register():
                 return render_template('auth/register.html')
                 
             user_id = user_result['id']
+
+            # Give the new account a player identity so their stats follow them,
+            # and record membership in their family (primary). Whoever creates a
+            # brand-new family leads it.
+            cursor.execute('''
+                INSERT INTO players (first_name, last_name, display_name, user_id, family_id, email)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+            ''', (first_name, last_name, first_name, user_id, family_id, email))
+            player_id = cursor.fetchone()['id']
+            cursor.execute('UPDATE users SET player_id = %s WHERE id = %s', (player_id, user_id))
+            cursor.execute('''
+                INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+                VALUES (%s, %s, TRUE, 'active', %s)
+                ON CONFLICT (player_id, family_id) DO NOTHING
+            ''', (player_id, family_id, 'lead' if is_new_family else 'member'))
+            if is_new_family:
+                cursor.execute('UPDATE families SET lead_user_id = %s, created_by_user_id = %s WHERE id = %s',
+                               (user_id, user_id, family_id))
             conn.commit()
 
             # Create verification token

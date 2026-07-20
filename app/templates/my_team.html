@@ -50,6 +50,7 @@
     justify-content: space-between;
     align-items: center;
   }
+  .section-card .card-body { padding: 1rem; }
 
   .player-row {
     display: flex;
@@ -80,43 +81,29 @@
     font-size: 0.75rem;
     color: var(--df-muted);
   }
-  .player-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .player-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
   .player-actions .btn {
     padding: 3px 8px;
     font-size: 0.72rem;
     border-radius: 6px;
   }
 
-  .badge-login { background: #10b981; color: #fff; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; }
-  .badge-nologin { background: var(--df-border); color: var(--df-muted); font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; }
+  .tag { font-size: 0.62rem; padding: 2px 7px; border-radius: 10px; font-weight: 700; letter-spacing: .02em; }
+  .tag-home { background: var(--df-accent); color: var(--df-btn-primary-text); }
+  .tag-guest { background: var(--df-border); color: var(--df-muted); }
+  .tag-lead { background: #f59e0b; color: #1a1a1a; }
+  .tag-login { background: #10b981; color: #fff; }
+  .tag-nologin { background: var(--df-border); color: var(--df-muted); }
 
-  .ally-row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.6rem 1rem;
-    border-bottom: 1px solid var(--df-border, #2a2a4a);
-  }
+  .ally-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1rem; border-bottom: 1px solid var(--df-border, #2a2a4a); }
   .ally-row:last-child { border-bottom: none; }
-  .ally-icon {
-    width: 36px; height: 36px;
-    border-radius: 50%;
-    background: var(--df-card-header);
-    color: var(--df-accent);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 0.9rem;
-    flex-shrink: 0;
-  }
+  .ally-icon { width: 36px; height: 36px; border-radius: 50%; background: var(--df-card-header); color: var(--df-accent); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; flex-shrink: 0; }
 
-  .modal-content {
-    background: var(--df-surface) !important;
-    color: var(--df-text) !important;
-  }
-  .modal-header {
-    background: var(--df-card-header) !important;
-    color: var(--df-dt-header-text) !important;
-    border-bottom: 2px solid var(--df-accent);
-  }
+  .form-select, .form-control { background: var(--df-surface); color: var(--df-text); border: 1px solid var(--df-border); }
+  .form-select:focus, .form-control:focus { background: var(--df-surface); color: var(--df-text); }
+
+  .modal-content { background: var(--df-surface) !important; color: var(--df-text) !important; }
+  .modal-header { background: var(--df-card-header) !important; color: var(--df-dt-header-text) !important; border-bottom: 2px solid var(--df-accent); }
 
   @media (max-width: 768px) {
     .team-hero { padding: 1rem; }
@@ -138,7 +125,7 @@
           <i class="fas fa-house-user me-1"></i>
           {{ family.name }} Family
           {% if is_lead %}
-          <span class="badge ms-2" style="background:var(--df-accent);color:var(--df-btn-primary-text);font-size:0.7rem;">Team Lead</span>
+          <span class="tag tag-lead ms-2">Team Lead</span>
           {% endif %}
         </p>
       </div>
@@ -154,7 +141,7 @@
     <div class="col-4">
       <div class="team-stat">
         <div class="num">{{ players|length }}</div>
-        <div class="lbl">Players</div>
+        <div class="lbl">Members</div>
       </div>
     </div>
     <div class="col-4">
@@ -165,18 +152,44 @@
     </div>
     <div class="col-4">
       <div class="team-stat">
-        <div class="num" id="loginCount">{{ players|selectattr('user_email')|list|length }}</div>
+        <div class="num">{{ players|selectattr('account_email')|list|length }}</div>
         <div class="lbl">Can Log In</div>
       </div>
     </div>
   </div>
 
-  <!-- Players List -->
+  {% if is_lead and pending %}
+  <!-- Pending requests -->
+  <div class="section-card">
+    <div class="card-header"><span><i class="fas fa-user-clock me-2"></i>Pending Requests ({{ pending|length }})</span></div>
+    <div class="card-body p-0">
+      {% for r in pending %}
+      <div class="player-row">
+        <div class="player-avatar">{{ r.display_name[0]|upper }}</div>
+        <div class="player-info">
+          <div class="name">{{ r.display_name }}</div>
+          <div class="sub">
+            {% if r.status == 'requested' %}Wants to join{% else %}Invited{% endif %}
+            {% if r.home_family_name %}&middot; from {{ r.home_family_name }}{% endif %}
+            {% if r.account_email %}&middot; {{ r.account_email }}{% endif %}
+          </div>
+        </div>
+        <div class="player-actions">
+          <button class="btn btn-success decide-btn" data-id="{{ r.membership_id }}" data-decision="approve"><i class="fas fa-check"></i> Approve</button>
+          <button class="btn btn-outline-danger decide-btn" data-id="{{ r.membership_id }}" data-decision="deny"><i class="fas fa-times"></i></button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Members List -->
   <div class="section-card">
     <div class="card-header">
-      <span><i class="fas fa-users me-2"></i>Players ({{ players|length }})</span>
+      <span><i class="fas fa-users me-2"></i>Members ({{ players|length }})</span>
       {% if players|length > 5 %}
-      <input type="text" id="playerSearch" class="form-control form-control-sm" placeholder="Search..." style="max-width:180px;background:var(--df-surface);color:var(--df-text);border:1px solid var(--df-border);">
+      <input type="text" id="playerSearch" class="form-control form-control-sm" placeholder="Search..." style="max-width:180px;">
       {% endif %}
     </div>
     <div class="card-body p-0" id="playerList">
@@ -184,69 +197,123 @@
       <div class="player-row" data-search="{{ p.display_name|lower }} {{ p.first_name|lower }} {{ p.last_name|lower }}">
         <div class="player-avatar">{{ p.display_name[0]|upper }}</div>
         <div class="player-info">
-          <div class="name">{{ p.display_name }}</div>
+          <div class="name">
+            {{ p.display_name }}
+            {% if p.is_home %}<span class="tag tag-home ms-1">Home</span>{% else %}<span class="tag tag-guest ms-1">Guest &middot; {{ p.home_family_name }}</span>{% endif %}
+            {% if p.account_id and p.account_id == lead_user_id %}<span class="tag tag-lead ms-1">Lead</span>{% endif %}
+          </div>
           <div class="sub">
             {{ p.first_name }} {{ p.last_name }}
-            {% if p.user_email %}
-            <span class="badge-login ms-1"><i class="fas fa-check"></i> Login</span>
-            {% else %}
-            <span class="badge-nologin ms-1">No Login</span>
-            {% endif %}
-            {% if p.player_email %}<span class="ms-1">{{ p.player_email }}</span>{% endif %}
+            {% if p.account_email %}<span class="tag tag-login ms-1"><i class="fas fa-check"></i> {{ p.account_email }}</span>{% else %}<span class="tag tag-nologin ms-1">No Login</span>{% endif %}
           </div>
         </div>
-        {% if is_lead %}
         <div class="player-actions">
+          {% if is_lead and p.is_home %}
+          <button class="btn btn-outline-secondary set-primary-btn" data-id="{{ p.id }}" title="Already home" disabled><i class="fas fa-house-user"></i></button>
+          {% elif is_lead %}
+          <button class="btn btn-outline-secondary set-primary-btn" data-id="{{ p.id }}" title="Make this their home family"><i class="fas fa-house-user"></i></button>
+          {% endif %}
+          {% if is_lead or p.id == my_player_id %}
           <button class="btn btn-outline-secondary edit-player-btn"
             data-id="{{ p.id }}" data-first="{{ p.first_name }}" data-last="{{ p.last_name }}"
             data-display="{{ p.display_name }}" data-email="{{ p.player_email or '' }}">
             <i class="fas fa-pen"></i>
           </button>
-          <button class="btn btn-outline-danger remove-player-btn" data-id="{{ p.id }}" data-name="{{ p.display_name }}">
-            <i class="fas fa-user-minus"></i>
-          </button>
+          {% endif %}
+          {% if is_lead and p.account_id != lead_user_id %}
+          <button class="btn btn-outline-danger remove-player-btn" data-id="{{ p.id }}" data-name="{{ p.display_name }}"><i class="fas fa-user-minus"></i></button>
+          {% endif %}
         </div>
-        {% endif %}
       </div>
       {% endfor %}
       {% if not players %}
-      <div class="text-center py-4" style="color:var(--df-muted);">
-        <i class="fas fa-user-plus fa-2x mb-2 d-block"></i>
-        No players yet. Add your first player above!
-      </div>
+      <div class="text-center py-4" style="color:var(--df-muted);"><i class="fas fa-user-plus fa-2x mb-2 d-block"></i>No members yet. Add your first player above!</div>
       {% endif %}
     </div>
   </div>
 
+  <!-- Your membership / identity -->
+  <div class="section-card">
+    <div class="card-header"><span><i class="fas fa-id-badge me-2"></i>My Membership</span></div>
+    <div class="card-body">
+      {% if my_player_id %}
+        <p class="mb-2" style="font-size:0.9rem;">Your stats follow you across every family you play in. Set which family is your home.</p>
+        {% if my_memberships %}
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Home family</label>
+          <div class="d-flex gap-2 flex-wrap">
+            <select id="primaryFamilySelect" class="form-select" style="max-width:260px;">
+              {% for m in my_memberships %}
+              <option value="{{ m.family_id }}" {% if m.is_primary %}selected{% endif %}>{{ m.name }}{% if m.is_primary %} (current home){% endif %}</option>
+              {% endfor %}
+            </select>
+            <button class="btn" id="savePrimaryBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Set Home</button>
+          </div>
+        </div>
+        {% endif %}
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#joinFamilyModal"><i class="fas fa-people-arrows me-1"></i>Join another family</button>
+          <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#startFamilyModal"><i class="fas fa-flag me-1"></i>Start my own family</button>
+        </div>
+      {% else %}
+        <p class="mb-2" style="font-size:0.9rem;">You don't own a player profile yet. Claim one to track your stats and play across families.</p>
+        {% if claimable %}
+        <div class="d-flex gap-2 flex-wrap">
+          <select id="claimSelect" class="form-select" style="max-width:260px;">
+            {% for c in claimable %}<option value="{{ c.id }}">{{ c.display_name }}</option>{% endfor %}
+          </select>
+          <button class="btn" id="claimBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Request to own this profile</button>
+        </div>
+        <p class="mt-2 mb-0" style="font-size:0.78rem;color:var(--df-muted);">Your family lead will confirm it's really you.</p>
+        {% else %}
+        <p class="mb-0" style="color:var(--df-muted);font-size:0.88rem;">No unclaimed profiles in your family. Ask your family lead to add you.</p>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  {% if is_lead %}
+  <!-- Leadership -->
+  <div class="section-card">
+    <div class="card-header"><span><i class="fas fa-crown me-2"></i>Leadership</span></div>
+    <div class="card-body">
+      <p class="mb-2" style="font-size:0.9rem;">Hand the family lead role to another member who has an account.</p>
+      {% set transfer_options = lead_candidates|rejectattr('user_id', 'equalto', lead_user_id)|list %}
+      {% if transfer_options %}
+      <div class="d-flex gap-2 flex-wrap">
+        <select id="transferLeadSelect" class="form-select" style="max-width:260px;">
+          {% for c in transfer_options %}<option value="{{ c.user_id }}">{{ c.display_name }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-warning" id="transferLeadBtn" style="font-weight:600;">Transfer leadership</button>
+      </div>
+      {% else %}
+      <p class="mb-0" style="color:var(--df-muted);font-size:0.88rem;">No other members have accounts yet.</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Crew Alliances -->
   <div class="section-card">
-    <div class="card-header">
-      <span><i class="fas fa-handshake me-2"></i>Crew Alliances ({{ alliances|length }})</span>
-    </div>
+    <div class="card-header"><span><i class="fas fa-handshake me-2"></i>Crew Alliances ({{ alliances|length }})</span></div>
     <div class="card-body p-0">
       {% for a in alliances %}
       <div class="ally-row">
         <div class="ally-icon"><i class="fas fa-users"></i></div>
         <div class="flex-grow-1">
           <a href="{{ url_for('main.family_page', family_id=a.ally_id) }}" style="font-weight:600;font-size:0.9rem;">{{ a.ally_name }}</a>
-          <div style="font-size:0.72rem;color:var(--df-muted);">
-            <span class="badge bg-success" style="font-size:0.6rem;">Active</span>
-          </div>
+          <div style="font-size:0.72rem;color:var(--df-muted);"><span class="badge bg-success" style="font-size:0.6rem;">Active</span></div>
         </div>
       </div>
       {% endfor %}
       {% if not alliances %}
-      <div class="text-center py-3" style="color:var(--df-muted);font-size:0.88rem;">
-        No crew alliances yet. Find families on the <a href="{{ url_for('main.dashboard') }}">dashboard</a>.
-      </div>
+      <div class="text-center py-3" style="color:var(--df-muted);font-size:0.88rem;">No crew alliances yet. Find families on the <a href="{{ url_for('main.dashboard') }}">dashboard</a>.</div>
       {% endif %}
     </div>
   </div>
 
   <div class="text-center mb-4">
-    <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary" style="border-radius:8px;">
-      <i class="fas fa-arrow-left me-1"></i>Dashboard
-    </a>
+    <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary" style="border-radius:8px;"><i class="fas fa-arrow-left me-1"></i>Dashboard</a>
   </div>
 </div>
 
@@ -261,23 +328,11 @@
       <div class="modal-body">
         <form id="addPlayerForm">
           <div class="row g-2 mb-2">
-            <div class="col-6">
-              <label class="form-label fw-semibold">First Name</label>
-              <input type="text" class="form-control" id="apFirstName" required>
-            </div>
-            <div class="col-6">
-              <label class="form-label fw-semibold">Last Name</label>
-              <input type="text" class="form-control" id="apLastName" required>
-            </div>
+            <div class="col-6"><label class="form-label fw-semibold">First Name</label><input type="text" class="form-control" id="apFirstName" required></div>
+            <div class="col-6"><label class="form-label fw-semibold">Last Name</label><input type="text" class="form-control" id="apLastName" required></div>
           </div>
-          <div class="mb-2">
-            <label class="form-label fw-semibold">Display Name</label>
-            <input type="text" class="form-control" id="apDisplayName" required placeholder="Nickname shown in games">
-          </div>
-          <div class="mb-2">
-            <label class="form-label fw-semibold">Email <small class="text-muted">(optional)</small></label>
-            <input type="email" class="form-control" id="apEmail" placeholder="For future login access">
-          </div>
+          <div class="mb-2"><label class="form-label fw-semibold">Display Name</label><input type="text" class="form-control" id="apDisplayName" required placeholder="Nickname shown in games"></div>
+          <div class="mb-2"><label class="form-label fw-semibold">Email <small class="text-muted">(optional)</small></label><input type="email" class="form-control" id="apEmail" placeholder="For future login access"></div>
         </form>
       </div>
       <div class="modal-footer">
@@ -299,27 +354,61 @@
       <div class="modal-body">
         <input type="hidden" id="epId">
         <div class="row g-2 mb-2">
-          <div class="col-6">
-            <label class="form-label fw-semibold">First Name</label>
-            <input type="text" class="form-control" id="epFirstName" required>
-          </div>
-          <div class="col-6">
-            <label class="form-label fw-semibold">Last Name</label>
-            <input type="text" class="form-control" id="epLastName" required>
-          </div>
+          <div class="col-6"><label class="form-label fw-semibold">First Name</label><input type="text" class="form-control" id="epFirstName" required></div>
+          <div class="col-6"><label class="form-label fw-semibold">Last Name</label><input type="text" class="form-control" id="epLastName" required></div>
         </div>
-        <div class="mb-2">
-          <label class="form-label fw-semibold">Display Name</label>
-          <input type="text" class="form-control" id="epDisplayName" required>
-        </div>
-        <div class="mb-2">
-          <label class="form-label fw-semibold">Email</label>
-          <input type="email" class="form-control" id="epEmail">
-        </div>
+        <div class="mb-2"><label class="form-label fw-semibold">Display Name</label><input type="text" class="form-control" id="epDisplayName" required></div>
+        <div class="mb-2"><label class="form-label fw-semibold">Email</label><input type="email" class="form-control" id="epEmail"></div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn" id="saveEditPlayer" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Join Family Modal -->
+<div class="modal fade" id="joinFamilyModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-people-arrows me-2"></i>Join Another Family</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:0.88rem;color:var(--df-muted);">Send a request to that family's lead. Once approved you can play and be scored there, and it shows up in your stats.</p>
+        <select id="joinFamilySelect" class="form-select">
+          {% for f in joinable_families %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn" id="requestJoinBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Send Request</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Start Family Modal -->
+<div class="modal fade" id="startFamilyModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-flag me-2"></i>Start My Own Family</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label fw-semibold">Family Name</label>
+        <input type="text" class="form-control mb-2" id="newFamilyName" placeholder="e.g. The Smiths">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="newFamilyPrimary" checked>
+          <label class="form-check-label" for="newFamilyPrimary">Make this my home family</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn" id="createFamilyBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Create Family</button>
       </div>
     </div>
   </div>
@@ -329,35 +418,25 @@
 {% block scripts %}
 <script>
 $(function() {
+  function fail(xhr) {
+    var msg = (xhr.responseJSON && xhr.responseJSON.error) ? xhr.responseJSON.error : 'Something went wrong';
+    if (typeof AppModal !== 'undefined') AppModal.error('Error', msg); else alert(msg);
+  }
+  function post(url, body, ok) {
+    $.ajax({ url: url, method: 'POST', contentType: 'application/json',
+      data: JSON.stringify(body || {}), success: ok || function(){ location.reload(); }, error: fail });
+  }
+
   $("#playerSearch").on("input", function() {
     var q = $(this).val().toLowerCase();
-    $(".player-row").each(function() {
-      $(this).toggle($(this).data("search").indexOf(q) !== -1);
-    });
+    $(".player-row").each(function() { $(this).toggle($(this).data("search").indexOf(q) !== -1); });
   });
 
   $("#saveNewPlayer").click(function() {
-    var data = {
-      first_name: $("#apFirstName").val(),
-      last_name: $("#apLastName").val(),
-      display_name: $("#apDisplayName").val(),
-      email: $("#apEmail").val()
-    };
+    var data = { first_name: $("#apFirstName").val(), last_name: $("#apLastName").val(),
+      display_name: $("#apDisplayName").val(), email: $("#apEmail").val() };
     if (!data.first_name || !data.last_name || !data.display_name) return;
-
-    $.ajax({
-      url: "/api/team/players",
-      method: "POST",
-      contentType: "application/json",
-      data: JSON.stringify(data),
-      success: function() {
-        location.reload();
-      },
-      error: function(xhr) {
-        if (typeof AppModal !== 'undefined') AppModal.error('Error', xhr.responseJSON?.error || 'Failed');
-        else alert(xhr.responseJSON?.error || 'Failed');
-      }
-    });
+    post("/api/team/players", data);
   });
 
   $(".edit-player-btn").click(function() {
@@ -372,50 +451,55 @@ $(function() {
 
   $("#saveEditPlayer").click(function() {
     var pid = $("#epId").val();
-    var data = {
-      first_name: $("#epFirstName").val(),
-      last_name: $("#epLastName").val(),
-      display_name: $("#epDisplayName").val(),
-      email: $("#epEmail").val()
-    };
-    $.ajax({
-      url: "/api/team/players/" + pid,
-      method: "PUT",
-      contentType: "application/json",
-      data: JSON.stringify(data),
-      success: function() {
-        location.reload();
-      },
-      error: function(xhr) {
-        if (typeof AppModal !== 'undefined') AppModal.error('Error', xhr.responseJSON?.error || 'Failed');
-        else alert(xhr.responseJSON?.error || 'Failed');
-      }
-    });
+    var data = { first_name: $("#epFirstName").val(), last_name: $("#epLastName").val(),
+      display_name: $("#epDisplayName").val(), email: $("#epEmail").val() };
+    $.ajax({ url: "/api/team/players/" + pid, method: "PUT", contentType: "application/json",
+      data: JSON.stringify(data), success: function(){ location.reload(); }, error: fail });
   });
 
   $(".remove-player-btn").click(function() {
-    var pid = $(this).data("id");
-    var name = $(this).data("name");
-    if (typeof AppModal !== 'undefined') {
-      AppModal.confirm('Remove Player', 'Are you sure you want to remove <strong>' + name + '</strong> from your team? This cannot be undone.', function() {
-        doRemove(pid);
-      });
-    } else if (confirm('Remove ' + name + ' from your team?')) {
-      doRemove(pid);
-    }
+    var pid = $(this).data("id"), name = $(this).data("name");
+    var doRemove = function() {
+      $.ajax({ url: "/api/team/players/" + pid, method: "DELETE",
+        success: function(){ location.reload(); }, error: fail });
+    };
+    if (typeof AppModal !== 'undefined') AppModal.confirm('Remove Member', 'Remove <strong>' + name + '</strong> from this family?', doRemove);
+    else if (confirm('Remove ' + name + '?')) doRemove();
   });
 
-  function doRemove(pid) {
-    $.ajax({
-      url: "/api/team/players/" + pid,
-      method: "DELETE",
-      success: function() { location.reload(); },
-      error: function(xhr) {
-        if (typeof AppModal !== 'undefined') AppModal.error('Error', xhr.responseJSON?.error || 'Failed');
-        else alert(xhr.responseJSON?.error || 'Failed');
-      }
-    });
-  }
+  $(".decide-btn").click(function() {
+    post("/api/memberships/" + $(this).data("id") + "/decide", { decision: $(this).data("decision") });
+  });
+
+  $(".set-primary-btn").click(function() {
+    var pid = $(this).data("id");
+    post("/api/players/" + pid + "/set-primary", { family_id: {{ family.id }} });
+  });
+
+  $("#savePrimaryBtn").click(function() {
+    post("/api/players/{{ my_player_id or 0 }}/set-primary", { family_id: parseInt($("#primaryFamilySelect").val(), 10) });
+  });
+
+  $("#requestJoinBtn").click(function() {
+    post("/api/families/" + $("#joinFamilySelect").val() + "/request-join", {});
+  });
+
+  $("#createFamilyBtn").click(function() {
+    var name = $("#newFamilyName").val().trim();
+    if (!name) return;
+    post("/api/families", { name: name, make_primary: $("#newFamilyPrimary").is(":checked") });
+  });
+
+  $("#claimBtn").click(function() {
+    post("/api/players/" + $("#claimSelect").val() + "/claim", {});
+  });
+
+  $("#transferLeadBtn").click(function() {
+    var uid = $("#transferLeadSelect").val();
+    var doIt = function() { post("/api/families/{{ family.id }}/transfer-lead", { user_id: parseInt(uid, 10) }); };
+    if (typeof AppModal !== 'undefined') AppModal.confirm('Transfer Leadership', 'Make this member the family lead? You will no longer be lead.', doIt);
+    else if (confirm('Transfer leadership?')) doIt();
+  });
 });
 </script>
 {% endblock %}
