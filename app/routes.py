@@ -2245,7 +2245,9 @@ def admin_update_player(player_id):
                   data.get('city', ''),
                   data.get('state', ''),
                   data.get('zipcode', ''),
-                  data.get('role', 'family_admin'),
+                  # super_admin can never be granted here; only the site owner
+                  # can change roles, via /auth/admin/users/<id>/set-role.
+                  'family_admin',
                   data.get('family_id', player['family_id'])))
             # users.player_id is the identity link; created_by_user_id is provenance.
             execute_modify(conn, 'UPDATE users SET player_id = %s WHERE id = %s', (player_id, new_user['id']))
@@ -4722,7 +4724,8 @@ def get_alliances():
         return jsonify({
             'alliances': [dict(a) for a in alliances],
             'pending_sent': [dict(p) for p in pending_sent],
-            'pending_received': [dict(p) for p in pending_received]
+            'pending_received': [dict(p) for p in pending_received],
+            'can_manage': is_family_lead(conn, user, family_id),
         })
     finally:
         conn.close()
@@ -4790,6 +4793,10 @@ def send_alliance_request():
 
     conn = get_db_connection()
     try:
+        # Alliances control who can see this family's minors, so only the
+        # family lead may create them.
+        if not is_family_lead(conn, user, family_id):
+            return jsonify({'error': 'Only the family lead can manage crew alliances'}), 403
         existing = execute_query_one(conn, '''
             SELECT id FROM family_alliances
             WHERE (requesting_family_id = %s AND target_family_id = %s)
@@ -4854,6 +4861,8 @@ def accept_alliance(alliance_id):
     family_id = user.get('family_id')
     conn = get_db_connection()
     try:
+        if not is_family_lead(conn, user, family_id):
+            return jsonify({'error': 'Only the family lead can manage crew alliances'}), 403
         already = execute_query_one(conn, '''
             SELECT id FROM family_alliances
             WHERE id = %s AND status = 'accepted'
@@ -4917,6 +4926,8 @@ def decline_alliance(alliance_id):
     family_id = user.get('family_id')
     conn = get_db_connection()
     try:
+        if not is_family_lead(conn, user, family_id):
+            return jsonify({'error': 'Only the family lead can manage crew alliances'}), 403
         execute_modify(conn, '''
             DELETE FROM family_alliances
             WHERE id = %s AND target_family_id = %s AND status = 'pending'

@@ -53,6 +53,9 @@
                 >
                   {{ user.role.replace('_', ' ').title() }}
                 </span>
+                {% if user.email|lower == owner_email|lower %}
+                <span class="badge bg-dark" title="Site owner: the only account that can grant or revoke Super Admin">Owner</span>
+                {% endif %}
               </td>
               <td>
                 <span
@@ -124,6 +127,26 @@
                   >
                     <i class="fas fa-trash"></i> Delete
                   </button>
+
+                  {% if is_owner and user.email|lower != owner_email|lower %}
+                    {% if user.role == 'super_admin' %}
+                    <button
+                      class="btn btn-outline-secondary btn-sm"
+                      title="Remove Super Admin access from this user"
+                      onclick="setRole({{ user.id }}, '{{ user.first_name }} {{ user.last_name }}', 'family_admin')"
+                    >
+                      <i class="fas fa-user-shield"></i> Revoke Super Admin
+                    </button>
+                    {% else %}
+                    <button
+                      class="btn btn-outline-danger btn-sm"
+                      title="Give this user full Super Admin access to everything"
+                      onclick="setRole({{ user.id }}, '{{ user.first_name }} {{ user.last_name }}', 'super_admin')"
+                    >
+                      <i class="fas fa-user-shield"></i> Make Super Admin
+                    </button>
+                    {% endif %}
+                  {% endif %}
                   {% else %}
                   <span class="badge bg-info">You</span>
                   {% endif %}
@@ -274,6 +297,31 @@
         })
         .catch(function(e) { AppModal.error('Error', 'Failed to approve user'); });
     }, {confirmText: 'Approve'});
+  }
+
+  function setRole(userId, userName, newRole) {
+    var making = newRole === 'super_admin';
+    var title = making ? 'Make Super Admin' : 'Revoke Super Admin';
+    var msg = making
+      ? userName + ' will get FULL access to every family, player, game, and admin function on the site. Only grant this to someone you completely trust.'
+      : userName + ' will lose Super Admin access and go back to being a regular user. Their family and lead status are not affected.';
+    AppModal.confirm(title, msg, function() {
+      fetch('/auth/admin/users/' + userId + '/set-role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole })
+      })
+        .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+        .then(function(res) {
+          if (res.ok) {
+            AppModal.success(title, res.j.message || 'Role updated.');
+            setTimeout(function() { location.reload(); }, 1200);
+          } else {
+            AppModal.error('Error', res.j.error || 'Failed to change role');
+          }
+        })
+        .catch(function() { AppModal.error('Error', 'Failed to change role'); });
+    }, { confirmText: title });
   }
 
   function deleteUser(userId, userName) {

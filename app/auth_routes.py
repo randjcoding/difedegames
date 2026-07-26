@@ -819,4 +819,53 @@ def admin_users():
         finally:
             conn.close()
     
-    return render_template('auth/admin_users.html', users=users)
+    is_owner = (current_user.get('email') or '').lower() == \
+        (current_app.config.get('OWNER_EMAIL') or '').lower()
+    return render_template('auth/admin_users.html', users=users,
+                           is_owner=is_owner,
+                           owner_email=current_app.config.get('OWNER_EMAIL'))
+
+
+@auth_bp.route('/admin/users/<int:user_id>/set-role', methods=['POST'])
+@login_required
+def admin_set_role(user_id):
+    """Grant or revoke super_admin. Reserved for the site owner alone; even
+    other super admins cannot change roles."""
+    current_user = load_current_user()
+    owner_email = (current_app.config.get('OWNER_EMAIL') or '').lower()
+    if not current_user or current_user.get('role') != 'super_admin' \
+            or (current_user.get('email') or '').lower() != owner_email:
+        return jsonify({'error': 'Only the site owner can change roles'}), 403
+
+    new_role = (request.get_json(silent=True) or {}).get('role')
+    if new_role not in ('super_admin', 'family_admin'):
+        return jsonify({'error': 'Role must be super_admin or family_admin'}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed'}), 500
+    try:
+        import psycopg2.extras
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute('SELECT id, email, role FROM users WHERE id = %s', (user_id,))
+        target = cursor.fetchone()
+        if not target:
+            return jsonify({'error': 'User not found'}), 404
+        if (target['email'] or '').lower() == owner_email:
+            return jsonify({'error': 'The site owner is always a super admin'}), 400
+        if target['role'] == new_role:
+            return jsonify({'message': 'No change needed'})
+
+        cursor.execute('UPDATE users SET role = %s WHERE id = %s', (new_role, user_id))
+        audit(conn, current_user['id'], 'role_changed', 'users', user_id,
+              old={'role': target['role']}, new={'role': new_role})
+        conn.commit()
+        cursor.close()
+        return jsonify({'success': True,
+                        'message': f"{target['email']} is now {new_role.replace('_', ' ')}."})
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error changing role: {e}")
+        return jsonify({'error': 'Failed to change role'}), 500
+    finally:
+        conn.close()

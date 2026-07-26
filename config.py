@@ -44,6 +44,11 @@ class Config:
     # Application Configuration
     APP_NAME = 'DiFede Games'
     ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@difedeapp.com')
+
+    # The site owner: the ONLY account allowed to grant or revoke the
+    # super_admin role. Super admins can do everything else, but role
+    # changes are reserved for this one person.
+    OWNER_EMAIL = os.environ.get('OWNER_EMAIL', 'joe_71@yahoo.com')
     
     # Security Configuration
     WTF_CSRF_ENABLED = True

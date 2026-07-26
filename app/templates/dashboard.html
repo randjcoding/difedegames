@@ -216,8 +216,10 @@ endblock %} {% block content %}
       <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
           <h5 class="mb-0"><i class="fas fa-handshake me-2"></i>Game Night Crew</h5>
-          <button class="btn btn-sm" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);" data-bs-toggle="modal" data-bs-target="#crewUpModal">
-            <i class="fas fa-plus me-1"></i>Crew Up
+          <button type="button" class="btn btn-sm" id="crewUpOpenBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);display:none;"
+            data-bs-toggle="modal" data-bs-target="#crewUpModal"
+            title="Invite another family to crew up" aria-label="Invite another family to crew up">
+            <i class="fas fa-plus me-1" aria-hidden="true"></i>Crew Up
           </button>
         </div>
         <div class="card-body">
@@ -589,15 +591,17 @@ endblock %} {% block content %}
         var sec = document.getElementById('allianceSection');
         var html = '';
 
+        var canManage = !!data.can_manage;
         if (data.pending_received && data.pending_received.length > 0) {
           html += '<div class="mb-3"><h6 class="text-warning"><i class="fas fa-envelope-open me-1"></i>Pending Crew Up Requests</h6>';
           data.pending_received.forEach(function(p){
+            var actions = canManage
+              ? '<button class="btn btn-success btn-sm me-1" title="Accept crew up request" aria-label="Accept crew up request" onclick="respondAlliance(' + p.id + ',\'accept\')"><i class="fas fa-check" aria-hidden="true"></i></button>' +
+                '<button class="btn btn-outline-secondary btn-sm" title="Decline crew up request" aria-label="Decline crew up request" onclick="respondAlliance(' + p.id + ',\'decline\')"><i class="fas fa-times" aria-hidden="true"></i></button>'
+              : '<small class="text-muted">Your family lead decides</small>';
             html += '<div class="d-flex justify-content-between align-items-center border rounded p-2 mb-2" style="background:rgba(var(--df-accent),0.05);">' +
               '<div><strong>' + p.requesting_family_name + '</strong> <small class="text-muted">from ' + (p.requested_by||'a member') + '</small></div>' +
-              '<div>' +
-                '<button class="btn btn-success btn-sm me-1" onclick="respondAlliance(' + p.id + ',\'accept\')"><i class="fas fa-check"></i></button>' +
-                '<button class="btn btn-outline-secondary btn-sm" onclick="respondAlliance(' + p.id + ',\'decline\')"><i class="fas fa-times"></i></button>' +
-              '</div></div>';
+              '<div>' + actions + '</div></div>';
           });
           html += '</div>';
         }
@@ -624,8 +628,13 @@ endblock %} {% block content %}
         }
 
         if (!data.alliances.length && !data.pending_sent.length && !data.pending_received.length) {
-          html = '<div class="text-center text-muted py-2"><i class="fas fa-handshake me-2"></i>No game night crew yet. Click <strong>Crew Up</strong> to invite another family!</div>';
+          html = canManage
+            ? '<div class="text-center text-muted py-2"><i class="fas fa-handshake me-2"></i>No game night crew yet. Click <strong>Crew Up</strong> to invite another family!</div>'
+            : '<div class="text-center text-muted py-2"><i class="fas fa-handshake me-2"></i>No game night crew yet. Your family lead can send crew up requests.</div>';
         }
+
+        var openBtn = document.getElementById('crewUpOpenBtn');
+        if (openBtn) openBtn.style.display = canManage ? '' : 'none';
 
         sec.innerHTML = html;
 

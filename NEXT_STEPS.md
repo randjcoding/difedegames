@@ -61,9 +61,12 @@ curl -s -o /dev/null -w "web: %{http_code}\n" http://localhost:5002/
       known dev key in `config.py`).
 - [x] ~~Registration self-attach by family name~~ Fixed in the identity rebuild: plain signups
       always get their own new family; joining others goes through the directory + lead approval.
-- [ ] **Tighten alliance + family-view permissions**: alliance create/accept/decline and viewing
-      `/family/<id>` are open to any logged-in user / any family member. Decide the intended policy
-      (lead-only? allied-only?) and enforce it.
+- [x] ~~Tighten alliance permissions~~ Done 2026-07-26: alliance create/accept/decline are
+      lead-only (API 403 + dashboard hides the buttons for non-leads). Super admin role grants
+      are reserved for the site owner (`OWNER_EMAIL`, default joe_71@yahoo.com) via
+      `/auth/admin/users/<id>/set-role` with UI on the User Management page.
+- [ ] **Family-view permissions**: viewing `/family/<id>` is open to any logged-in user.
+      Decide the intended policy (allied-only?) and enforce it if desired.
 
 ## Priority 2 - Correctness / stats
 
