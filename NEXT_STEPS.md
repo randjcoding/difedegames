@@ -1,11 +1,35 @@
 # DiFede Games - Next Steps (Development Backlog)
 
-Status as of 2026-06-20. The app is stable and running on port 5002. Everything
+Status as of 2026-07-26. The app is stable and running on port 5002. Everything
 listed below is a **known, open item** - none of it breaks current gameplay, but
 these are the next things to do when development resumes.
 
-> Backups before this work: `backup_pre_skyjo_*.sql` and `backup_pre_security_*.sql`
-> in the project root. Always `pg_dump` before schema/data changes.
+> Backups before this work: `backup_pre_rebuild_*.sql` (pre identity rebuild) and
+> `backup_post_rebuild_*.sql` (verified post-rebuild seed for Rocky) in the project
+> root. Always `pg_dump` before schema/data changes.
+
+---
+
+## Multi-family identity rebuild - DONE 2026-07-26 (do NOT redo)
+
+Commit `ba1c7ec` on main. Migration `migrations/004_identity_rebuild.sql` applied.
+End-to-end suite: `venv/bin/python tests/smoke_test.py` (69 checks, all passing,
+self-cleaning). Includes: privacy-aware directory (`/directory`), minor protection
+(visible only to direct allied crews), email invitations + claim-by-email flow,
+lead-approved batch transfers, archive/reinstate/purge lifecycle (no hard deletes),
+FK hardening (RESTRICT/SET NULL on all score history), lead-scoped duplicate merge,
+audit logging, per-family vs lifetime stats split, `/player/<id>` profiles.
+
+### Rocky reseed (run ON the Rocky box - no SSH key from Ubuntu)
+
+```bash
+cd ~/difedegames && git pull
+# Pull the live V2 data straight from Ubuntu over the LAN (pg_hba already allows it):
+PGPASSWORD=Password pg_dump -h 192.168.68.72 -U difedeapp difedeappv2 > deploy/initdb/01_restore.sql
+# Wipe the DB volume and restore fresh (see DEPLOY_ROCKY.md "Wipe everything"):
+docker compose down && docker volume rm difedegames_dbdata && docker compose up -d --build
+curl -s -o /dev/null -w "web: %{http_code}\n" http://localhost:5002/
+```
 
 ---
 
@@ -35,8 +59,8 @@ these are the next things to do when development resumes.
       **duplicate `connect`/`disconnect` handlers** (defined in both `routes.py` and `events.py`).
 - [ ] **Set a real `SECRET_KEY`** via environment variable in production (currently falls back to a
       known dev key in `config.py`).
-- [ ] **Registration self-attach by family name** (`app/auth_routes.py` ~line 181): a new user can
-      join any existing family just by typing its name. Add family-lead approval or an invite flow.
+- [x] ~~Registration self-attach by family name~~ Fixed in the identity rebuild: plain signups
+      always get their own new family; joining others goes through the directory + lead approval.
 - [ ] **Tighten alliance + family-view permissions**: alliance create/accept/decline and viewing
       `/family/<id>` are open to any logged-in user / any family member. Decide the intended policy
       (lead-only? allied-only?) and enforce it.
