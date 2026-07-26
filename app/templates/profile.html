@@ -32,12 +32,18 @@
   .profile-card .form-label { color: var(--df-text); font-weight: 600; }
   .setting-help { font-size: 0.8rem; color: var(--df-muted); }
   .form-check-input:checked { background-color: var(--df-accent); border-color: var(--df-accent); }
+  .form-check-label { color: var(--df-text); }
   .readonly-value {
-    background: rgba(0,0,0,0.12);
+    background: color-mix(in srgb, var(--df-text) 10%, transparent);
     border: 1px solid var(--df-border, #2a2a4a);
     border-radius: 8px;
     padding: 0.5rem 0.75rem;
     font-size: 0.9rem;
+    color: var(--df-text);
+  }
+  .profile-card .form-control {
+    background: var(--df-card, #fff);
+    color: var(--df-text-card, #212529);
   }
 </style>
 {% endblock %}

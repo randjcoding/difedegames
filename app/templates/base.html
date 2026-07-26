@@ -24,7 +24,7 @@
         --df-card-header: #16213e;
         --df-text: #e0e0e0;
         --df-text-card: #212529;
-        --df-muted: #9a9ab0;
+        --df-muted: #b4b4cc;
         --df-accent: #5eead4;
         --df-accent-hover: #2dd4bf;
         --df-accent-gradient: linear-gradient(135deg, #5eead4 0%, #2dd4bf 100%);
@@ -80,7 +80,7 @@
         --df-card-header: #1e2749;
         --df-text: #c5cae9;
         --df-text-card: #212529;
-        --df-muted: #7986cb;
+        --df-muted: #a0aad8;
         --df-accent: #5c6bc0;
         --df-accent-hover: #3f51b5;
         --df-accent-gradient: linear-gradient(135deg, #5c6bc0 0%, #3f51b5 100%);
@@ -108,7 +108,7 @@
         --df-card-header: #3d2b1f;
         --df-text: #e8d5c4;
         --df-text-card: #2c1810;
-        --df-muted: #a08974;
+        --df-muted: #c4a990;
         --df-accent: #d4915e;
         --df-accent-hover: #c47a42;
         --df-accent-gradient: linear-gradient(135deg, #d4915e 0%, #c47a42 100%);
@@ -136,7 +136,7 @@
         --df-card-header: #1a3a28;
         --df-text: #c5e8d4;
         --df-text-card: #1a2e20;
-        --df-muted: #6dab86;
+        --df-muted: #8ec9a4;
         --df-accent: #34d399;
         --df-accent-hover: #10b981;
         --df-accent-gradient: linear-gradient(135deg, #34d399 0%, #10b981 100%);
@@ -164,7 +164,7 @@
         --df-card-header: #3d1f2e;
         --df-text: #e8c5d4;
         --df-text-card: #2c1020;
-        --df-muted: #b0708a;
+        --df-muted: #d094ad;
         --df-accent: #f472b6;
         --df-accent-hover: #ec4899;
         --df-accent-gradient: linear-gradient(135deg, #f472b6 0%, #ec4899 100%);
@@ -248,7 +248,7 @@
         --df-card-header: #2d1a4e;
         --df-text: #d4c0f0;
         --df-text-card: #2d1a4e;
-        --df-muted: #9b7dc8;
+        --df-muted: #b9a0db;
         --df-accent: #a855f7;
         --df-accent-hover: #9333ea;
         --df-accent-gradient: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
@@ -384,11 +384,47 @@
 
       /* Themed Modal -- force readable dark text on light modal backgrounds.
          Modals use white bg by default, but body inherits --df-text (light on
-         dark themes), making modal text invisible. Override globally here. */
+         dark themes), making modal text invisible. Override globally here.
+         Do NOT restyle .modal-content to a dark surface without also overriding
+         .modal-body / labels / inputs — that is what made My Team unreadable. */
       .modal-content { background-color: #ffffff; color: #212529; }
       .modal-body { color: #212529; }
       .modal-body pre { color: #212529; }
       .modal-footer { color: #212529; }
+      .modal-content .form-label,
+      .modal-content .form-check-label,
+      .modal-content label {
+        color: #212529 !important;
+      }
+      .modal-content .text-muted,
+      .modal-content .help-text {
+        color: #6c757d !important;
+      }
+      .modal-content .form-control,
+      .modal-content .form-select {
+        background-color: #ffffff;
+        color: #212529;
+        border-color: #ced4da;
+      }
+      .modal-content .form-control:focus,
+      .modal-content .form-select:focus {
+        background-color: #ffffff;
+        color: #212529;
+      }
+      .modal-content .form-control::placeholder {
+        color: #6c757d;
+        opacity: 0.85;
+      }
+      .modal-content .btn-secondary {
+        background-color: #e9ecef;
+        border-color: #ced4da;
+        color: #212529;
+      }
+      .modal-content .btn-secondary:hover {
+        background-color: #dee2e6;
+        border-color: #adb5bd;
+        color: #212529;
+      }
       #appModal .modal-content { border-radius: 12px; overflow: hidden; }
       #appModal .modal-header { background: var(--df-modal-header); color: #fff; border-bottom: none; padding: 1rem 1.5rem; }
       #appModal .modal-body { padding: 1.5rem; }
@@ -455,10 +491,14 @@
         color: var(--df-text-card, #333);
       }
 
+      /* Theme-aware muted text on page surfaces; light panels keep Bootstrap grey. */
+      .text-muted { color: var(--df-muted) !important; }
+
       .new-game-section .text-muted,
       .score-sheet .text-muted,
       .completed-games .text-muted,
-      .paused-games .text-muted {
+      .paused-games .text-muted,
+      .modal-content .text-muted {
         color: #6c757d !important;
       }
 

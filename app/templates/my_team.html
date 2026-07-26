@@ -78,7 +78,7 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .player-info .sub {
-    font-size: 0.75rem;
+    font-size: 0.78rem;
     color: var(--df-muted);
   }
   .player-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
@@ -90,20 +90,52 @@
 
   .tag { font-size: 0.62rem; padding: 2px 7px; border-radius: 10px; font-weight: 700; letter-spacing: .02em; }
   .tag-home { background: var(--df-accent); color: var(--df-btn-primary-text); }
-  .tag-guest { background: var(--df-border); color: var(--df-muted); }
+  .tag-guest {
+    background: color-mix(in srgb, var(--df-text) 12%, transparent);
+    color: var(--df-muted);
+    border: 1px solid var(--df-border);
+  }
   .tag-lead { background: #f59e0b; color: #1a1a1a; }
   .tag-login { background: #10b981; color: #fff; }
-  .tag-nologin { background: var(--df-border); color: var(--df-muted); }
+  .tag-nologin {
+    background: color-mix(in srgb, var(--df-text) 12%, transparent);
+    color: var(--df-muted);
+    border: 1px solid var(--df-border);
+  }
 
   .ally-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1rem; border-bottom: 1px solid var(--df-border, #2a2a4a); }
   .ally-row:last-child { border-bottom: none; }
   .ally-icon { width: 36px; height: 36px; border-radius: 50%; background: var(--df-card-header); color: var(--df-accent); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; flex-shrink: 0; }
 
-  .form-select, .form-control { background: var(--df-surface); color: var(--df-text); border: 1px solid var(--df-border); }
-  .form-select:focus, .form-control:focus { background: var(--df-surface); color: var(--df-text); }
+  /* Page-level inputs on dark surfaces keep theme text; modals use global white-modal rules. */
+  .section-card .form-select,
+  .section-card .form-control {
+    background: var(--df-card, #fff);
+    color: var(--df-text-card, #212529);
+    border: 1px solid var(--df-border);
+  }
+  .section-card .form-select:focus,
+  .section-card .form-control:focus {
+    background: var(--df-card, #fff);
+    color: var(--df-text-card, #212529);
+  }
+  .section-card .form-label { color: var(--df-text); }
 
-  .modal-content { background: var(--df-surface) !important; color: var(--df-text) !important; }
-  .modal-header { background: var(--df-card-header) !important; color: var(--df-dt-header-text) !important; border-bottom: 2px solid var(--df-accent); }
+  .modal-header {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text) !important;
+    border-bottom: 2px solid var(--df-accent);
+  }
+  .modal-header .modal-title { color: var(--df-dt-header-text) !important; }
+
+  .join-result-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+    padding: 0.65rem 0; border-bottom: 1px solid #e9ecef; color: #212529;
+  }
+  .join-result-row:last-child { border-bottom: none; }
+  .join-result-row .name { font-weight: 600; color: #212529; }
+  .join-result-row .sub { font-size: 0.8rem; color: #6c757d; }
+  .join-empty { text-align: center; padding: 1rem 0; color: #6c757d; font-size: 0.9rem; }
 
   @media (max-width: 768px) {
     .team-hero { padding: 1rem; }
@@ -131,11 +163,15 @@
       </div>
       {% if is_lead %}
       <div class="d-flex gap-2 flex-wrap">
-        <button class="btn btn-sm" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;border-radius:8px;" data-bs-toggle="modal" data-bs-target="#addPlayerModal">
-          <i class="fas fa-user-plus me-1"></i>Add Player
+        <button type="button" class="btn btn-sm" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;border-radius:8px;"
+          data-bs-toggle="modal" data-bs-target="#addPlayerModal"
+          title="Add a player to this family" aria-label="Add a player to this family">
+          <i class="fas fa-user-plus me-1" aria-hidden="true"></i>Add Player
         </button>
-        <button class="btn btn-sm btn-outline-light" style="font-weight:600;border-radius:8px;" data-bs-toggle="modal" data-bs-target="#inviteEmailModal">
-          <i class="fas fa-envelope me-1"></i>Invite by Email
+        <button type="button" class="btn btn-sm btn-outline-light" style="font-weight:600;border-radius:8px;"
+          data-bs-toggle="modal" data-bs-target="#inviteEmailModal"
+          title="Invite someone by email to join this family or the site" aria-label="Invite someone by email">
+          <i class="fas fa-envelope me-1" aria-hidden="true"></i>Invite by Email
         </button>
       </div>
       {% endif %}
@@ -188,8 +224,10 @@
           </div>
         </div>
         <div class="player-actions">
-          <button class="btn btn-success decide-btn" data-id="{{ r.membership_id }}" data-decision="approve"><i class="fas fa-check"></i> Approve</button>
-          <button class="btn btn-outline-danger decide-btn" data-id="{{ r.membership_id }}" data-decision="deny"><i class="fas fa-times"></i></button>
+          <button type="button" class="btn btn-success decide-btn" data-id="{{ r.membership_id }}" data-decision="approve"
+            title="Approve join request" aria-label="Approve join request"><i class="fas fa-check" aria-hidden="true"></i> Approve</button>
+          <button type="button" class="btn btn-outline-danger decide-btn" data-id="{{ r.membership_id }}" data-decision="deny"
+            title="Decline join request" aria-label="Decline join request"><i class="fas fa-times" aria-hidden="true"></i></button>
         </div>
       </div>
       {% endfor %}
@@ -222,25 +260,39 @@
         </div>
         <div class="player-actions">
           {% if is_lead and p.is_home %}
-          <button class="btn btn-outline-secondary set-primary-btn" data-id="{{ p.id }}" title="Already home" disabled><i class="fas fa-house-user"></i></button>
+          <button type="button" class="btn btn-outline-secondary set-primary-btn" data-id="{{ p.id }}"
+            title="Already their home family" aria-label="Already their home family" disabled>
+            <i class="fas fa-house-user" aria-hidden="true"></i>
+          </button>
           {% elif is_lead %}
-          <button class="btn btn-outline-secondary set-primary-btn" data-id="{{ p.id }}" title="Make this their home family"><i class="fas fa-house-user"></i></button>
+          <button type="button" class="btn btn-outline-secondary set-primary-btn" data-id="{{ p.id }}"
+            title="Make this their home family" aria-label="Make this their home family">
+            <i class="fas fa-house-user" aria-hidden="true"></i>
+          </button>
           {% endif %}
           {% if is_lead or p.id == my_player_id %}
-          <button class="btn btn-outline-secondary edit-player-btn"
+          <button type="button" class="btn btn-outline-secondary edit-player-btn"
+            title="Edit player details" aria-label="Edit player details"
             data-id="{{ p.id }}" data-first="{{ p.first_name }}" data-last="{{ p.last_name }}"
             data-display="{{ p.display_name }}" data-email="{{ p.player_email or '' }}">
-            <i class="fas fa-pen"></i>
+            <i class="fas fa-pen" aria-hidden="true"></i>
           </button>
           {% endif %}
           {% if is_lead and not p.account_id %}
-          <button class="btn btn-outline-secondary claim-invite-btn" title="Email them an invite to claim this profile"
+          <button type="button" class="btn btn-outline-secondary claim-invite-btn"
+            title="Email a claim invite so they can create a login for this profile"
+            aria-label="Email a claim invite so they can create a login for this profile"
             data-id="{{ p.id }}" data-name="{{ p.display_name }}" data-email="{{ p.player_email or '' }}">
-            <i class="fas fa-envelope"></i>
+            <i class="fas fa-envelope" aria-hidden="true"></i>
           </button>
           {% endif %}
           {% if is_lead and p.account_id != lead_user_id %}
-          <button class="btn btn-outline-danger remove-player-btn" data-id="{{ p.id }}" data-name="{{ p.display_name }}"><i class="fas fa-user-minus"></i></button>
+          <button type="button" class="btn btn-outline-danger remove-player-btn"
+            title="Remove from this family (archives them if they have no other family)"
+            aria-label="Remove from this family"
+            data-id="{{ p.id }}" data-name="{{ p.display_name }}">
+            <i class="fas fa-user-minus" aria-hidden="true"></i>
+          </button>
           {% endif %}
         </div>
       </div>
@@ -355,7 +407,7 @@
           <div class="form-check mt-2">
             <input class="form-check-input" type="checkbox" id="apIsMinor">
             <label class="form-check-label" for="apIsMinor">This is a child</label>
-            <div style="font-size:0.75rem;color:#6c757d;">Children are never shown in public search. Only your family and directly allied crews can see them.</div>
+            <div class="help-text" style="font-size:0.75rem;">Children are never shown in public search. Only your family and directly allied crews can see them.</div>
           </div>
         </form>
       </div>
@@ -387,7 +439,7 @@
             <option value="join_site">Join the site with their own family</option>
           </select>
         </div>
-        <p class="mb-0" style="font-size:0.78rem;color:#6c757d;">If they already have an account here, they get an in-app invitation instead of an email. If the address belongs to an unclaimed player profile, they get a claim invite.</p>
+        <p class="mb-0 help-text" style="font-size:0.78rem;">If they already have an account here, they get an in-app invitation instead of an email. If the address belongs to an unclaimed player profile, they get a claim invite.</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -450,17 +502,21 @@
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title"><i class="fas fa-people-arrows me-2"></i>Join Another Family</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <p style="font-size:0.88rem;color:var(--df-muted);">Send a request to that family's lead. Once approved you can play and be scored there, and it shows up in your stats.</p>
-        <select id="joinFamilySelect" class="form-select">
-          {% for f in joinable_families %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}
-        </select>
+        <p class="help-text" style="font-size:0.88rem;">Type a family name to search, then send a request to their lead. Once approved you can play and be scored there.</p>
+        <div class="input-group mb-2">
+          <input type="text" class="form-control" id="joinFamilyQuery" placeholder="Family name (at least 2 letters)" autocomplete="off">
+          <button type="button" class="btn btn-outline-secondary" id="joinFamilySearchBtn" title="Search families" aria-label="Search families">
+            <i class="fas fa-search" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div id="joinFamilyResults" class="join-empty">Type at least 2 letters to find a family.</div>
+        <p class="help-text mb-0 mt-2" style="font-size:0.75rem;">Want more detail first? Use the <a href="{{ url_for('main.directory') }}">Directory</a> to view rosters before you request.</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn" id="requestJoinBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Send Request</button>
       </div>
     </div>
   </div>
@@ -628,8 +684,60 @@ $(function() {
     post("/api/players/{{ my_player_id or 0 }}/set-primary", { family_id: parseInt($("#primaryFamilySelect").val(), 10) });
   });
 
-  $("#requestJoinBtn").click(function() {
-    post("/api/families/" + $("#joinFamilySelect").val() + "/request-join", {});
+  function escJoin(s) {
+    return $('<div>').text(s == null ? '' : String(s)).html();
+  }
+  function searchJoinFamilies() {
+    var q = $("#joinFamilyQuery").val().trim();
+    var box = $("#joinFamilyResults");
+    if (q.length < 2) {
+      box.attr('class', 'join-empty').html('Type at least 2 letters to find a family.');
+      return;
+    }
+    box.attr('class', 'join-empty').html('Searching...');
+    $.get('/api/directory/families', { q: q })
+      .done(function(data) {
+        var list = (data && data.results) ? data.results : [];
+        list = list.filter(function(f) { return !f.is_my_family; });
+        if (!list.length) {
+          box.attr('class', 'join-empty').html('No matching families found. They may not be listed, or you may already belong.');
+          return;
+        }
+        var html = list.map(function(f) {
+          return '<div class="join-result-row">' +
+            '<div><div class="name">' + escJoin(f.name) + '</div>' +
+            '<div class="sub">' + escJoin(f.label || '') +
+            (f.member_count != null ? ' - ' + f.member_count + ' member' + (f.member_count === 1 ? '' : 's') : '') +
+            '</div></div>' +
+            '<button type="button" class="btn btn-sm join-request-btn" data-id="' + f.family_id + '" ' +
+            'title="Send join request to ' + escJoin(f.name) + '" aria-label="Send join request to ' + escJoin(f.name) + '" ' +
+            'style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;white-space:nowrap;">Request to Join</button>' +
+            '</div>';
+        }).join('');
+        box.removeClass('join-empty').html(html);
+      })
+      .fail(function(xhr) {
+        var msg = (xhr.responseJSON && xhr.responseJSON.error) || 'Search failed. Try again.';
+        box.attr('class', 'join-empty').html(escJoin(msg));
+      });
+  }
+  $("#joinFamilySearchBtn").click(searchJoinFamilies);
+  $("#joinFamilyQuery").on('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); searchJoinFamilies(); }
+  });
+  $("#joinFamilyResults").on('click', '.join-request-btn', function() {
+    var btn = $(this);
+    var fid = btn.data('id');
+    btn.prop('disabled', true);
+    post('/api/families/' + fid + '/request-join', {}, function(d) {
+      bootstrap.Modal.getInstance(document.getElementById('joinFamilyModal')).hide();
+      if (typeof AppModal !== 'undefined') AppModal.success('Request Sent', d.message || 'Your request was sent to their family lead.');
+      else alert(d.message || 'Request sent.');
+    });
+  });
+  $('#joinFamilyModal').on('shown.bs.modal', function() {
+    $("#joinFamilyQuery").val('').trigger('focus');
+    $("#joinFamilyResults").attr('class', 'join-empty').html('Type at least 2 letters to find a family.');
   });
 
   $("#createFamilyBtn").click(function() {
