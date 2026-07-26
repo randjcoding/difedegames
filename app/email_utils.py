@@ -189,6 +189,117 @@ def send_alliance_request_email(user_email: str, first_name: str, from_family: s
     return send_email(user_email, subject, body)
 
 
+def send_site_invite_email(to_email: str, inviter_name: str, family_name: str | None, link: str) -> bool:
+    if family_name:
+        subject = f"{inviter_name} invited you to join the {family_name} family on DiFede Games"
+        middle = f"{inviter_name} invited you to join the {family_name} family on DiFede Games, a score tracker for family game nights."
+    else:
+        subject = f"{inviter_name} invited you to DiFede Games"
+        middle = f"{inviter_name} invited you to DiFede Games, a score tracker for family game nights. You can start your own family group when you sign up."
+    body = f"""
+    Hi,
+
+    {middle}
+
+    Accept the invite here:
+
+    {link}
+
+    The link expires in 7 days. If you were not expecting this, you can ignore this message.
+
+    — DiFede Games
+    {APP_BASE_URL}
+    """
+    return send_email(to_email, subject, body)
+
+
+def send_claim_invite_email(to_email: str, person_name: str, family_name: str, inviter_name: str, link: str) -> bool:
+    subject = f"Claim your player profile on DiFede Games"
+    body = f"""
+    Hi {person_name},
+
+    {inviter_name} added this email address to your player profile in the {family_name} family on DiFede Games. Your profile already has your game history and stats.
+
+    Claim it here to create your login:
+
+    {link}
+
+    The link expires in 7 days. If you were not expecting this, you can ignore this message.
+
+    — DiFede Games
+    {APP_BASE_URL}
+    """
+    return send_email(to_email, subject, body)
+
+
+def send_release_request_email(to_email: str, lead_first: str, requester_name: str,
+                               to_family: str, member_names: list[str], approve_link: str) -> bool:
+    names = ", ".join(member_names)
+    subject = f"Transfer request: {names}"
+    body = f"""
+    Hi {lead_first},
+
+    {requester_name} is asking to move the following people from your family to the {to_family} family on DiFede Games:
+
+    {names}
+
+    Their game history with your family stays in your family's records either way; only their home family changes.
+
+    Approve with one tap:
+
+    {approve_link}
+
+    Or review the request (including approving only some people) under My Team:
+
+    {APP_BASE_URL}/my-team
+
+    — DiFede Games
+    """
+    return send_email(to_email, subject, body)
+
+
+def send_release_decided_email(to_email: str, first_name: str, decision: str,
+                               member_names: list[str], from_family: str, to_family: str) -> bool:
+    names = ", ".join(member_names)
+    if decision == 'approved':
+        subject = f"Transfer approved: {names}"
+        line = f"The {from_family} family approved moving {names} to {to_family}."
+    else:
+        subject = f"Transfer declined"
+        line = f"The {from_family} family declined the request to move {names} to {to_family}."
+    body = f"""
+    Hi {first_name},
+
+    {line}
+
+    {APP_BASE_URL}/my-team
+
+    — DiFede Games
+    """
+    return send_email(to_email, subject, body)
+
+
+def send_join_request_email(to_email: str, lead_first: str, requester_name: str,
+                            family_name: str, approve_link: str) -> bool:
+    subject = f"{requester_name} wants to join the {family_name} family"
+    body = f"""
+    Hi {lead_first},
+
+    {requester_name} asked to join the {family_name} family on DiFede Games.
+
+    Approve with one tap:
+
+    {approve_link}
+
+    Or review it in the app:
+
+    {APP_BASE_URL}/my-team
+
+    — DiFede Games
+    """
+    return send_email(to_email, subject, body)
+
+
 def send_alliance_accepted_email(user_email: str, first_name: str, accepted_family: str) -> bool:
     subject = f"{accepted_family} accepted your crew-up request"
     body = f"""

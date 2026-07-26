@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}{{ shown_name }}{% endblock %}
+
+{% block styles %}
+<style>
+  .pp-hero {
+    background: var(--df-card-header);
+    border-radius: 12px;
+    color: var(--df-dt-header-text);
+    padding: 1.5rem 2rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .pp-avatar {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: var(--df-accent-gradient);
+    color: var(--df-btn-primary-text);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 1.6rem;
+    flex-shrink: 0;
+  }
+  .pp-card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    margin-bottom: 1.25rem;
+    background: var(--df-surface);
+    color: var(--df-text);
+    overflow: hidden;
+  }
+  .pp-card .card-header {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text);
+    font-weight: 700;
+    padding: 0.65rem 1rem;
+    border-bottom: 2px solid var(--df-accent);
+  }
+  .pp-stat {
+    text-align: center;
+    padding: 1rem;
+    background: var(--df-surface);
+    border-radius: 10px;
+    border: 1px solid var(--df-border, #2a2a4a);
+  }
+  .pp-stat .num { font-size: 1.8rem; font-weight: 800; color: var(--df-accent); line-height: 1; }
+  .pp-stat .lbl { font-size: 0.78rem; color: var(--df-muted); margin-top: 0.2rem; }
+  .pp-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--df-border, #2a2a4a);
+    font-size: 0.9rem;
+  }
+  .pp-row:last-child { border-bottom: none; }
+  .pp-row .meta { color: var(--df-muted); font-size: 0.78rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3" style="max-width: 860px;">
+  <div class="pp-hero">
+    <div class="pp-avatar">{{ shown_name[0]|upper }}</div>
+    <div>
+      <h1 class="mb-0" style="font-weight:700;">{{ shown_name }}</h1>
+      <p class="mb-0" style="opacity:0.85; font-size:0.9rem;">
+        Home family: {{ player.family_name or 'None' }}
+        {% if player.archived_at %}<span class="badge bg-warning text-dark ms-2">Archived</span>{% endif %}
+      </p>
+      {% if memberships|length > 1 %}
+      <p class="mb-0" style="opacity:0.75; font-size:0.8rem;">
+        Also plays with:
+        {% for m in memberships if not m.is_primary %}{{ m.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+      </p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-4">
+      <div class="pp-stat"><div class="num">{{ totals.games }}</div><div class="lbl">Lifetime Games</div></div>
+    </div>
+    <div class="col-4">
+      <div class="pp-stat"><div class="num">{{ totals.wins }}</div><div class="lbl">Lifetime Wins</div></div>
+    </div>
+    <div class="col-4">
+      <div class="pp-stat">
+        <div class="num">{% if totals.games > 0 %}{{ ((totals.wins / totals.games) * 100) | round(0) | int }}%{% else %}--{% endif %}</div>
+        <div class="lbl">Win Rate</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-md-6">
+      <div class="pp-card card">
+        <div class="card-header"><i class="fas fa-home me-2"></i>By Family</div>
+        <div class="card-body p-0">
+          {% for f in by_family %}
+          <div class="pp-row">
+            <div>
+              <div style="font-weight:600;">{{ f.family_name }}</div>
+              <div class="meta">Played at {{ f.family_name }} game nights</div>
+            </div>
+            <div style="font-weight:700;color:var(--df-accent);">{{ f.wins }}W / {{ f.games }}G</div>
+          </div>
+          {% endfor %}
+          {% if not by_family %}<div class="text-center py-3" style="color:var(--df-muted);">No completed games yet</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="pp-card card">
+        <div class="card-header"><i class="fas fa-gamepad me-2"></i>By Game</div>
+        <div class="card-body p-0">
+          {% for g in by_game %}
+          <div class="pp-row">
+            <div style="font-weight:600;">{{ g.game_name }}</div>
+            <div style="font-weight:700;color:var(--df-accent);">{{ g.wins }}W / {{ g.games }}G</div>
+          </div>
+          {% endfor %}
+          {% if not by_game %}<div class="text-center py-3" style="color:var(--df-muted);">No completed games yet</div>{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pp-card card">
+    <div class="card-header"><i class="fas fa-clock-rotate-left me-2"></i>Recent Games</div>
+    <div class="card-body p-0">
+      {% for r in recent %}
+      <div class="pp-row">
+        <div>
+          <div style="font-weight:600;">{{ r.game_name }}
+            {% if r.won %}<span class="badge bg-success ms-1" style="font-size:0.65rem;">Won</span>{% endif %}
+          </div>
+          <div class="meta">with {{ r.family_name }}{% if r.completion_time %} &middot; {{ r.completion_time.strftime('%b %-d, %Y') }}{% endif %}</div>
+        </div>
+      </div>
+      {% endfor %}
+      {% if not recent %}<div class="text-center py-3" style="color:var(--df-muted);">No completed games yet</div>{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

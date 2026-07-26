@@ -10,6 +10,12 @@ endblock %} {% block content %}
             <p class="text-muted">Join DiFede Games</p>
           </div>
 
+          {% if invite_banner %}
+          <div class="alert alert-info" style="font-size: 0.9rem;">
+            <i class="fas fa-envelope-open-text me-1"></i> {{ invite_banner }}
+          </div>
+          {% endif %}
+
           <form method="POST">
             <div class="row">
               <div class="col-md-6 mb-3">
@@ -19,6 +25,7 @@ endblock %} {% block content %}
                   class="form-control"
                   id="first_name"
                   name="first_name"
+                  value="{{ prefill_first_name or '' }}"
                   required
                   autofocus
                 />
@@ -30,11 +37,19 @@ endblock %} {% block content %}
                   class="form-control"
                   id="last_name"
                   name="last_name"
+                  value="{{ prefill_last_name or '' }}"
                   required
                 />
               </div>
             </div>
 
+            {% if lock_family_name %}
+            <div class="mb-3">
+              <label class="form-label">Family</label>
+              <input type="text" class="form-control" value="{{ lock_family_name }}" disabled />
+              <div class="form-text">You are joining this family.</div>
+            </div>
+            {% else %}
             <div class="mb-3">
               <label for="family_name" class="form-label">Family Name *</label>
               <input
@@ -46,9 +61,12 @@ endblock %} {% block content %}
                 required
               />
               <div class="form-text">
-                This will be used to identify your family's game data
+                This creates your own family group, and you lead it. To join an
+                existing family instead, sign up and use the Directory to send a
+                join request.
               </div>
             </div>
+            {% endif %}
 
             <div class="mb-3">
               <label for="email" class="form-label">Email Address *</label>
@@ -57,6 +75,7 @@ endblock %} {% block content %}
                 class="form-control"
                 id="email"
                 name="email"
+                value="{{ prefill_email or '' }}"
                 required
               />
             </div>

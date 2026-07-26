@@ -7,6 +7,7 @@ from .auth import (
     login_required, admin_required, load_current_user
 )
 from .email_utils import send_verification_email, send_registration_notification, APP_BASE_URL
+from .identity import unique_family_slug, audit
 import logging
 from datetime import datetime
 
@@ -130,89 +131,195 @@ def login():
 
     return render_template('auth/login.html')
 
+def _register_context(conn):
+    """Claim/invite context from session tokens: who is registering and where
+    they land. Returns None for a plain signup."""
+    from .auth import peek_action_token
+    cursor = conn.cursor()
+    try:
+        claim_token = session.get('claim_token')
+        if claim_token:
+            row = peek_action_token(conn, claim_token, 'claim_profile')
+            if row:
+                cursor.execute('''
+                    SELECT p.*, f.name AS home_family_name FROM players p
+                    LEFT JOIN families f ON f.id = p.family_id
+                    WHERE p.id = %s AND p.purged_at IS NULL
+                      AND NOT EXISTS (SELECT 1 FROM users u WHERE u.player_id = p.id)
+                ''', (row['player_id'],))
+                player = cursor.fetchone()
+                if player:
+                    return {'kind': 'claim', 'token': claim_token, 'player': dict(player)}
+            session.pop('claim_token', None)
+
+        invite_token = session.get('invite_token')
+        if invite_token:
+            cursor.execute('''
+                SELECT i.*, f.name AS invite_family_name FROM invitations i
+                LEFT JOIN families f ON f.id = i.family_id
+                WHERE i.token = %s AND i.status = 'sent' AND i.expires_at > CURRENT_TIMESTAMP
+                  AND i.invite_type IN ('join_family', 'join_site')
+            ''', (invite_token,))
+            inv = cursor.fetchone()
+            if inv:
+                return {'kind': 'invite', 'token': invite_token, 'invitation': dict(inv)}
+            session.pop('invite_token', None)
+        return None
+    finally:
+        cursor.close()
+
+def _register_prefill(ctx):
+    if not ctx:
+        return {}
+    if ctx['kind'] == 'claim':
+        p = ctx['player']
+        return {
+            'prefill_first_name': p.get('first_name'),
+            'prefill_last_name': p.get('last_name'),
+            'prefill_email': p.get('email'),
+            'lock_family_name': p.get('home_family_name'),
+            'invite_banner': f"You are claiming the player profile \"{p.get('display_name') or p.get('first_name')}\" in the {p.get('home_family_name')} family. Your game history is already attached to it.",
+        }
+    inv = ctx['invitation']
+    out = {'prefill_email': inv.get('email')}
+    if inv['invite_type'] == 'join_family' and inv.get('family_id'):
+        out['lock_family_name'] = inv.get('invite_family_name')
+        out['invite_banner'] = f"You were invited to join the {inv.get('invite_family_name')} family. Finish signing up and you are in."
+    else:
+        out['invite_banner'] = 'You were invited to DiFede Games. Sign up to start your own family group.'
+    return out
+
 @auth_bp.route('/register', methods=['GET', 'POST'])
 def register():
-    """Registration page and handler"""
+    """Registration page and handler. Supports three entries: plain signup
+    (own new family, leads it), claim invite (binds to an existing player and
+    their family), and email invite (joins the inviting family)."""
     if request.method == 'GET':
-        # If user is already logged in, redirect to dashboard
         if 'user_id' in session:
             return redirect(url_for('main.dashboard'))
-        return render_template('auth/register.html')
-    
-    if request.method == 'POST':
+        conn = get_db_connection()
         try:
-            # Get form data
-            first_name = request.form.get('first_name', '').strip()
-            last_name = request.form.get('last_name', '').strip()
-            family_name = request.form.get('family_name', '').strip()
-            email = request.form.get('email', '').strip().lower()
-            password = request.form.get('password', '')
-            confirm_password = request.form.get('confirm_password', '')
+            ctx = _register_context(conn)
+        finally:
+            conn.close()
+        return render_template('auth/register.html', **_register_prefill(ctx))
 
-            # Validation
-            if not all([first_name, last_name, family_name, email, password]):
-                flash('All fields are required.', 'error')
-                return render_template('auth/register.html')
+    conn = None
+    try:
+        first_name = request.form.get('first_name', '').strip()
+        last_name = request.form.get('last_name', '').strip()
+        family_name = request.form.get('family_name', '').strip()
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
 
-            if not validate_email(email):
-                flash('Please enter a valid email address.', 'error')
-                return render_template('auth/register.html')
+        conn = get_db_connection()
+        ctx = _register_context(conn)
+        prefill = _register_prefill(ctx)
+        joins_existing_family = ctx is not None and (
+            ctx['kind'] == 'claim'
+            or (ctx['kind'] == 'invite' and ctx['invitation']['invite_type'] == 'join_family'
+                and ctx['invitation'].get('family_id')))
 
-            if password != confirm_password:
-                flash('Passwords do not match.', 'error')
-                return render_template('auth/register.html')
+        required = [first_name, last_name, email, password]
+        if not joins_existing_family:
+            required.append(family_name)
+        if not all(required):
+            flash('All fields are required.', 'error')
+            return render_template('auth/register.html', **prefill)
+        if not validate_email(email):
+            flash('Please enter a valid email address.', 'error')
+            return render_template('auth/register.html', **prefill)
+        if password != confirm_password:
+            flash('Passwords do not match.', 'error')
+            return render_template('auth/register.html', **prefill)
+        if not validate_password(password):
+            flash('Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one digit, and one special character.', 'error')
+            return render_template('auth/register.html', **prefill)
 
-            if not validate_password(password):
-                flash('Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one digit, and one special character.', 'error')
-                return render_template('auth/register.html')
-
-            # Check if user already exists
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute('SELECT id FROM users WHERE email = %s', (email,))
-            if cursor.fetchone():
-                flash('An account with this email already exists.', 'error')
-                cursor.close()
-                conn.close()
-                return render_template('auth/register.html')
-
-            # Find or create family
-            cursor.execute('SELECT id FROM families WHERE name = %s', (family_name,))
-            family_row = cursor.fetchone()
-            is_new_family = False
-            if family_row:
-                family_id = family_row['id']
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, archived_at FROM users WHERE lower(email) = %s', (email,))
+        existing = cursor.fetchone()
+        if existing:
+            if existing.get('archived_at'):
+                flash('An account with this email exists but was archived. Contact the administrator to reinstate it.', 'error')
             else:
-                cursor.execute(
-                    'INSERT INTO families (name) VALUES (%s) RETURNING id',
-                    (family_name,))
-                family_id = cursor.fetchone()['id']
-                is_new_family = True
+                flash('An account with this email already exists.', 'error')
+            cursor.close()
+            return render_template('auth/register.html', **prefill)
 
-            # Create user account
-            password_hash = generate_password_hash(password)
-            cursor.execute('''
-                INSERT INTO users (first_name, last_name, family_name, email, password_hash,
-                                   is_verified, is_approved, family_id, created_at)
-                VALUES (%s, %s, %s, %s, %s, FALSE, FALSE, %s, NOW())
-                RETURNING id
-            ''', (first_name, last_name, family_name, email, password_hash, family_id))
-            
-            user_result = cursor.fetchone()
-            if not user_result:
-                flash('Registration failed. Please try again.', 'error')
-                cursor.close()
-                conn.close()
-                return render_template('auth/register.html')
-                
-            user_id = user_result['id']
+        # Where does this person land?
+        name_taken = False
+        is_new_family = False
+        invited_by_email = None
+        if ctx and ctx['kind'] == 'claim':
+            family_id = ctx['player']['family_id']
+            family_name = ctx['player'].get('home_family_name') or family_name or 'Family'
+            invited_by_email = ctx['player'].get('email')
+        elif joins_existing_family:
+            family_id = ctx['invitation']['family_id']
+            family_name = ctx['invitation'].get('invite_family_name') or family_name or 'Family'
+            invited_by_email = ctx['invitation'].get('email')
+        else:
+            # Every plain signup gets their OWN family and leads it. Nobody is
+            # silently added to an existing family because the name matches;
+            # joining someone else's family goes through the directory.
+            if ctx and ctx['kind'] == 'invite':
+                invited_by_email = ctx['invitation'].get('email')
+            cursor.execute('SELECT COUNT(*) AS n FROM families WHERE lower(name) = lower(%s)', (family_name,))
+            name_taken = cursor.fetchone()['n'] > 0
+            cursor.execute(
+                'INSERT INTO families (name, slug) VALUES (%s, %s) RETURNING id',
+                (family_name, unique_family_slug(conn, family_name)))
+            family_id = cursor.fetchone()['id']
+            is_new_family = True
 
-            # Give the new account a player identity so their stats follow them,
-            # and record membership in their family (primary). Whoever creates a
-            # brand-new family leads it.
+        # Possession of an emailed token to this same address proves the email,
+        # and being invited by a lead removes the manual-approval step.
+        auto_trust = ctx is not None and invited_by_email is not None \
+            and invited_by_email.strip().lower() == email
+
+        password_hash = generate_password_hash(password)
+        cursor.execute('''
+            INSERT INTO users (first_name, last_name, family_name, email, password_hash,
+                               is_verified, is_approved, family_id, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            RETURNING id
+        ''', (first_name, last_name, family_name, email, password_hash,
+              auto_trust, auto_trust or ctx is not None, family_id))
+        user_result = cursor.fetchone()
+        if not user_result:
+            flash('Registration failed. Please try again.', 'error')
+            cursor.close()
+            return render_template('auth/register.html', **prefill)
+        user_id = user_result['id']
+
+        if ctx and ctx['kind'] == 'claim':
+            # Bind the existing person instead of creating a new one; their
+            # entire game history comes with them.
+            from .auth import consume_action_token
+            player_id = ctx['player']['id']
+            consume_action_token(conn, ctx['token'], 'claim_profile')
             cursor.execute('''
-                INSERT INTO players (first_name, last_name, display_name, user_id, family_id, email)
+                UPDATE players SET email = %s, email_verified = %s,
+                    archived_at = NULL, archived_by_user_id = NULL, archive_reason = NULL
+                WHERE id = %s
+            ''', (email, auto_trust, player_id))
+            cursor.execute('UPDATE users SET player_id = %s WHERE id = %s', (player_id, user_id))
+            cursor.execute('''
+                INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+                VALUES (%s, %s, TRUE, 'active', 'member')
+                ON CONFLICT (player_id, family_id) DO UPDATE SET status = 'active'
+            ''', (player_id, family_id))
+            cursor.execute('''
+                UPDATE invitations SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP
+                WHERE token = %s AND status = 'sent'
+            ''', (ctx['token'],))
+            audit(conn, user_id, 'profile_claimed_at_registration', 'players', player_id)
+            session.pop('claim_token', None)
+        else:
+            cursor.execute('''
+                INSERT INTO players (first_name, last_name, display_name, created_by_user_id, family_id, email)
                 VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
             ''', (first_name, last_name, first_name, user_id, family_id, email))
             player_id = cursor.fetchone()['id']
@@ -225,57 +332,68 @@ def register():
             if is_new_family:
                 cursor.execute('UPDATE families SET lead_user_id = %s, created_by_user_id = %s WHERE id = %s',
                                (user_id, user_id, family_id))
-            conn.commit()
+            if ctx and ctx['kind'] == 'invite':
+                cursor.execute('''
+                    UPDATE invitations SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP
+                    WHERE token = %s AND status = 'sent'
+                ''', (ctx['token'],))
+                audit(conn, user_id, 'invite_accepted_at_registration', 'invitations', ctx['invitation']['id'])
+                session.pop('invite_token', None)
+        conn.commit()
 
-            # Create verification token
+        if auto_trust:
             try:
-                token = create_verification_token(user_id)
-                verification_link = f"{APP_BASE_URL}/auth/verify/{token}"
-                
-                # Try to send verification email
-                email_sent = False
-                try:
-                    email_sent = send_verification_email(email, first_name, verification_link)
-                except Exception as email_error:
-                    logger.error(f"Email sending error: {email_error}")
-                    
-                # Try to send admin notification
-                try:
-                    send_registration_notification(first_name, last_name, email, family_name)
-                except Exception as notify_error:
-                    logger.error(f"Admin notification error: {notify_error}")
-                
-                cursor.close()
-                conn.close()
-                
-                if email_sent:
-                    flash(f'Registration successful! A verification email has been sent to {email}. Please check your email and click the verification link to activate your account.', 'success')
-                else:
-                    flash(f'Account created successfully, but we had trouble sending the verification email. Please contact the administrator at joe_71@yahoo.com to manually verify your account.', 'warning')
-                    
-                return redirect(url_for('auth.login'))
-                
-            except Exception as token_error:
-                logger.error(f"Token creation error: {token_error}")
-                cursor.close()
-                conn.close()
-                flash('Account created but verification setup failed. Please contact the administrator.', 'error')
-                return redirect(url_for('auth.login'))
+                send_registration_notification(first_name, last_name, email, family_name)
+            except Exception as notify_error:
+                logger.error(f"Admin notification error: {notify_error}")
+            cursor.close()
+            flash('Your account is ready. Sign in to get started.', 'success')
+            return redirect(url_for('auth.login'))
 
-        except Exception as e:
-            logger.error(f"Registration error: {e}")
-            import traceback
-            traceback.print_exc()
-            if conn:
-                try:
-                    conn.rollback()
-                    conn.close()
-                except Exception:
-                    pass
-            flash('Registration failed due to a system error. Please try again or contact the administrator.', 'error')
-            return render_template('auth/register.html')
+        try:
+            token = create_verification_token(user_id)
+            verification_link = f"{APP_BASE_URL}/auth/verify/{token}"
+            email_sent = False
+            try:
+                email_sent = send_verification_email(email, first_name, verification_link)
+            except Exception as email_error:
+                logger.error(f"Email sending error: {email_error}")
+            try:
+                send_registration_notification(first_name, last_name, email, family_name)
+            except Exception as notify_error:
+                logger.error(f"Admin notification error: {notify_error}")
+            cursor.close()
 
-    return render_template('auth/register.html')
+            if name_taken:
+                flash(f'Note: another family already uses the name "{family_name}". You now lead your own separate "{family_name}" family. If you meant to join the existing one, use the Directory after logging in to send a join request.', 'info')
+            if email_sent:
+                flash(f'Registration successful! A verification email has been sent to {email}. Please check your email and click the verification link to activate your account.', 'success')
+            else:
+                flash(f'Account created successfully, but we had trouble sending the verification email. Please contact the administrator at joe_71@yahoo.com to manually verify your account.', 'warning')
+            return redirect(url_for('auth.login'))
+        except Exception as token_error:
+            logger.error(f"Token creation error: {token_error}")
+            cursor.close()
+            flash('Account created but verification setup failed. Please contact the administrator.', 'error')
+            return redirect(url_for('auth.login'))
+
+    except Exception as e:
+        logger.error(f"Registration error: {e}")
+        import traceback
+        traceback.print_exc()
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        flash('Registration failed due to a system error. Please try again or contact the administrator.', 'error')
+        return render_template('auth/register.html')
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @auth_bp.route('/logout')
 def logout():

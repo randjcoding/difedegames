@@ -183,13 +183,13 @@
         </div>
         <div class="card-body p-0">
           {% for m in members %}
-          <div class="member-card">
+          <a href="{{ url_for('main.player_profile', player_id=m.id) }}" class="member-card" style="text-decoration:none;color:inherit;display:flex;">
             <div class="member-avatar">{{ m.display_name[0] | upper }}</div>
             <div>
               <div class="member-name">{{ m.display_name }}</div>
-              <div class="member-sub">{{ m.first_name }} {{ m.last_name }}{% if m.user_id %} <i class="fas fa-user-check text-success" title="Has login account"></i>{% endif %}</div>
+              <div class="member-sub">{{ m.first_name }} {{ m.last_name }}</div>
             </div>
-          </div>
+          </a>
           {% endfor %}
           {% if not members %}
           <div class="text-center py-3 text-muted">No players yet</div>
@@ -201,25 +201,48 @@
     <!-- Leaderboard -->
     <div class="col-md-6">
       <div class="section-card">
-        <div class="card-header">
-          <i class="fas fa-trophy me-2"></i>Family Leaderboard
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="fas fa-trophy me-2"></i>Leaderboard</span>
+          <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-outline-light active" id="scopeFamilyBtn">With This Family</button>
+            <button type="button" class="btn btn-outline-light" id="scopeLifetimeBtn">Lifetime</button>
+          </div>
         </div>
         <div class="card-body p-0">
-          {% for p in top_players %}
-          <div class="leaderboard-row">
-            <div class="lb-rank {% if loop.index == 1 %}lb-rank-1{% elif loop.index == 2 %}lb-rank-2{% elif loop.index == 3 %}lb-rank-3{% endif %}">{{ loop.index }}</div>
-            <div class="flex-grow-1">
-              <div style="font-weight:600;font-size:0.9rem;color:var(--df-text,#333);">{{ p.display_name }}</div>
-              <div style="font-size:0.75rem;color:var(--df-muted,#999);">{{ p.wins }} win{{ 's' if p.wins != 1 }} / {{ p.total_games }} game{{ 's' if p.total_games != 1 }}</div>
+          <div id="scopeFamily">
+            {% for p in family_top %}
+            <div class="leaderboard-row">
+              <div class="lb-rank {% if loop.index == 1 %}lb-rank-1{% elif loop.index == 2 %}lb-rank-2{% elif loop.index == 3 %}lb-rank-3{% endif %}">{{ loop.index }}</div>
+              <div class="flex-grow-1">
+                <a href="{{ url_for('main.player_profile', player_id=p.id) }}" style="font-weight:600;font-size:0.9rem;color:var(--df-text,#333);text-decoration:none;">{{ p.display_name }}</a>
+                <div style="font-size:0.75rem;color:var(--df-muted,#999);">{{ p.wins }} win{{ 's' if p.wins != 1 }} / {{ p.total_games }} game{{ 's' if p.total_games != 1 }} with {{ family.name }}</div>
+              </div>
+              <div style="font-weight:700;color:var(--df-accent);">
+                {% if p.total_games > 0 %}{{ ((p.wins / p.total_games) * 100) | round(0) | int }}%{% else %}--{% endif %}
+              </div>
             </div>
-            <div style="font-weight:700;color:var(--df-accent);">
-              {% if p.total_games > 0 %}{{ ((p.wins / p.total_games) * 100) | round(0) | int }}%{% else %}--{% endif %}
-            </div>
+            {% endfor %}
+            {% if not family_top %}
+            <div class="text-center py-3 text-muted">No games played yet</div>
+            {% endif %}
           </div>
-          {% endfor %}
-          {% if not top_players %}
-          <div class="text-center py-3 text-muted">No games played yet</div>
-          {% endif %}
+          <div id="scopeLifetime" style="display:none;">
+            {% for p in lifetime_top %}
+            <div class="leaderboard-row">
+              <div class="lb-rank {% if loop.index == 1 %}lb-rank-1{% elif loop.index == 2 %}lb-rank-2{% elif loop.index == 3 %}lb-rank-3{% endif %}">{{ loop.index }}</div>
+              <div class="flex-grow-1">
+                <a href="{{ url_for('main.player_profile', player_id=p.id) }}" style="font-weight:600;font-size:0.9rem;color:var(--df-text,#333);text-decoration:none;">{{ p.display_name }}</a>
+                <div style="font-size:0.75rem;color:var(--df-muted,#999);">{{ p.wins }} win{{ 's' if p.wins != 1 }} / {{ p.total_games }} game{{ 's' if p.total_games != 1 }} everywhere</div>
+              </div>
+              <div style="font-weight:700;color:var(--df-accent);">
+                {% if p.total_games > 0 %}{{ ((p.wins / p.total_games) * 100) | round(0) | int }}%{% else %}--{% endif %}
+              </div>
+            </div>
+            {% endfor %}
+            {% if not lifetime_top %}
+            <div class="text-center py-3 text-muted">No games played yet</div>
+            {% endif %}
+          </div>
         </div>
       </div>
 
@@ -253,4 +276,22 @@
   </div>
 
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var fBtn = document.getElementById('scopeFamilyBtn');
+  var lBtn = document.getElementById('scopeLifetimeBtn');
+  if (!fBtn) return;
+  function setScope(family) {
+    document.getElementById('scopeFamily').style.display = family ? '' : 'none';
+    document.getElementById('scopeLifetime').style.display = family ? 'none' : '';
+    fBtn.classList.toggle('active', family);
+    lBtn.classList.toggle('active', !family);
+  }
+  fBtn.addEventListener('click', function() { setScope(true); });
+  lBtn.addEventListener('click', function() { setScope(false); });
+})();
+</script>
 {% endblock %}

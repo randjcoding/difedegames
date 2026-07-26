@@ -1,0 +1,344 @@
+{% extends "base.html" %}
+{% block title %}Directory{% endblock %}
+
+{% block styles %}
+<style>
+  .dir-hero {
+    background: var(--df-card-header);
+    border-radius: 12px;
+    color: var(--df-dt-header-text);
+    padding: 1.5rem 2rem;
+    margin-bottom: 1.5rem;
+  }
+  .dir-hero h1 { font-weight: 700; margin-bottom: 0.25rem; }
+  .dir-hero p { margin-bottom: 0; opacity: 0.85; font-size: 0.9rem; }
+
+  .dir-card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    margin-bottom: 1.25rem;
+    background: var(--df-surface);
+    color: var(--df-text);
+    overflow: hidden;
+  }
+  .dir-card .card-header {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text);
+    font-weight: 700;
+    padding: 0.65rem 1rem;
+    border-bottom: 2px solid var(--df-accent);
+  }
+  .dir-card .card-body { padding: 1rem; }
+
+  .dir-tabs .nav-link {
+    color: var(--df-muted);
+    font-weight: 600;
+    border: none;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+    background: transparent;
+  }
+  .dir-tabs .nav-link.active {
+    color: var(--df-accent);
+    border-bottom-color: var(--df-accent);
+    background: transparent;
+  }
+
+  .result-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 0.5rem;
+    border-bottom: 1px solid var(--df-border, #2a2a4a);
+    flex-wrap: wrap;
+  }
+  .result-row:last-child { border-bottom: none; }
+  .result-avatar {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: var(--df-accent-gradient);
+    color: var(--df-btn-primary-text);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .result-info { flex: 1; min-width: 160px; }
+  .result-info .name { font-weight: 600; }
+  .result-info .sub { font-size: 0.8rem; color: var(--df-muted); }
+  .result-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+
+  .roster-box {
+    background: rgba(0,0,0,0.12);
+    border: 1px solid var(--df-border, #2a2a4a);
+    border-radius: 8px;
+    padding: 0.75rem;
+    margin: 0.5rem 0 0.75rem;
+    width: 100%;
+  }
+  .roster-member {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.3rem 0.25rem;
+    font-size: 0.9rem;
+  }
+  .dir-empty { color: var(--df-muted); text-align: center; padding: 1.5rem 0; font-size: 0.9rem; }
+  .privacy-note {
+    font-size: 0.78rem;
+    color: var(--df-muted);
+    margin-top: 0.5rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3" style="max-width: 900px;">
+  <div class="dir-hero">
+    <h1><i class="fas fa-search me-2"></i>Directory</h1>
+    <p>Find players and families, confirm you have the right one, and send a join request. People appear by first name and last initial; email addresses are never shown.</p>
+  </div>
+
+  <ul class="nav nav-tabs dir-tabs mb-3" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabPeople" type="button" role="tab">People</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabFamilies" type="button" role="tab">Families</button></li>
+  </ul>
+
+  <div class="tab-content">
+    <div class="tab-pane fade show active" id="tabPeople" role="tabpanel">
+      <div class="dir-card card">
+        <div class="card-header">Search People</div>
+        <div class="card-body">
+          <div class="input-group mb-2">
+            <input type="text" class="form-control" id="peopleQuery" placeholder="Name (at least 2 letters)" autocomplete="off">
+            <button class="btn btn-primary" id="peopleSearchBtn"><i class="fas fa-search"></i></button>
+          </div>
+          <div id="peopleResults"><div class="dir-empty">Search by first or last name.</div></div>
+        </div>
+      </div>
+
+      <div class="dir-card card">
+        <div class="card-header">Know Their Email?</div>
+        <div class="card-body">
+          <div class="input-group mb-2">
+            <input type="email" class="form-control" id="emailQuery" placeholder="Exact email address" autocomplete="off">
+            <button class="btn btn-primary" id="emailSearchBtn"><i class="fas fa-at"></i></button>
+          </div>
+          <div id="emailResult"></div>
+          <div class="privacy-note">Requires the complete address. Partial matches are not supported, and the address itself is never displayed.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="tabFamilies" role="tabpanel">
+      <div class="dir-card card">
+        <div class="card-header">Search Families</div>
+        <div class="card-body">
+          <div class="input-group mb-2">
+            <input type="text" class="form-control" id="familyQuery" placeholder="Family name (at least 2 letters)" autocomplete="off">
+            <button class="btn btn-primary" id="familySearchBtn"><i class="fas fa-search"></i></button>
+          </div>
+          <div id="familyResults"><div class="dir-empty">Search for a family, then open its roster to make sure it is the right one.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+  function initial(name) { return (name || '?').trim().charAt(0).toUpperCase(); }
+  function toast(msg, ok) {
+    var el = document.createElement('div');
+    el.className = 'alert ' + (ok ? 'alert-success' : 'alert-danger') + ' position-fixed bottom-0 start-50 translate-middle-x mb-3 shadow';
+    el.style.zIndex = 3000;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(function() { el.remove(); }, 3500);
+  }
+
+  function requestJoin(familyId, btn) {
+    btn.disabled = true;
+    fetch('/api/families/' + familyId + '/request-join', { method: 'POST', headers: {'Content-Type': 'application/json'} })
+      .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+      .then(function(res) {
+        toast(res.j.message || res.j.error || 'Done', res.ok);
+        if (!res.ok) btn.disabled = false;
+      })
+      .catch(function() { toast('Request failed', false); btn.disabled = false; });
+  }
+
+  function personRowHtml(p) {
+    var joinBtn = p.in_my_family ? '' :
+      '<button class="btn btn-sm btn-outline-primary join-btn" data-family="' + p.family_id + '">Request to Join Their Family</button>';
+    return '<div class="result-row">' +
+      '<div class="result-avatar">' + esc(initial(p.name)) + '</div>' +
+      '<div class="result-info">' +
+        '<div class="name">' + esc(p.name) + (p.is_claimed ? '' : ' <span class="badge bg-secondary" style="font-size:0.65rem;">No account yet</span>') + '</div>' +
+        '<div class="sub">' + esc(p.family_label) + (p.in_my_family ? ' - your family' : '') + '</div>' +
+      '</div>' +
+      '<div class="result-actions">' + joinBtn + '</div>' +
+    '</div>';
+  }
+
+  function renderPeople(list, container) {
+    if (!list.length) {
+      container.innerHTML = '<div class="dir-empty">No one found. They may not exist here yet, or they may have chosen not to be listed.</div>';
+      return;
+    }
+    container.innerHTML = list.map(personRowHtml).join('');
+    container.querySelectorAll('.join-btn').forEach(function(b) {
+      b.addEventListener('click', function() { requestJoin(b.dataset.family, b); });
+    });
+  }
+
+  function searchPeople() {
+    var q = document.getElementById('peopleQuery').value.trim();
+    var box = document.getElementById('peopleResults');
+    if (q.length < 2) { box.innerHTML = '<div class="dir-empty">Type at least 2 letters.</div>'; return; }
+    box.innerHTML = '<div class="dir-empty">Searching...</div>';
+    fetch('/api/directory/people?q=' + encodeURIComponent(q))
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        if (j.error) { box.innerHTML = '<div class="dir-empty">' + esc(j.error) + '</div>'; return; }
+        renderPeople(j.results || [], box);
+      })
+      .catch(function() { box.innerHTML = '<div class="dir-empty">Search failed. Try again.</div>'; });
+  }
+
+  function searchEmail() {
+    var email = document.getElementById('emailQuery').value.trim();
+    var box = document.getElementById('emailResult');
+    if (!email) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="dir-empty">Looking up...</div>';
+    fetch('/api/directory/lookup-email', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email: email })
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        if (j.error) { box.innerHTML = '<div class="dir-empty">' + esc(j.error) + '</div>'; return; }
+        if (!j.found) { box.innerHTML = '<div class="dir-empty">No match for that address.</div>'; return; }
+        renderPeople([{ player_id: j.player_id, name: j.name, family_id: j.family_id,
+                        family_label: j.family_label, is_claimed: true, in_my_family: false }], box);
+      })
+      .catch(function() { box.innerHTML = '<div class="dir-empty">Lookup failed. Try again.</div>'; });
+  }
+
+  function familyRowHtml(f) {
+    var actions = '';
+    if (!f.is_my_family) {
+      actions += '<button class="btn btn-sm btn-outline-primary join-btn" data-family="' + f.family_id + '">Request to Join</button>';
+    }
+    actions += '<button class="btn btn-sm btn-outline-secondary roster-btn" data-family="' + f.family_id + '">View Roster</button>';
+    return '<div class="result-row" id="fam-' + f.family_id + '">' +
+      '<div class="result-avatar"><i class="fas fa-home"></i></div>' +
+      '<div class="result-info">' +
+        '<div class="name">' + esc(f.name) + (f.is_my_family ? ' <span class="badge bg-info" style="font-size:0.65rem;">Your family</span>' : '') + '</div>' +
+        '<div class="sub">' + esc(f.label) + ' - ' + f.member_count + ' member' + (f.member_count === 1 ? '' : 's') + '</div>' +
+      '</div>' +
+      '<div class="result-actions">' + actions + '</div>' +
+      '<div class="roster-slot w-100"></div>' +
+    '</div>';
+  }
+
+  function loadRoster(familyId, slot, btn) {
+    if (slot.dataset.open === '1') {
+      slot.innerHTML = '';
+      slot.dataset.open = '0';
+      btn.textContent = 'View Roster';
+      return;
+    }
+    btn.disabled = true;
+    fetch('/api/directory/families/' + familyId + '/roster')
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        btn.disabled = false;
+        if (j.error) { toast(j.error, false); return; }
+        var canTransfer = !!j.can_request_transfer;
+        var html = '<div class="roster-box">';
+        if (!j.roster_visible) {
+          html += '<div class="dir-empty mb-0">This family keeps its roster private. It has ' + j.member_count + ' member' + (j.member_count === 1 ? '' : 's') + '.</div>';
+        } else if (!j.members.length) {
+          html += '<div class="dir-empty mb-0">No listed members.</div>';
+        } else {
+          html += j.members.map(function(m) {
+            var check = canTransfer
+              ? '<input type="checkbox" class="form-check-input me-1 transfer-check" value="' + m.player_id + '">'
+              : '';
+            return '<div class="roster-member">' + check + '<i class="fas fa-user" style="color:var(--df-accent);"></i> ' + esc(m.name) +
+              (m.is_claimed ? '' : ' <span class="badge bg-secondary" style="font-size:0.6rem;">No account yet</span>') + '</div>';
+          }).join('');
+          if (canTransfer) {
+            html += '<div class="mt-2">' +
+              '<button class="btn btn-sm btn-outline-primary transfer-request-btn">Request Transfer to My Family</button>' +
+              '<div style="font-size:0.72rem;color:var(--df-muted);margin-top:4px;">Check the people who belong with your family. Their current family lead has to approve, and their game history stays where it was played.</div>' +
+              '</div>';
+          }
+        }
+        html += '</div>';
+        slot.innerHTML = html;
+        slot.dataset.open = '1';
+        btn.textContent = 'Hide Roster';
+
+        var trBtn = slot.querySelector('.transfer-request-btn');
+        if (trBtn) {
+          trBtn.addEventListener('click', function() {
+            var ids = Array.prototype.map.call(slot.querySelectorAll('.transfer-check:checked'), function(c) { return parseInt(c.value, 10); });
+            if (!ids.length) { toast('Check at least one person first', false); return; }
+            trBtn.disabled = true;
+            fetch('/api/release-requests', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ player_ids: ids })
+            })
+              .then(function(r) { return r.json().then(function(jj) { return { ok: r.ok, j: jj }; }); })
+              .then(function(res) {
+                toast(res.j.message || res.j.error || 'Done', res.ok);
+                if (!res.ok) trBtn.disabled = false;
+              })
+              .catch(function() { toast('Request failed', false); trBtn.disabled = false; });
+          });
+        }
+      })
+      .catch(function() { btn.disabled = false; toast('Could not load roster', false); });
+  }
+
+  function searchFamilies() {
+    var q = document.getElementById('familyQuery').value.trim();
+    var box = document.getElementById('familyResults');
+    if (q.length < 2) { box.innerHTML = '<div class="dir-empty">Type at least 2 letters.</div>'; return; }
+    box.innerHTML = '<div class="dir-empty">Searching...</div>';
+    fetch('/api/directory/families?q=' + encodeURIComponent(q))
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        if (j.error) { box.innerHTML = '<div class="dir-empty">' + esc(j.error) + '</div>'; return; }
+        var list = j.results || [];
+        if (!list.length) { box.innerHTML = '<div class="dir-empty">No families found by that name.</div>'; return; }
+        box.innerHTML = list.map(familyRowHtml).join('');
+        box.querySelectorAll('.join-btn').forEach(function(b) {
+          b.addEventListener('click', function() { requestJoin(b.dataset.family, b); });
+        });
+        box.querySelectorAll('.roster-btn').forEach(function(b) {
+          b.addEventListener('click', function() {
+            var row = document.getElementById('fam-' + b.dataset.family);
+            loadRoster(b.dataset.family, row.querySelector('.roster-slot'), b);
+          });
+        });
+      })
+      .catch(function() { box.innerHTML = '<div class="dir-empty">Search failed. Try again.</div>'; });
+  }
+
+  document.getElementById('peopleSearchBtn').addEventListener('click', searchPeople);
+  document.getElementById('peopleQuery').addEventListener('keydown', function(e) { if (e.key === 'Enter') searchPeople(); });
+  document.getElementById('emailSearchBtn').addEventListener('click', searchEmail);
+  document.getElementById('emailQuery').addEventListener('keydown', function(e) { if (e.key === 'Enter') searchEmail(); });
+  document.getElementById('familySearchBtn').addEventListener('click', searchFamilies);
+  document.getElementById('familyQuery').addEventListener('keydown', function(e) { if (e.key === 'Enter') searchFamilies(); });
+})();
+</script>
+{% endblock %}

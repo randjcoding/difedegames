@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}My Profile{% endblock %}
+
+{% block styles %}
+<style>
+  .profile-hero {
+    background: var(--df-card-header);
+    border-radius: 12px;
+    color: var(--df-dt-header-text);
+    padding: 1.5rem 2rem;
+    margin-bottom: 1.5rem;
+  }
+  .profile-hero h1 { font-weight: 700; margin-bottom: 0.25rem; }
+
+  .profile-card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    margin-bottom: 1.25rem;
+    background: var(--df-surface);
+    color: var(--df-text);
+    overflow: hidden;
+  }
+  .profile-card .card-header {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text);
+    font-weight: 700;
+    padding: 0.65rem 1rem;
+    border-bottom: 2px solid var(--df-accent);
+  }
+  .profile-card .card-body { padding: 1.25rem; }
+  .profile-card .form-label { color: var(--df-text); font-weight: 600; }
+  .setting-help { font-size: 0.8rem; color: var(--df-muted); }
+  .form-check-input:checked { background-color: var(--df-accent); border-color: var(--df-accent); }
+  .readonly-value {
+    background: rgba(0,0,0,0.12);
+    border: 1px solid var(--df-border, #2a2a4a);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3" style="max-width: 720px;">
+  <div class="profile-hero">
+    <h1><i class="fas fa-id-card me-2"></i>My Profile</h1>
+    <p class="mb-0" style="opacity:0.85; font-size:0.9rem;">Control how you appear to people outside your family. Your email address is never shown to anyone; it is only used for login and invites.</p>
+  </div>
+
+  {% if saved %}
+  <div class="alert alert-success">Your settings were saved.</div>
+  {% endif %}
+  {% if error %}
+  <div class="alert alert-danger">Something went wrong saving your settings: {{ error }}</div>
+  {% endif %}
+
+  <form method="POST" action="{{ url_for('main.profile') }}">
+    {% if person %}
+    <div class="profile-card card">
+      <div class="card-header">How You Appear</div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <div class="readonly-value">{{ person.first_name }} {{ person.last_name }}</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="display_name">Display Name</label>
+          <input type="text" class="form-control" id="display_name" name="display_name"
+                 value="{{ person.display_name or '' }}" maxlength="60"
+                 placeholder="{{ person.first_name }}">
+          <div class="setting-help">Shown on score sheets and leaderboards instead of your first name.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Email</label>
+          <div class="readonly-value">{{ current_user.email }}</div>
+          <div class="setting-help">Used for login and invites only. Never visible to other members.</div>
+        </div>
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" id="is_discoverable" name="is_discoverable"
+                 {% if person.is_discoverable %}checked{% endif %}>
+          <label class="form-check-label" for="is_discoverable">Let people find me in the Directory</label>
+          <div class="setting-help">When off, searches will not return you. People already in your family and crew can still see you.</div>
+        </div>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="show_full_last_name" name="show_full_last_name"
+                 {% if person.show_full_last_name %}checked{% endif %}>
+          <label class="form-check-label" for="show_full_last_name">Show my full last name in search results</label>
+          <div class="setting-help">When off, you appear as "{{ person.first_name }} {{ person.last_name[0] }}." to people outside your family.</div>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="profile-card card">
+      <div class="card-body">
+        <p class="mb-0">Your account is not linked to a player profile yet. Ask your family lead to send you a claim invite, or visit <a href="{{ url_for('main.my_team') }}">My Team</a>.</p>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if lead_of %}
+    <div class="profile-card card">
+      <div class="card-header">Family Settings ({{ lead_of.name }})</div>
+      <div class="card-body">
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" id="family_discoverable" name="family_discoverable"
+                 {% if lead_of.is_discoverable %}checked{% endif %}>
+          <label class="form-check-label" for="family_discoverable">List {{ lead_of.name }} in the family directory</label>
+          <div class="setting-help">When off, nobody can find your family by searching.</div>
+        </div>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="family_show_roster" name="family_show_roster"
+                 {% if lead_of.show_roster %}checked{% endif %}>
+          <label class="form-check-label" for="family_show_roster">Show our member list to non-members</label>
+          <div class="setting-help">Members appear by first name and last initial. Children are only ever visible to your own family and directly allied crews, regardless of this setting.</div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if person or lead_of %}
+    <button type="submit" class="btn btn-primary w-100 py-2">Save Settings</button>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

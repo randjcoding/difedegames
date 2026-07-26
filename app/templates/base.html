@@ -511,7 +511,12 @@
                 <i class="fas fa-trophy"></i> Leaderboard
               </a>
             </li>
-            {% if current_user.role in ('family_admin', 'super_admin') %}
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('main.directory') }}">
+                <i class="fas fa-search"></i> Directory
+              </a>
+            </li>
+            {% if current_user.family_id %}
             <li class="nav-item">
               <a class="nav-link" href="{{ url_for('main.my_team') }}">
                 <i class="fas fa-users-cog"></i> My Team
@@ -604,7 +609,12 @@
                 <li><h6 class="dropdown-header">{{ current_user.family_name }}</h6></li>
                 <li>
                   <a class="dropdown-item" href="{{ url_for('auth.profile') }}">
-                    <i class="fas fa-user-edit"></i> Profile
+                    <i class="fas fa-user-edit"></i> Account
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item" href="{{ url_for('main.profile') }}">
+                    <i class="fas fa-user-shield"></i> Privacy
                   </a>
                 </li>
                 <li>
@@ -803,6 +813,23 @@
           }).catch(function(){});
       }
 
+      // Generic actionable notifications: any notification whose data contains
+      // an actions array of {label, style, method, url} renders working buttons.
+      var notifActionRegistry = [];
+
+      function notifActionsFor(n) {
+        var data = {};
+        try { data = typeof n.data === 'string' ? JSON.parse(n.data) : (n.data || {}); } catch(e) {}
+        var acts = Array.isArray(data.actions) ? data.actions : null;
+        if (!acts && n.type === 'crew_up_request' && data.alliance_id) {
+          acts = [
+            { label: 'Accept', style: 'success', method: 'POST', url: '/api/alliances/' + data.alliance_id + '/accept' },
+            { label: 'Decline', style: 'outline-secondary', method: 'POST', url: '/api/alliances/' + data.alliance_id + '/decline' }
+          ];
+        }
+        return acts || [];
+      }
+
       function loadNotifications() {
         fetch('/api/notifications')
           .then(function(r){ return r.json(); })
@@ -812,6 +839,7 @@
               list.innerHTML = '<div class="text-center text-muted py-3" style="font-size:0.85rem;">No notifications</div>';
               return;
             }
+            notifActionRegistry = [];
             var html = '';
             notifs.forEach(function(n){
               var cls = n.is_read ? 'opacity-50' : '';
@@ -820,18 +848,21 @@
               if (n.type === 'crew_up_request') icon = 'fa-handshake';
               else if (n.type === 'crew_up_accepted') icon = 'fa-check-circle text-success';
               else if (n.type === 'user_pending_approval') icon = 'fa-user-clock text-warning';
+              else if (n.type === 'family_join_request') icon = 'fa-user-plus text-warning';
+              else if (n.type === 'release_request') icon = 'fa-people-arrows text-warning';
+              else if (n.type === 'family_invite') icon = 'fa-envelope-open-text text-warning';
 
               var actions = '';
-              if (n.type === 'crew_up_request' && !n.is_read) {
-                try {
-                  var data = typeof n.data === 'string' ? JSON.parse(n.data) : n.data;
-                  if (data.alliance_id) {
-                    actions = '<div class="mt-1">' +
-                      '<button class="btn btn-success btn-sm me-1" onclick="acceptAlliance(' + data.alliance_id + ',' + n.id + ')"><i class="fas fa-check"></i> Accept</button>' +
-                      '<button class="btn btn-outline-secondary btn-sm" onclick="declineAlliance(' + data.alliance_id + ',' + n.id + ')"><i class="fas fa-times"></i> Decline</button>' +
-                      '</div>';
-                  }
-                } catch(e){}
+              if (!n.is_read) {
+                var acts = notifActionsFor(n);
+                if (acts.length) {
+                  var btns = acts.map(function(a){
+                    var idx = notifActionRegistry.length;
+                    notifActionRegistry.push({ notifId: n.id, method: a.method || 'POST', url: a.url });
+                    return '<button class="btn btn-' + (a.style || 'primary') + ' btn-sm me-1 notif-action-btn" data-action-idx="' + idx + '">' + a.label + '</button>';
+                  }).join('');
+                  actions = '<div class="mt-1">' + btns + '</div>';
+                }
               }
 
               var ago = timeAgo(n.created_at);
@@ -847,6 +878,30 @@
                 '</div></div>';
             });
             list.innerHTML = html;
+
+            list.querySelectorAll('.notif-action-btn').forEach(function(btn){
+              btn.addEventListener('click', function(ev){
+                ev.preventDefault();
+                ev.stopPropagation();
+                var act = notifActionRegistry[parseInt(btn.dataset.actionIdx, 10)];
+                if (!act) return;
+                btn.disabled = true;
+                fetch(act.url, { method: act.method, headers: {'Content-Type': 'application/json'} })
+                  .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+                  .then(function(res){
+                    if (res.ok) {
+                      markRead(act.notifId);
+                      loadNotifications();
+                      loadNotifCount();
+                      if (res.j.message && window.AppModal) window.AppModal.success('Done', res.j.message);
+                    } else {
+                      btn.disabled = false;
+                      if (window.AppModal) window.AppModal.error('Error', res.j.error || 'Action failed.');
+                    }
+                  })
+                  .catch(function(){ btn.disabled = false; });
+              });
+            });
           }).catch(function(){});
       }
 
@@ -863,33 +918,6 @@
       window.markRead = function(id, el) {
         fetch('/api/notifications/' + id + '/read', {method:'POST'}).then(function(){ loadNotifCount(); });
         if (el) el.classList.add('opacity-50');
-      };
-
-      window.acceptAlliance = function(allianceId, notifId) {
-        fetch('/api/alliances/' + allianceId + '/accept', {method:'POST',headers:{'Content-Type':'application/json'}})
-          .then(function(r){ return r.json(); })
-          .then(function(d){
-            if (d.success) {
-              window.AppModal.success('Crew Up Accepted!', 'You are now game night crew! Time to play together.');
-              markRead(notifId);
-              loadNotifications();
-              loadNotifCount();
-            } else {
-              window.AppModal.error('Error', d.error || 'Failed to accept request.');
-            }
-          });
-      };
-
-      window.declineAlliance = function(allianceId, notifId) {
-        fetch('/api/alliances/' + allianceId + '/decline', {method:'POST',headers:{'Content-Type':'application/json'}})
-          .then(function(r){ return r.json(); })
-          .then(function(d){
-            if (d.success) {
-              markRead(notifId);
-              loadNotifications();
-              loadNotifCount();
-            }
-          });
       };
 
       document.getElementById('markAllReadBtn').addEventListener('click', function(e){

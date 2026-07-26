@@ -563,6 +563,76 @@ def validate_password_strength(password):
     
     return True, "Password is valid"
 
+def create_action_token(purpose, player_id=None, user_id=None, family_id=None,
+                        payload=None, ttl_hours=72):
+    """Single-use token for email approve/claim links. Returns the token string
+    or None. The token identifies the REQUEST; the executing route must still
+    verify the logged-in user is authorized for the action."""
+    import json as _json
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.utcnow() + timedelta(hours=ttl_hours)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO action_tokens (token, purpose, player_id, user_id, family_id, payload, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING token
+        ''', (token, purpose, player_id, user_id, family_id,
+              _json.dumps(payload or {}), expires_at))
+        row = cursor.fetchone()
+        conn.commit()
+        cursor.close()
+        return row['token'] if row else None
+    except Exception as e:
+        conn.rollback()
+        print(f"Error creating action token: {e}")
+        return None
+    finally:
+        conn.close()
+
+def peek_action_token(conn, token, expected_purpose=None):
+    """Read a token without consuming it. Returns the row or None. Accepts a
+    single purpose or a tuple of purposes."""
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM action_tokens WHERE token = %s', (token,))
+    row = cursor.fetchone()
+    cursor.close()
+    if not row:
+        return None
+    if row['used_at'] is not None or row['expires_at'] < datetime.utcnow():
+        return None
+    if expected_purpose:
+        allowed = expected_purpose if isinstance(expected_purpose, (tuple, list)) else (expected_purpose,)
+        if row['purpose'] not in allowed:
+            return None
+    return dict(row)
+
+def consume_action_token(conn, token, expected_purpose=None):
+    """Atomically mark a token used and return its row, or None if invalid,
+    expired, already used, or the wrong purpose. Caller commits."""
+    allowed = None
+    if expected_purpose:
+        allowed = list(expected_purpose) if isinstance(expected_purpose, (tuple, list)) else [expected_purpose]
+    cursor = conn.cursor()
+    if allowed:
+        cursor.execute('''
+            UPDATE action_tokens SET used_at = CURRENT_TIMESTAMP
+            WHERE token = %s AND used_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+              AND purpose = ANY(%s)
+            RETURNING *
+        ''', (token, allowed))
+    else:
+        cursor.execute('''
+            UPDATE action_tokens SET used_at = CURRENT_TIMESTAMP
+            WHERE token = %s AND used_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+            RETURNING *
+        ''', (token,))
+    row = cursor.fetchone()
+    cursor.close()
+    return dict(row) if row else None
+
 # Simple wrapper functions for auth_routes.py
 def validate_email(email):
     """Simple email validation wrapper"""
