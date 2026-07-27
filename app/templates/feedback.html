@@ -92,16 +92,17 @@
     <div class="card-header">Your recent messages</div>
     <div class="card-body">
       {% for item in my_items %}
-      <div class="fb-mine-row">
+      <a class="fb-mine-row text-decoration-none" href="{{ url_for('main.feedback_detail', feedback_id=item.id) }}" style="color:inherit;">
         <div>
           <div style="font-weight:600;">{{ item.subject }}</div>
           <div style="font-size:0.8rem;color:var(--df-muted);">
             {{ categories.get(item.category, item.category) }}
             &middot; {{ item.created_at.strftime('%b %d, %Y') if item.created_at else '' }}
+            {% if item.reply_count %}&middot; {{ item.reply_count }} repl{{ 'y' if item.reply_count == 1 else 'ies' }}{% endif %}
           </div>
         </div>
         <span class="fb-status {{ item.status }}">{{ statuses.get(item.status, item.status) }}</span>
-      </div>
+      </a>
       {% endfor %}
     </div>
   </div>

@@ -48,10 +48,16 @@
     <p>{{ open_count }} open item{{ 's' if open_count != 1 else '' }}. Open an item to mark it seen and view the paper trail of who has read it.</p>
   </div>
 
-  <div class="afb-filters d-flex flex-wrap gap-2 mb-3">
-    <a href="{{ url_for('main.admin_feedback_list') }}" class="btn btn-sm {% if not filter_status %}btn-primary{% else %}btn-outline-secondary{% endif %}">All</a>
+  <div class="afb-filters d-flex flex-wrap gap-2 mb-3 align-items-center">
+    <form class="d-flex gap-2 flex-grow-1" method="GET" action="{{ url_for('main.admin_feedback_list') }}" style="max-width:420px;">
+      {% if filter_status %}<input type="hidden" name="status" value="{{ filter_status }}">{% endif %}
+      <input type="search" class="form-control form-control-sm" name="q" value="{{ filter_q or '' }}"
+             placeholder="Search subject, message, name, email..." style="background:#fff;color:#212529;">
+      <button type="submit" class="btn btn-sm btn-primary">Search</button>
+    </form>
+    <a href="{{ url_for('main.admin_feedback_list', q=filter_q) }}" class="btn btn-sm {% if not filter_status %}btn-primary{% else %}btn-outline-secondary{% endif %}">All</a>
     {% for key, label in statuses.items() %}
-    <a href="{{ url_for('main.admin_feedback_list', status=key) }}"
+    <a href="{{ url_for('main.admin_feedback_list', status=key, q=filter_q) }}"
        class="btn btn-sm {% if filter_status == key %}btn-primary{% else %}btn-outline-secondary{% endif %}">{{ label }}</a>
     {% endfor %}
   </div>
@@ -71,6 +77,7 @@
             &middot; {{ item.first_name }} {{ item.last_name }}
             &middot; {{ item.created_at.strftime('%b %d, %Y %I:%M %p') if item.created_at else '' }}
             &middot; Seen by {{ item.seen_count }}
+            {% if item.reply_count %}&middot; {{ item.reply_count }} repl{{ 'y' if item.reply_count == 1 else 'ies' }}{% endif %}
           </div>
         </div>
         <span class="afb-status {{ item.status }}">{{ statuses.get(item.status, item.status) }}</span>

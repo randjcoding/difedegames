@@ -62,12 +62,33 @@
       <div class="afd-body mb-3">{{ item.body }}</div>
 
       <label class="form-label fw-semibold">Status</label>
-      <div class="d-flex flex-wrap gap-2">
+      <div class="d-flex flex-wrap gap-2 mb-3">
         {% for key, label in statuses.items() %}
         <button type="button" class="btn btn-sm status-btn {% if item.status == key %}btn-primary{% else %}btn-outline-secondary{% endif %}"
                 data-status="{{ key }}">{{ label }}</button>
         {% endfor %}
       </div>
+
+      <hr>
+      <h6 class="fw-bold mb-3">Conversation</h6>
+      {% if not replies %}
+      <div class="text-muted mb-3">No replies yet.</div>
+      {% endif %}
+      {% for r in replies %}
+      <div class="mb-2 p-2" style="background:#f8f9fa;border:1px solid #e9ecef;border-radius:8px;color:#212529;white-space:pre-wrap;">
+        <div style="font-size:0.8rem;color:#6c757d;margin-bottom:0.25rem;">
+          <strong>{{ r.first_name }} {{ r.last_name }}</strong>
+          {% if r.role == 'super_admin' %}(Admin){% endif %}
+          &middot; {{ r.created_at.strftime('%b %d, %Y %I:%M %p') if r.created_at else '' }}
+        </div>
+        {{ r.body }}
+      </div>
+      {% endfor %}
+      <form method="POST" class="mt-3">
+        <label class="form-label fw-semibold" for="replyBody">Reply to user</label>
+        <textarea class="form-control mb-2" id="replyBody" name="body" rows="4" maxlength="10000" required style="background:#fff;color:#212529;"></textarea>
+        <button type="submit" class="btn btn-primary">Send Reply</button>
+      </form>
     </div>
   </div>
 

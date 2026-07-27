@@ -377,6 +377,65 @@
   </div>
   {% endif %}
 
+  <!-- Personal Crew -->
+  <div class="section-card">
+    <div class="card-header"><span><i class="fas fa-user-friends me-2"></i>Personal Crew</span></div>
+    <div class="card-body">
+      <p class="mb-3" style="font-size:0.88rem;color:var(--df-muted);">
+        Crew up with individual people (not whole families). Once they accept, you can pick each other when starting a game. Find people in the <a href="{{ url_for('main.directory') }}">Directory</a>.
+      </p>
+      {% if personal_crew.pending_in %}
+      <div class="mb-3">
+        <div class="fw-semibold mb-2" style="font-size:0.85rem;">Requests for you</div>
+        {% for c in personal_crew.pending_in %}
+        <div class="ally-row">
+          <div class="ally-icon"><i class="fas fa-user-plus"></i></div>
+          <div class="flex-grow-1">
+            <div style="font-weight:600;font-size:0.9rem;">{{ c.display_name }}</div>
+            <div style="font-size:0.72rem;color:var(--df-muted);">{{ c.family_name }}</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-success crew-accept-btn" data-id="{{ c.id }}">Accept</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary crew-decline-btn" data-id="{{ c.id }}">Decline</button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if personal_crew.pending_out %}
+      <div class="mb-3">
+        <div class="fw-semibold mb-2" style="font-size:0.85rem;">Waiting on them</div>
+        {% for c in personal_crew.pending_out %}
+        <div class="ally-row">
+          <div class="ally-icon"><i class="fas fa-hourglass-half"></i></div>
+          <div class="flex-grow-1">
+            <div style="font-weight:600;font-size:0.9rem;">{{ c.display_name }}</div>
+            <div style="font-size:0.72rem;color:var(--df-muted);">{{ c.family_name }}</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-danger crew-end-btn" data-id="{{ c.id }}">Cancel</button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if personal_crew.accepted %}
+      <div class="mb-1">
+        <div class="fw-semibold mb-2" style="font-size:0.85rem;">Accepted ({{ personal_crew.accepted|length }})</div>
+        {% for c in personal_crew.accepted %}
+        <div class="ally-row">
+          <div class="ally-icon"><i class="fas fa-user-check"></i></div>
+          <div class="flex-grow-1">
+            <div style="font-weight:600;font-size:0.9rem;">{{ c.display_name }}</div>
+            <div style="font-size:0.72rem;color:var(--df-muted);">{{ c.family_name }}</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-danger crew-end-btn" data-id="{{ c.id }}">End</button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if not personal_crew.pending_in and not personal_crew.pending_out and not personal_crew.accepted %}
+      <div class="text-center py-2" style="color:var(--df-muted);font-size:0.88rem;">No personal crew yet. Search the Directory and tap Crew up with me.</div>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- Crew Alliances -->
   <div class="section-card">
     <div class="card-header"><span><i class="fas fa-handshake me-2"></i>Crew Alliances ({{ alliances|length }})</span></div>
@@ -958,6 +1017,20 @@ $(function() {
     var doIt = function() { post("/api/families/{{ family.id }}/transfer-lead", { user_id: parseInt(uid, 10) }); };
     if (typeof AppModal !== 'undefined') AppModal.confirm('Transfer Leadership', 'Make this member the family lead? You will no longer be lead.', doIt);
     else if (confirm('Transfer leadership?')) doIt();
+  });
+
+  $(".crew-accept-btn").click(function() {
+    post("/api/crew-links/" + $(this).data("id") + "/accept", {});
+  });
+  $(".crew-decline-btn").click(function() {
+    post("/api/crew-links/" + $(this).data("id") + "/decline", {});
+  });
+  $(".crew-end-btn").click(function() {
+    var id = $(this).data("id");
+    var doIt = function() { post("/api/crew-links/" + id + "/end", {}); };
+    if (typeof AppModal !== 'undefined') {
+      AppModal.confirm('End Personal Crew', 'Remove this personal crew link? You can request again later.', doIt);
+    } else if (confirm('End this personal crew link?')) doIt();
   });
 });
 </script>

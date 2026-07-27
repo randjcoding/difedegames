@@ -107,6 +107,11 @@ window.GameLayouts = (function() {
   }
 
   function readPlayerIds() {
+    if (typeof cfg.getPlayerIds === 'function') {
+      return (cfg.getPlayerIds() || []).map(function(v) {
+        return v && v !== 'new' ? parseInt(v, 10) : null;
+      }).filter(function(x) { return !!x; });
+    }
     return $(cfg.playerSelect).map(function() {
       var v = $(this).val();
       return v && v !== 'new' ? parseInt(v, 10) : null;
@@ -258,6 +263,7 @@ window.GameLayouts = (function() {
     var $count = $(cfg.playerCount);
     if ($count.val() !== String(n)) {
       $count.val(String(n)).trigger('change');
+      afterRebuild();
     } else if (typeof cfg.rebuild === 'function') {
       cfg.rebuild();
     } else {
@@ -270,12 +276,16 @@ window.GameLayouts = (function() {
     var layout = pending;
     pending = null;
     var ids = layout.player_ids || [];
-    ids.forEach(function(pid, idx) {
-      var $sel = $(cfg.playerSelect + '[data-player-num="' + (idx + 1) + '"]');
-      if ($sel.find('option[value="' + pid + '"]').length) {
-        $sel.val(String(pid));
-      }
-    });
+    if (typeof cfg.setPlayerIds === 'function') {
+      cfg.setPlayerIds(ids);
+    } else {
+      ids.forEach(function(pid, idx) {
+        var $sel = $(cfg.playerSelect + '[data-player-num="' + (idx + 1) + '"]');
+        if ($sel.find('option[value="' + pid + '"]').length) {
+          $sel.val(String(pid));
+        }
+      });
+    }
     applySettings(layout);
     render();
   }
@@ -305,6 +315,8 @@ window.GameLayouts = (function() {
       hasSettings: false,
       playerCount: '#playerCount',
       playerSelect: '.player-select',
+      getPlayerIds: null,
+      setPlayerIds: null,
       scoringDirName: 'scoringDir',
       targetScore: '#targetScore',
       targetPreset: '.target-preset',

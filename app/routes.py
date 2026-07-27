@@ -147,9 +147,10 @@ def is_family_lead(conn, user, family_id):
     fam = execute_query_one(conn, 'SELECT lead_user_id FROM families WHERE id = %s', (family_id,))
     return bool(fam and fam.get('lead_user_id') == user.get('id'))
 
-def get_family_players(family_id, include_crew=False):
+def get_family_players(family_id, include_crew=False, for_player_id=None):
     """Roster for a family from memberships (a person can belong to several
-    families), optionally including allied/crew family players as guests."""
+    families), optionally including allied/crew family players as guests,
+    plus accepted personal crew links for for_player_id."""
     conn = get_db_connection()
     if not conn:
         return []
@@ -159,6 +160,7 @@ def get_family_players(family_id, include_crew=False):
             SELECT p.id, p.first_name, p.last_name,
                 COALESCE(p.display_name, p.first_name) as display_name,
                 FALSE as is_guest, NULL as guest_family_name,
+                FALSE as is_personal_crew,
                 p.family_id
             FROM players p
             JOIN player_family_memberships m ON m.player_id = p.id
@@ -187,6 +189,7 @@ def get_family_players(family_id, include_crew=False):
                     SELECT p.id, p.first_name, p.last_name,
                         COALESCE(p.display_name, p.first_name) as display_name,
                         TRUE as is_guest, %s as guest_family_name,
+                        FALSE as is_personal_crew,
                         p.family_id
                     FROM players p
                     JOIN player_family_memberships m ON m.player_id = p.id
@@ -197,6 +200,26 @@ def get_family_players(family_id, include_crew=False):
                     if cp['id'] not in seen:
                         seen.add(cp['id'])
                         result.append(cp)
+
+            if for_player_id:
+                personal = execute_query(conn, '''
+                    SELECT p.id, p.first_name, p.last_name,
+                        COALESCE(p.display_name, p.first_name) as display_name,
+                        TRUE as is_guest, 'Personal crew' as guest_family_name,
+                        TRUE as is_personal_crew,
+                        p.family_id
+                    FROM player_crew_links l
+                    JOIN players p ON p.id = CASE
+                        WHEN l.player_a_id = %s THEN l.player_b_id ELSE l.player_a_id END
+                    WHERE l.status = 'accepted'
+                      AND (l.player_a_id = %s OR l.player_b_id = %s)
+                      AND p.archived_at IS NULL AND p.purged_at IS NULL
+                    ORDER BY p.first_name, p.last_name
+                ''', (for_player_id, for_player_id, for_player_id))
+                for pp in personal:
+                    if pp['id'] not in seen:
+                        seen.add(pp['id'])
+                        result.append(pp)
         
         return result
     finally:
@@ -289,7 +312,8 @@ def game_page(slug, game_id):
             ''', (active_game['id'],))
         scores = {(s['player_id'], s['round_number']): s['score'] for s in scores_data}
     
-    all_players = get_family_players(user.get('family_id'), include_crew=True)
+    all_players = get_family_players(user.get('family_id'), include_crew=True,
+                                     for_player_id=user.get('player_id'))
     family_id = user.get('family_id')
     lead = is_family_lead(conn, user, family_id) if family_id else False
     conn.close()
@@ -364,13 +388,45 @@ def admin():
         conn.close()
 
 def notify_user(conn, user_id, ntype, title, message, data=None):
-    """Insert an in-app notification (best effort; caller commits)."""
+    """Insert an in-app notification (best effort; caller commits).
+    Ensures data.url exists so the bell row can navigate to a destination."""
     if not user_id:
         return
+    payload = dict(data or {})
+    if not payload.get('url'):
+        for act in (payload.get('actions') or []):
+            if (act.get('method') or 'POST').upper() == 'GET' and act.get('url'):
+                payload['url'] = act['url']
+                break
+        if not payload.get('url'):
+            defaults = {
+                'crew_up_request': '/my-team',
+                'crew_up_accepted': '/my-team',
+                'family_join_request': '/my-team',
+                'family_join_approved': '/my-team',
+                'family_join_denied': '/my-team',
+                'family_invite': '/my-team',
+                'release_request': '/my-team',
+                'release_decided': '/my-team',
+                'home_family_changed': '/my-team',
+                'family_lead_transfer': '/my-team',
+                'player_claim_request': '/my-team',
+                'player_claim_approved': '/profile',
+                'possible_duplicate': '/my-team',
+                'user_pending_approval': '/auth/admin/users',
+                'personal_crew_request': '/my-team',
+                'personal_crew_accepted': '/my-team',
+                'personal_crew_ended': '/my-team',
+            }
+            if ntype in defaults:
+                payload['url'] = defaults[ntype]
+            elif payload.get('feedback_id') and ntype in ('user_feedback', 'user_feedback_reply'):
+                # Admins land on admin detail; submitter replies use /feedback/<id> when set by caller.
+                payload['url'] = f"/admin/feedback/{payload['feedback_id']}"
     execute_modify(conn, '''
         INSERT INTO notifications (user_id, type, title, message, data)
         VALUES (%s, %s, %s, %s, %s)
-    ''', (user_id, ntype, title, message, json.dumps(data or {})))
+    ''', (user_id, ntype, title, message, json.dumps(payload)))
 
 def notify_family_lead(conn, family_id, ntype, title, message, data=None):
     lead = execute_query_one(conn, 'SELECT lead_user_id FROM families WHERE id = %s', (family_id,))
@@ -410,13 +466,32 @@ def _record_feedback_view(conn, feedback_id, user_id):
         ON CONFLICT (feedback_id, user_id) DO UPDATE
         SET last_seen_at = CURRENT_TIMESTAMP
     ''', (feedback_id, user_id))
-    # Mark matching unread feedback notifications as read for this admin.
     execute_modify(conn, '''
         UPDATE notifications
         SET is_read = TRUE
-        WHERE user_id = %s AND is_read = FALSE AND type = 'user_feedback'
+        WHERE user_id = %s AND is_read = FALSE
+          AND type IN ('user_feedback', 'user_feedback_reply')
           AND (data->>'feedback_id') = %s
     ''', (user_id, str(feedback_id)))
+
+
+def _feedback_replies(conn, feedback_id):
+    return list(execute_query(conn, '''
+        SELECT r.id, r.body, r.created_at, r.user_id,
+               u.first_name, u.last_name, u.email, u.role
+        FROM feedback_replies r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.feedback_id = %s
+        ORDER BY r.created_at ASC
+    ''', (feedback_id,)))
+
+
+def _can_access_feedback(user, item):
+    if not item:
+        return False
+    if user.get('role') == 'super_admin':
+        return True
+    return item.get('user_id') == user.get('id')
 
 
 @main.route('/feedback', methods=['GET', 'POST'])
@@ -446,6 +521,7 @@ def feedback_page():
             ''', (user['id'], category, subject, body))
             cat_label = FEEDBACK_CATEGORIES[category]
             who = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or user.get('email')
+            detail_url = f"/admin/feedback/{row['id']}"
             notify_super_admins(
                 conn, 'user_feedback',
                 f'{cat_label}: {subject}',
@@ -453,19 +529,21 @@ def feedback_page():
                 {
                     'feedback_id': row['id'],
                     'category': category,
+                    'url': detail_url,
                     'actions': [{
                         'label': 'Open',
                         'style': 'primary',
                         'method': 'GET',
-                        'url': f"/admin/feedback/{row['id']}",
+                        'url': detail_url,
                     }],
                 })
             conn.commit()
             flash('Thanks. Your message was sent to the site admins.', 'success')
-            return redirect(url_for('main.feedback_page'))
+            return redirect(url_for('main.feedback_detail', feedback_id=row['id']))
 
         mine = list(execute_query(conn, '''
-            SELECT id, category, subject, status, created_at
+            SELECT id, category, subject, status, created_at,
+                   (SELECT COUNT(*) FROM feedback_replies r WHERE r.feedback_id = feedback_items.id) AS reply_count
             FROM feedback_items
             WHERE user_id = %s
             ORDER BY created_at DESC
@@ -475,6 +553,69 @@ def feedback_page():
                                categories=FEEDBACK_CATEGORIES,
                                statuses=FEEDBACK_STATUSES,
                                my_items=mine)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+@main.route('/feedback/<int:feedback_id>', methods=['GET', 'POST'])
+@login_required
+def feedback_detail(feedback_id):
+    """Submitter thread view (admins use /admin/feedback/<id>)."""
+    user = get_current_user()
+    conn = get_db_connection()
+    try:
+        item = execute_query_one(conn, '''
+            SELECT f.*, u.first_name, u.last_name, u.email, u.family_name
+            FROM feedback_items f
+            JOIN users u ON u.id = f.user_id
+            WHERE f.id = %s
+        ''', (feedback_id,))
+        if not _can_access_feedback(user, item):
+            flash('That feedback item was not found.', 'error')
+            return redirect(url_for('main.feedback_page'))
+        # Super admins use the admin inbox unless they are the original submitter.
+        if user.get('role') == 'super_admin' and item.get('user_id') != user.get('id'):
+            return redirect(url_for('main.admin_feedback_detail', feedback_id=feedback_id))
+
+        if request.method == 'POST':
+            body = (request.form.get('body') or '').strip()
+            if not body or len(body) > 10000:
+                flash('Enter a reply (max 10,000 characters).', 'error')
+                return redirect(url_for('main.feedback_detail', feedback_id=feedback_id))
+            execute_query_one(conn, '''
+                INSERT INTO feedback_replies (feedback_id, user_id, body)
+                VALUES (%s, %s, %s) RETURNING id
+            ''', (feedback_id, user['id'], body))
+            execute_modify(conn, '''
+                UPDATE feedback_items SET updated_at = CURRENT_TIMESTAMP,
+                    status = CASE WHEN status = 'closed' THEN 'open' ELSE status END
+                WHERE id = %s
+            ''', (feedback_id,))
+            who = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or user.get('email')
+            admin_url = f"/admin/feedback/{feedback_id}"
+            notify_super_admins(
+                conn, 'user_feedback_reply',
+                f'Reply: {item["subject"]}',
+                f'{who} replied to feedback #{feedback_id}.',
+                {
+                    'feedback_id': feedback_id,
+                    'url': admin_url,
+                    'actions': [{'label': 'Open', 'style': 'primary', 'method': 'GET', 'url': admin_url}],
+                })
+            conn.commit()
+            flash('Reply sent.', 'success')
+            return redirect(url_for('main.feedback_detail', feedback_id=feedback_id))
+
+        replies = _feedback_replies(conn, feedback_id)
+        return render_template('feedback_detail.html',
+                               item=item,
+                               replies=replies,
+                               categories=FEEDBACK_CATEGORIES,
+                               statuses=FEEDBACK_STATUSES,
+                               is_admin=False)
     except Exception:
         conn.rollback()
         raise
@@ -505,6 +646,7 @@ def api_submit_feedback():
         ''', (user['id'], category, subject, body))
         cat_label = FEEDBACK_CATEGORIES[category]
         who = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or user.get('email')
+        detail_url = f"/admin/feedback/{row['id']}"
         notify_super_admins(
             conn, 'user_feedback',
             f'{cat_label}: {subject}',
@@ -512,11 +654,12 @@ def api_submit_feedback():
             {
                 'feedback_id': row['id'],
                 'category': category,
+                'url': detail_url,
                 'actions': [{
                     'label': 'Open',
                     'style': 'primary',
                     'method': 'GET',
-                    'url': f"/admin/feedback/{row['id']}",
+                    'url': detail_url,
                 }],
             })
         conn.commit()
@@ -535,21 +678,90 @@ def api_submit_feedback():
         conn.close()
 
 
+@main.route('/api/feedback/<int:feedback_id>/replies', methods=['POST'])
+@login_required
+def api_feedback_reply(feedback_id):
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    body = (data.get('body') or '').strip()
+    if not body or len(body) > 10000:
+        return jsonify({'error': 'Reply text is required'}), 400
+    conn = get_db_connection()
+    try:
+        item = execute_query_one(conn, 'SELECT * FROM feedback_items WHERE id = %s', (feedback_id,))
+        if not _can_access_feedback(user, item):
+            return jsonify({'error': 'Feedback not found'}), 404
+        reply = execute_query_one(conn, '''
+            INSERT INTO feedback_replies (feedback_id, user_id, body)
+            VALUES (%s, %s, %s) RETURNING id, created_at
+        ''', (feedback_id, user['id'], body))
+        execute_modify(conn, '''
+            UPDATE feedback_items SET updated_at = CURRENT_TIMESTAMP,
+                status = CASE WHEN status = 'closed' THEN 'open' ELSE status END
+            WHERE id = %s
+        ''', (feedback_id,))
+        who = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or user.get('email')
+        is_admin = user.get('role') == 'super_admin'
+        if is_admin and item['user_id'] != user['id']:
+            user_url = f"/feedback/{feedback_id}"
+            notify_user(conn, item['user_id'], 'user_feedback_reply',
+                        f'Reply: {item["subject"]}',
+                        'A site admin replied to your feedback.',
+                        {
+                            'feedback_id': feedback_id,
+                            'url': user_url,
+                            'actions': [{'label': 'Open', 'style': 'primary', 'method': 'GET', 'url': user_url}],
+                        })
+            _record_feedback_view(conn, feedback_id, user['id'])
+        else:
+            admin_url = f"/admin/feedback/{feedback_id}"
+            notify_super_admins(
+                conn, 'user_feedback_reply',
+                f'Reply: {item["subject"]}',
+                f'{who} replied to feedback #{feedback_id}.',
+                {
+                    'feedback_id': feedback_id,
+                    'url': admin_url,
+                    'actions': [{'label': 'Open', 'style': 'primary', 'method': 'GET', 'url': admin_url}],
+                })
+        conn.commit()
+        return jsonify({'message': 'Reply sent.', 'id': reply['id']})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
 @main.route('/admin/feedback')
 @admin_required
 def admin_feedback_list():
     conn = get_db_connection()
     try:
         status = (request.args.get('status') or '').strip()
+        q = (request.args.get('q') or '').strip()
+        clauses = []
         params = []
-        where = ''
         if status in FEEDBACK_STATUSES:
-            where = 'WHERE f.status = %s'
+            clauses.append('f.status = %s')
             params.append(status)
+        if q:
+            like = f'%{q}%'
+            clauses.append('''(
+                f.subject ILIKE %s OR f.body ILIKE %s
+                OR u.first_name ILIKE %s OR u.last_name ILIKE %s OR u.email ILIKE %s
+                OR EXISTS (
+                    SELECT 1 FROM feedback_replies r
+                    WHERE r.feedback_id = f.id AND r.body ILIKE %s
+                )
+            )''')
+            params.extend([like, like, like, like, like, like])
+        where = ('WHERE ' + ' AND '.join(clauses)) if clauses else ''
         rows = list(execute_query(conn, f'''
             SELECT f.id, f.category, f.subject, f.status, f.created_at,
                    u.first_name, u.last_name, u.email,
-                   (SELECT COUNT(*) FROM feedback_views v WHERE v.feedback_id = f.id) AS seen_count
+                   (SELECT COUNT(*) FROM feedback_views v WHERE v.feedback_id = f.id) AS seen_count,
+                   (SELECT COUNT(*) FROM feedback_replies r WHERE r.feedback_id = f.id) AS reply_count
             FROM feedback_items f
             JOIN users u ON u.id = f.user_id
             {where}
@@ -566,12 +778,13 @@ def admin_feedback_list():
                                categories=FEEDBACK_CATEGORIES,
                                statuses=FEEDBACK_STATUSES,
                                filter_status=status,
+                               filter_q=q,
                                open_count=open_count)
     finally:
         conn.close()
 
 
-@main.route('/admin/feedback/<int:feedback_id>')
+@main.route('/admin/feedback/<int:feedback_id>', methods=['GET', 'POST'])
 @admin_required
 def admin_feedback_detail(feedback_id):
     user = get_current_user()
@@ -587,6 +800,32 @@ def admin_feedback_detail(feedback_id):
             flash('That feedback item was not found.', 'error')
             return redirect(url_for('main.admin_feedback_list'))
 
+        if request.method == 'POST':
+            body = (request.form.get('body') or '').strip()
+            if not body or len(body) > 10000:
+                flash('Enter a reply (max 10,000 characters).', 'error')
+                return redirect(url_for('main.admin_feedback_detail', feedback_id=feedback_id))
+            execute_query_one(conn, '''
+                INSERT INTO feedback_replies (feedback_id, user_id, body)
+                VALUES (%s, %s, %s) RETURNING id
+            ''', (feedback_id, user['id'], body))
+            execute_modify(conn, '''
+                UPDATE feedback_items SET updated_at = CURRENT_TIMESTAMP WHERE id = %s
+            ''', (feedback_id,))
+            user_url = f"/feedback/{feedback_id}"
+            notify_user(conn, item['user_id'], 'user_feedback_reply',
+                        f'Reply: {item["subject"]}',
+                        'A site admin replied to your feedback.',
+                        {
+                            'feedback_id': feedback_id,
+                            'url': user_url,
+                            'actions': [{'label': 'Open', 'style': 'primary', 'method': 'GET', 'url': user_url}],
+                        })
+            _record_feedback_view(conn, feedback_id, user['id'])
+            conn.commit()
+            flash('Reply sent.', 'success')
+            return redirect(url_for('main.admin_feedback_detail', feedback_id=feedback_id))
+
         _record_feedback_view(conn, feedback_id, user['id'])
         conn.commit()
 
@@ -598,9 +837,11 @@ def admin_feedback_detail(feedback_id):
             WHERE v.feedback_id = %s
             ORDER BY v.first_seen_at ASC
         ''', (feedback_id,)))
+        replies = _feedback_replies(conn, feedback_id)
         return render_template('admin_feedback_detail.html',
                                item=item,
                                viewers=viewers,
+                               replies=replies,
                                categories=FEEDBACK_CATEGORIES,
                                statuses=FEEDBACK_STATUSES)
     except Exception:
@@ -737,11 +978,49 @@ def my_team():
             AND (fa.requesting_family_id = %s OR fa.target_family_id = %s)
         ''', (family_id, family_id, family_id, family_id)))
 
+        personal_crew = {'pending_in': [], 'pending_out': [], 'accepted': []}
+        if my_player_id:
+            links = list(execute_query(conn, '''
+                SELECT l.id, l.status, l.requested_by_player_id,
+                       l.player_a_id, l.player_b_id,
+                       CASE WHEN l.player_a_id = %s THEN l.player_b_id ELSE l.player_a_id END AS other_id
+                FROM player_crew_links l
+                WHERE (l.player_a_id = %s OR l.player_b_id = %s)
+                  AND l.status IN ('pending', 'accepted')
+            ''', (my_player_id, my_player_id, my_player_id)))
+            other_ids = [l['other_id'] for l in links]
+            others = {}
+            if other_ids:
+                for row in execute_query(conn, '''
+                    SELECT p.id, COALESCE(p.display_name, p.first_name) AS display_name,
+                           f.name AS family_name
+                    FROM players p
+                    LEFT JOIN families f ON f.id = p.family_id
+                    WHERE p.id = ANY(%s)
+                ''', (other_ids,)):
+                    others[row['id']] = row
+            for l in links:
+                other = others.get(l['other_id']) or {'display_name': 'Player', 'family_name': ''}
+                entry = {
+                    'id': l['id'],
+                    'other_player_id': l['other_id'],
+                    'display_name': other['display_name'],
+                    'family_name': other.get('family_name') or '',
+                    'i_requested': l['requested_by_player_id'] == my_player_id,
+                }
+                if l['status'] == 'accepted':
+                    personal_crew['accepted'].append(entry)
+                elif entry['i_requested']:
+                    personal_crew['pending_out'].append(entry)
+                else:
+                    personal_crew['pending_in'].append(entry)
+
         return render_template('my_team.html',
             family=family, players=players, alliances=alliances,
             pending=pending, my_memberships=my_memberships,
             joinable_families=joinable_families, claimable=claimable,
             lead_candidates=lead_candidates,
+            personal_crew=personal_crew,
             lead_user_id=family.get('lead_user_id') if family else None,
             my_player_id=my_player_id, is_lead=is_lead, user=user)
     finally:
@@ -1223,15 +1502,31 @@ def directory_people():
         ''', (like, like, like, like, minor_families, (page - 1) * 40))
 
         my_family = user.get('family_id')
-        return jsonify({'page': page, 'results': [{
-            'player_id': r['id'],
-            'name': _directory_person_name(r),
-            'family_id': r['family_id'],
-            'family_name': r['family_name'],
-            'family_label': _family_label(r),
-            'is_claimed': bool(r['is_claimed']),
-            'in_my_family': r['family_id'] == my_family,
-        } for r in rows]})
+        my_pid = user.get('player_id')
+        linked = set()
+        if my_pid:
+            for L in execute_query(conn, '''
+                SELECT player_a_id, player_b_id FROM player_crew_links
+                WHERE status IN ('pending', 'accepted')
+                  AND (player_a_id = %s OR player_b_id = %s)
+            ''', (my_pid, my_pid)):
+                linked.add(L['player_a_id'])
+                linked.add(L['player_b_id'])
+        results = []
+        for r in rows:
+            can_pc = bool(my_pid and r['id'] != my_pid and r['id'] not in linked
+                          and r['family_id'] != my_family and r['is_claimed'])
+            results.append({
+                'player_id': r['id'],
+                'name': _directory_person_name(r),
+                'family_id': r['family_id'],
+                'family_name': r['family_name'],
+                'family_label': _family_label(r),
+                'is_claimed': bool(r['is_claimed']),
+                'in_my_family': r['family_id'] == my_family,
+                'can_personal_crew': can_pc,
+            })
+        return jsonify({'page': page, 'results': results})
     finally:
         conn.close()
 
@@ -3537,7 +3832,8 @@ def players():
     # player picker can select them; pass include_crew=false to opt out.
     include_crew = request.args.get('include_crew', 'true') != 'false'
     conn.close()
-    result = [dict(p) for p in get_family_players(family_id, include_crew=include_crew)]
+    result = [dict(p) for p in get_family_players(
+        family_id, include_crew=include_crew, for_player_id=user.get('player_id'))]
     return jsonify(result)
 
 @main.route('/api/scores', methods=['POST'])
@@ -5546,6 +5842,197 @@ def mark_all_notifications_read():
     finally:
         conn.close()
 
+@main.route('/api/crew-links', methods=['GET', 'POST'])
+@login_required
+def crew_links():
+    """Person-to-person crew (individual). Any logged-in player can request/accept."""
+    user = get_current_user()
+    my_pid = user.get('player_id')
+    if not my_pid:
+        return jsonify({'error': 'You need a player profile first'}), 400
+    conn = get_db_connection()
+    try:
+        if request.method == 'GET':
+            links = list(execute_query(conn, '''
+                SELECT l.*, 
+                    CASE WHEN l.player_a_id = %s THEN l.player_b_id ELSE l.player_a_id END AS other_id
+                FROM player_crew_links l
+                WHERE (l.player_a_id = %s OR l.player_b_id = %s)
+                  AND l.status IN ('pending', 'accepted')
+                ORDER BY l.updated_at DESC
+            ''', (my_pid, my_pid, my_pid)))
+            return jsonify({'links': [dict(l) for l in links], 'my_player_id': my_pid})
+
+        data = request.get_json(silent=True) or {}
+        try:
+            other_id = int(data.get('player_id'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'player_id is required'}), 400
+        if other_id == my_pid:
+            return jsonify({'error': 'You cannot crew up with yourself'}), 400
+        other = execute_query_one(conn, '''
+            SELECT id, display_name, first_name, family_id, archived_at, purged_at
+            FROM players WHERE id = %s
+        ''', (other_id,))
+        if not other or other.get('archived_at') or other.get('purged_at'):
+            return jsonify({'error': 'Player not found'}), 404
+        a, b = (my_pid, other_id) if my_pid < other_id else (other_id, my_pid)
+        existing = execute_query_one(conn, '''
+            SELECT * FROM player_crew_links WHERE player_a_id = %s AND player_b_id = %s
+        ''', (a, b))
+        if existing:
+            if existing['status'] == 'accepted':
+                return jsonify({'error': 'You are already personal crew with that person'}), 409
+            if existing['status'] == 'pending':
+                return jsonify({'error': 'A crew request is already pending'}), 409
+            # Re-open declined/ended
+            row = execute_query_one(conn, '''
+                UPDATE player_crew_links
+                SET status = 'pending', requested_by_player_id = %s,
+                    responded_by_player_id = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s RETURNING *
+            ''', (my_pid, existing['id']))
+        else:
+            row = execute_query_one(conn, '''
+                INSERT INTO player_crew_links
+                    (player_a_id, player_b_id, status, requested_by_player_id)
+                VALUES (%s, %s, 'pending', %s) RETURNING *
+            ''', (a, b, my_pid))
+
+        me_name = execute_query_one(conn, '''
+            SELECT COALESCE(display_name, first_name) AS n FROM players WHERE id = %s
+        ''', (my_pid,))
+        target_user = execute_query_one(conn, 'SELECT id FROM users WHERE player_id = %s', (other_id,))
+        if target_user:
+            notify_user(conn, target_user['id'], 'personal_crew_request',
+                        'Personal crew request',
+                        f"{me_name['n']} wants to crew up with you for game nights.",
+                        {
+                            'crew_link_id': row['id'],
+                            'url': '/my-team',
+                            'actions': [
+                                {'label': 'Accept', 'style': 'success', 'method': 'POST',
+                                 'url': f"/api/crew-links/{row['id']}/accept"},
+                                {'label': 'Decline', 'style': 'outline-secondary', 'method': 'POST',
+                                 'url': f"/api/crew-links/{row['id']}/decline"},
+                            ],
+                        })
+        conn.commit()
+        return jsonify({'message': 'Crew request sent.', 'id': row['id']})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@main.route('/api/crew-links/<int:link_id>/accept', methods=['POST'])
+@login_required
+def crew_link_accept(link_id):
+    user = get_current_user()
+    my_pid = user.get('player_id')
+    if not my_pid:
+        return jsonify({'error': 'You need a player profile first'}), 400
+    conn = get_db_connection()
+    try:
+        link = execute_query_one(conn, 'SELECT * FROM player_crew_links WHERE id = %s', (link_id,))
+        if not link or link['status'] != 'pending':
+            return jsonify({'error': 'Request not found'}), 404
+        if my_pid not in (link['player_a_id'], link['player_b_id']):
+            return jsonify({'error': 'Not your request'}), 403
+        if link['requested_by_player_id'] == my_pid:
+            return jsonify({'error': 'You cannot accept your own request'}), 400
+        execute_modify(conn, '''
+            UPDATE player_crew_links
+            SET status = 'accepted', responded_by_player_id = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        ''', (my_pid, link_id))
+        requester_user = execute_query_one(conn, '''
+            SELECT id FROM users WHERE player_id = %s
+        ''', (link['requested_by_player_id'],))
+        me_name = execute_query_one(conn, '''
+            SELECT COALESCE(display_name, first_name) AS n FROM players WHERE id = %s
+        ''', (my_pid,))
+        if requester_user:
+            notify_user(conn, requester_user['id'], 'personal_crew_accepted',
+                        'Personal crew accepted',
+                        f"{me_name['n']} accepted your crew request. You can pick each other for games.",
+                        {'crew_link_id': link_id, 'url': '/my-team'})
+        conn.commit()
+        return jsonify({'message': 'You are now personal crew.', 'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@main.route('/api/crew-links/<int:link_id>/decline', methods=['POST'])
+@login_required
+def crew_link_decline(link_id):
+    user = get_current_user()
+    my_pid = user.get('player_id')
+    if not my_pid:
+        return jsonify({'error': 'You need a player profile first'}), 400
+    conn = get_db_connection()
+    try:
+        link = execute_query_one(conn, 'SELECT * FROM player_crew_links WHERE id = %s', (link_id,))
+        if not link or link['status'] != 'pending':
+            return jsonify({'error': 'Request not found'}), 404
+        if my_pid not in (link['player_a_id'], link['player_b_id']):
+            return jsonify({'error': 'Not your request'}), 403
+        execute_modify(conn, '''
+            UPDATE player_crew_links
+            SET status = 'declined', responded_by_player_id = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        ''', (my_pid, link_id))
+        conn.commit()
+        return jsonify({'message': 'Request declined.', 'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@main.route('/api/crew-links/<int:link_id>/end', methods=['POST'])
+@login_required
+def crew_link_end(link_id):
+    user = get_current_user()
+    my_pid = user.get('player_id')
+    if not my_pid:
+        return jsonify({'error': 'You need a player profile first'}), 400
+    conn = get_db_connection()
+    try:
+        link = execute_query_one(conn, 'SELECT * FROM player_crew_links WHERE id = %s', (link_id,))
+        if not link or link['status'] not in ('accepted', 'pending'):
+            return jsonify({'error': 'Link not found'}), 404
+        if my_pid not in (link['player_a_id'], link['player_b_id']):
+            return jsonify({'error': 'Not your crew link'}), 403
+        execute_modify(conn, '''
+            UPDATE player_crew_links
+            SET status = 'ended', updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        ''', (link_id,))
+        other_id = link['player_b_id'] if link['player_a_id'] == my_pid else link['player_a_id']
+        other_user = execute_query_one(conn, 'SELECT id FROM users WHERE player_id = %s', (other_id,))
+        me_name = execute_query_one(conn, '''
+            SELECT COALESCE(display_name, first_name) AS n FROM players WHERE id = %s
+        ''', (my_pid,))
+        if other_user:
+            notify_user(conn, other_user['id'], 'personal_crew_ended',
+                        'Personal crew ended',
+                        f"{me_name['n']} ended your personal crew link.",
+                        {'crew_link_id': link_id, 'url': '/my-team'})
+        conn.commit()
+        return jsonify({'message': 'Personal crew ended.', 'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
 @main.route('/api/alliances')
 @login_required
 def get_alliances():
@@ -5698,7 +6185,17 @@ def send_alliance_request():
                 tu['id'],
                 f"Crew Up Request from {my_family['name']}!",
                 f"The {my_family['name']} family wants to crew up for game nights! Accept to start playing together.",
-                json.dumps({'alliance_id': alliance_id, 'from_family': my_family['name']})
+                json.dumps({
+                    'alliance_id': alliance_id,
+                    'from_family': my_family['name'],
+                    'url': '/my-team',
+                    'actions': [
+                        {'label': 'Accept', 'style': 'success', 'method': 'POST',
+                         'url': f'/api/alliances/{alliance_id}/accept'},
+                        {'label': 'Decline', 'style': 'outline-secondary', 'method': 'POST',
+                         'url': f'/api/alliances/{alliance_id}/decline'},
+                    ],
+                })
             ))
             conn.commit()
 
@@ -5766,7 +6263,11 @@ def accept_alliance(alliance_id):
                 ru['id'],
                 f"The {my_family['name']} family accepted your Crew Up!",
                 f"You're now game night crew with the {my_family['name']} family. Time to play!",
-                json.dumps({'alliance_id': alliance_id, 'family_name': my_family['name']})
+                json.dumps({
+                    'alliance_id': alliance_id,
+                    'family_name': my_family['name'],
+                    'url': '/my-team',
+                })
             ))
             conn.commit()
 

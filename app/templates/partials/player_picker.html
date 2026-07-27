@@ -1,0 +1,298 @@
+{# Searchable per-seat player picker. Include once, then PlayerPicker.mount({...}). #}
+<style>
+  .pp-seat {
+    margin-bottom: 0.85rem;
+    color: var(--df-text-card, #212529);
+  }
+  .pp-seat .form-label {
+    color: var(--df-text-card, #333);
+    font-weight: 600;
+  }
+  .pp-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: #fff;
+    color: #212529;
+    border: 1px solid var(--df-border, #ced4da);
+    border-radius: 8px;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+  }
+  .pp-chip .pp-group {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #6c757d;
+  }
+  .pp-chip .pp-clear {
+    border: none;
+    background: transparent;
+    color: #6c757d;
+    padding: 0 2px;
+    line-height: 1;
+    font-size: 0.95rem;
+  }
+  .pp-chip .pp-clear:hover { color: #dc3545; }
+  .pp-wrap { position: relative; }
+  .pp-input {
+    background: #fff;
+    color: #212529;
+  }
+  .pp-menu {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 20;
+    max-height: 220px;
+    overflow-y: auto;
+    background: #fff;
+    color: #212529;
+    border: 1px solid var(--df-border, #ced4da);
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+    display: none;
+  }
+  .pp-menu.open { display: block; }
+  .pp-group-label {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #6c757d;
+    background: #f8f9fa;
+  }
+  .pp-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: #fff;
+    color: #212529;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.88rem;
+  }
+  .pp-option:hover, .pp-option.active {
+    background: color-mix(in srgb, var(--df-accent, #0d6efd) 12%, #fff);
+  }
+  .pp-option:disabled {
+    color: #adb5bd;
+    background: #f8f9fa;
+  }
+  .pp-empty {
+    padding: 0.55rem 0.65rem;
+    font-size: 0.82rem;
+    color: #6c757d;
+  }
+</style>
+<script>
+window.PlayerPicker = (function() {
+  function esc(s) {
+    return $('<div>').text(s == null ? '' : String(s)).html();
+  }
+
+  function labelOf(p) {
+    return p.display_name + (p.has_duplicate ? (' (' + p.first_name + ' ' + p.last_name + ')') : '');
+  }
+
+  function groupOf(p) {
+    if (!p.is_guest) return 'Your Family';
+    if (p.is_personal_crew || p.guest_family_name === 'Personal crew') return 'Personal crew';
+    return 'Crew - ' + (p.guest_family_name || 'Other');
+  }
+
+  function mount(options) {
+    var cfg = $.extend({
+      container: '#playerSelections',
+      countSelector: '#playerCount',
+      allowAddNew: true,
+      onAddNew: null,
+      onChange: null
+    }, options || {});
+
+    var catalog = [];
+    var selected = [];
+    var $root = $(cfg.container);
+    var openSeat = null;
+
+    function takenExcept(seatIdx) {
+      var set = {};
+      selected.forEach(function(id, i) {
+        if (id && i !== seatIdx) set[id] = true;
+      });
+      return set;
+    }
+
+    function byGroups(filterText, seatIdx) {
+      var q = (filterText || '').trim().toLowerCase();
+      var taken = takenExcept(seatIdx);
+      var groups = {};
+      var order = [];
+      catalog.forEach(function(p) {
+        if (taken[p.id]) return;
+        var lab = labelOf(p);
+        if (q) {
+          var hay = (lab + ' ' + (p.first_name || '') + ' ' + (p.last_name || '') + ' ' + (p.guest_family_name || '')).toLowerCase();
+          if (hay.indexOf(q) === -1) return;
+        }
+        var g = groupOf(p);
+        if (!groups[g]) { groups[g] = []; order.push(g); }
+        groups[g].push(p);
+      });
+      order.sort(function(a, b) {
+        if (a === 'Your Family') return -1;
+        if (b === 'Your Family') return 1;
+        if (a === 'Personal crew') return 1;
+        if (b === 'Personal crew') return -1;
+        return a.localeCompare(b);
+      });
+      return { groups: groups, order: order };
+    }
+
+    function closeMenus() {
+      $root.find('.pp-menu').removeClass('open');
+      openSeat = null;
+    }
+
+    function renderMenu($menu, seatIdx, filterText) {
+      var data = byGroups(filterText, seatIdx);
+      var html = '';
+      if (cfg.allowAddNew) {
+        html += '<button type="button" class="pp-option pp-add-new">+ Add New Player</button>';
+      }
+      if (!data.order.length) {
+        html += '<div class="pp-empty">No matching players. Try another name, or crew up in the Directory.</div>';
+      } else {
+        data.order.forEach(function(g) {
+          html += '<div class="pp-group-label">' + esc(g) + '</div>';
+          data.groups[g].forEach(function(p) {
+            html += '<button type="button" class="pp-option" data-id="' + p.id + '">' +
+              esc(labelOf(p)) + '</button>';
+          });
+        });
+      }
+      $menu.html(html);
+      $menu.find('.pp-option[data-id]').on('mousedown', function(e) {
+        e.preventDefault();
+        setSeat(seatIdx, parseInt($(this).data('id'), 10));
+      });
+      $menu.find('.pp-add-new').on('mousedown', function(e) {
+        e.preventDefault();
+        closeMenus();
+        if (typeof cfg.onAddNew === 'function') cfg.onAddNew(seatIdx);
+      });
+    }
+
+    function setSeat(idx, playerId) {
+      while (selected.length <= idx) selected.push(null);
+      selected[idx] = playerId || null;
+      rebuild();
+      if (typeof cfg.onChange === 'function') cfg.onChange(getIds());
+    }
+
+    function rebuild() {
+      var count = parseInt($(cfg.countSelector).val(), 10) || 0;
+      if (count < 1) count = 1;
+      while (selected.length < count) selected.push(null);
+      if (selected.length > count) selected = selected.slice(0, count);
+
+      var byId = {};
+      catalog.forEach(function(p) { byId[p.id] = p; });
+
+      $root.empty();
+      for (var i = 0; i < count; i++) {
+        (function(seatIdx) {
+          var pid = selected[seatIdx];
+          var p = pid ? byId[pid] : null;
+          var $seat = $('<div class="pp-seat">');
+          $seat.append($('<label class="form-label">').text('Player ' + (seatIdx + 1)));
+          if (p) {
+            var $chip = $('<div class="pp-chip">');
+            $chip.append($('<span>').text(labelOf(p)));
+            $chip.append($('<span class="pp-group">').text(groupOf(p)));
+            $chip.append($('<button type="button" class="pp-clear" aria-label="Clear player">&times;</button>')
+              .on('click', function() { setSeat(seatIdx, null); }));
+            $seat.append($chip);
+          }
+          var $wrap = $('<div class="pp-wrap">');
+          var $input = $('<input type="search" class="form-control pp-input" autocomplete="off">')
+            .attr('placeholder', p ? 'Change player...' : 'Search players...')
+            .attr('data-player-num', seatIdx + 1);
+          var $menu = $('<div class="pp-menu" role="listbox">');
+          $input.on('focus', function() {
+            openSeat = seatIdx;
+            renderMenu($menu, seatIdx, $input.val());
+            $menu.addClass('open');
+          });
+          $input.on('input', function() {
+            openSeat = seatIdx;
+            renderMenu($menu, seatIdx, $input.val());
+            $menu.addClass('open');
+          });
+          $input.on('keydown', function(e) {
+            if (e.key === 'Escape') closeMenus();
+          });
+          $wrap.append($input).append($menu);
+          $seat.append($wrap);
+          $root.append($seat);
+        })(i);
+      }
+    }
+
+    function getIds() {
+      return selected.map(function(id) { return id || ''; });
+    }
+
+    function getValidIds() {
+      return selected.filter(function(id) { return !!id; });
+    }
+
+    function setIds(ids) {
+      selected = (ids || []).map(function(id) {
+        if (id == null || id === '' || id === 'new') return null;
+        return parseInt(id, 10);
+      });
+      rebuild();
+    }
+
+    function setCatalog(list) {
+      catalog = list || [];
+      // Drop selections that are no longer in catalog.
+      var ok = {};
+      catalog.forEach(function(p) { ok[p.id] = true; });
+      selected = selected.map(function(id) { return (id && ok[id]) ? id : null; });
+      rebuild();
+    }
+
+    function addPlayerToCatalog(p) {
+      if (!p || !p.id) return;
+      if (!catalog.some(function(x) { return x.id === p.id; })) {
+        catalog.push($.extend({ is_guest: false, is_personal_crew: false, guest_family_name: null }, p));
+      }
+    }
+
+    $(document).off('click.playerPicker').on('click.playerPicker', function(e) {
+      if (!$(e.target).closest('.pp-wrap').length) closeMenus();
+    });
+    $(cfg.countSelector).off('change.playerPicker').on('change.playerPicker', function() {
+      rebuild();
+      if (typeof cfg.onChange === 'function') cfg.onChange(getIds());
+    });
+
+    return {
+      setCatalog: setCatalog,
+      addPlayerToCatalog: addPlayerToCatalog,
+      rebuild: rebuild,
+      getIds: getIds,
+      getValidIds: getValidIds,
+      setIds: setIds,
+      setSeat: setSeat,
+      catalog: function() { return catalog; }
+    };
+  }
+
+  return { mount: mount };
+})();
+</script>

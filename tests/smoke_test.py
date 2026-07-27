@@ -102,6 +102,10 @@ def schema_audit(conn):
           q1(conn, "SELECT to_regclass('public.feedback_items') IS NOT NULL AS ok")['ok'])
     check('table feedback_views exists',
           q1(conn, "SELECT to_regclass('public.feedback_views') IS NOT NULL AS ok")['ok'])
+    check('table feedback_replies exists',
+          q1(conn, "SELECT to_regclass('public.feedback_replies') IS NOT NULL AS ok")['ok'])
+    check('table player_crew_links exists',
+          q1(conn, "SELECT to_regclass('public.player_crew_links') IS NOT NULL AS ok")['ok'])
     expected = {
         'fk_active_games_user_id': 'n',
         'game_scores_player_fkey': 'r',
@@ -187,6 +191,10 @@ def cleanup(conn, ids):
     run(conn, "DELETE FROM invitations WHERE invited_by_user_id = ANY(%s) OR email LIKE 'zztest%%'",
         (user_ids or [0],))
     run(conn, 'DELETE FROM notifications WHERE user_id = ANY(%s)', (user_ids or [0],))
+    run(conn, '''DELETE FROM feedback_replies
+        WHERE user_id = ANY(%s)
+           OR feedback_id IN (SELECT id FROM feedback_items WHERE user_id = ANY(%s))''',
+        (user_ids or [0], user_ids or [0]))
     run(conn, '''DELETE FROM feedback_views
         WHERE user_id = ANY(%s)
            OR feedback_id IN (SELECT id FROM feedback_items WHERE user_id = ANY(%s))''',
@@ -195,6 +203,10 @@ def cleanup(conn, ids):
     run(conn, 'DELETE FROM user_audit_log WHERE user_id = ANY(%s)', (user_ids or [0],))
     run(conn, 'UPDATE user_audit_log SET record_id = NULL WHERE table_name = %s AND record_id = ANY(%s)',
         ('players', player_ids or [0]))
+    run(conn, '''DELETE FROM player_crew_links
+        WHERE player_a_id = ANY(%s) OR player_b_id = ANY(%s)
+           OR requested_by_player_id = ANY(%s) OR responded_by_player_id = ANY(%s)''',
+        (player_ids or [0], player_ids or [0], player_ids or [0], player_ids or [0]))
     run(conn, 'DELETE FROM player_family_memberships WHERE player_id = ANY(%s) OR family_id = ANY(%s)',
         (player_ids or [0], fam_ids or [0]))
     run(conn, """DELETE FROM family_alliances
@@ -760,6 +772,135 @@ def main():
         primary = page.split('navbar-nav ms-auto', 1)[0] if 'navbar-nav ms-auto' in page else ''
         check('Feedback link is on the primary navbar',
               "href=\"/feedback\"" in primary or "Send Feedback" in primary or '>Feedback<' in primary)
+
+        # Replies + search + notification destination URLs.
+        reply_marker = 'ZztestAdminReplyMarker42'
+        r = client_a.post(f'/api/feedback/{fb_id}/replies', json={
+            'body': f'Thanks for reporting. {reply_marker}'
+        })
+        check('super admin can reply to feedback', r.status_code == 200, str(r.get_json()))
+        check('feedback reply row persisted',
+              q1(conn, 'SELECT COUNT(*) AS n FROM feedback_replies WHERE feedback_id = %s', (fb_id,))['n'] >= 1)
+
+        reply_notif = q1(conn, """
+            SELECT id, type, data FROM notifications
+            WHERE user_id = %s AND type = 'user_feedback_reply'
+            ORDER BY id DESC LIMIT 1
+        """, (user_b['id'],))
+        check('submitter got feedback reply notification', reply_notif is not None)
+        if reply_notif:
+            import json as _json
+            rdata = reply_notif['data'] or {}
+            if isinstance(rdata, str):
+                rdata = _json.loads(rdata)
+            check('feedback reply notification has url',
+                  (rdata.get('url') or '') == f'/feedback/{fb_id}', str(rdata))
+
+        r = client_b.get(f'/feedback/{fb_id}')
+        b_thread = r.get_data(as_text=True)
+        check('submitter can open own feedback thread', r.status_code == 200)
+        check('submitter sees admin reply in thread', reply_marker in b_thread)
+
+        r = client_b.post(f'/api/feedback/{fb_id}/replies', json={
+            'body': 'ZztestUserFollowUp still stuck on iPhone.'
+        })
+        check('submitter can reply on their feedback', r.status_code == 200, str(r.get_json()))
+
+        r = client_a.get('/admin/feedback?q=ZztestAdminReplyMarker42')
+        check('admin feedback search finds reply text', r.status_code == 200)
+        check('admin search results include the feedback item',
+              f'/admin/feedback/{fb_id}' in r.get_data(as_text=True) or str(fb_id) in r.get_data(as_text=True))
+
+        if notif:
+            import json as _json
+            fdata = notif['data'] or {}
+            if isinstance(fdata, str):
+                fdata = _json.loads(fdata)
+            check('feedback notification has destination url',
+                  (fdata.get('url') or '') == f'/admin/feedback/{fb_id}', str(fdata))
+
+        print('\n== Section 13: personal crew links ==')
+        # Use Copycat (separate family, never joined Alpha) so personal crew is
+        # the only reason they appear in a picker -- Beta already joined Alpha earlier.
+        activate_and_login(conn, client_c, 'zztest.copycat@example.com')
+        newbie_row = q1(conn, "SELECT id, player_id FROM users WHERE email = 'zztest.newbie@example.com'")
+        check('newbie exists for personal crew test', newbie_row is not None)
+        client_n = app.test_client()
+        if newbie_row:
+            activate_and_login(conn, client_n, 'zztest.newbie@example.com')
+            r = client_n.get('/api/directory/people?q=Zztestcopy')
+            people = (r.get_json() or {}).get('results') or []
+            copy_hit = next((p for p in people if p.get('player_id') == copy_user['player_id']), None)
+            check('directory finds Copycat for personal crew', copy_hit is not None, str(people[:3]))
+            if copy_hit:
+                check('directory offers can_personal_crew for outsider with account',
+                      copy_hit.get('can_personal_crew') is True, str(copy_hit))
+
+            r = client_n.post('/api/crew-links', json={'player_id': copy_user['player_id']})
+            check('non-lead can request personal crew', r.status_code == 200, str(r.get_json()))
+            link_id = (r.get_json() or {}).get('id')
+            check('crew link id returned', bool(link_id))
+
+            crew_notif = q1(conn, """
+                SELECT id, type, data FROM notifications
+                WHERE user_id = %s AND type = 'personal_crew_request'
+                ORDER BY id DESC LIMIT 1
+            """, (copy_user['id'],))
+            check('target got personal crew request notification', crew_notif is not None)
+            if crew_notif:
+                import json as _json
+                cdata = crew_notif['data'] or {}
+                if isinstance(cdata, str):
+                    cdata = _json.loads(cdata)
+                check('personal crew notification has url',
+                      (cdata.get('url') or '') == '/my-team', str(cdata))
+                acts = cdata.get('actions') or []
+                check('personal crew notification has Accept action',
+                      any(a.get('label') == 'Accept' for a in acts), str(cdata))
+
+            before = client_n.get('/api/players').get_json() or []
+            check('pending personal crew is not yet in /api/players',
+                  not any(p.get('id') == copy_user['player_id'] for p in before),
+                  str([p.get('id') for p in before]))
+
+            r = client_c.post(f'/api/crew-links/{link_id}/accept')
+            check('target can accept personal crew', r.status_code == 200, str(r.get_json()))
+
+            after = client_n.get('/api/players').get_json() or []
+            copy_pick = next((p for p in after if p.get('id') == copy_user['player_id']), None)
+            check('accepted personal crew appears in /api/players', copy_pick is not None)
+            if copy_pick:
+                check('personal crew flagged for picker grouping',
+                      copy_pick.get('is_personal_crew') is True
+                      or copy_pick.get('guest_family_name') == 'Personal crew',
+                      str(copy_pick))
+
+            # Beta is Alpha-allied via membership, not the outsider control case.
+            # A random other-family player without a link must stay out -- use Beta's
+            # family-only adult if present? Simpler: Copycat's family has only Copycat;
+            # verify Beta without personal crew from Copycat's perspective.
+            from_copy = client_c.get('/api/players').get_json() or []
+            check('accepter also sees requester in /api/players',
+                  any(p.get('id') == newbie_row['player_id'] for p in from_copy))
+            check('non-crewed Beta not in Copycat picker',
+                  not any(p.get('id') == user_b['player_id'] for p in from_copy),
+                  str([p.get('id') for p in from_copy]))
+
+            r = client_n.get('/my-team')
+            check('my team loads with personal crew section',
+                  r.status_code == 200 and 'Personal Crew' in r.get_data(as_text=True))
+
+            r = client_n.post(f'/api/crew-links/{link_id}/end')
+            check('either side can end personal crew', r.status_code == 200, str(r.get_json()))
+            ended = client_n.get('/api/players').get_json() or []
+            check('ended personal crew removed from /api/players',
+                  not any(p.get('id') == copy_user['player_id'] for p in ended))
+
+        # Game landing uses searchable picker partial.
+        r = client_a.get('/game/uno-classic')
+        gl = r.get_data(as_text=True)
+        check('game landing includes player picker',
+              r.status_code == 200 and 'PlayerPicker' in gl and 'pp-input' in gl)
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')

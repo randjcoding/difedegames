@@ -179,16 +179,36 @@
   }
 
   function personRowHtml(p) {
-    var joinBtn = p.in_my_family ? '' :
-      '<button class="btn btn-sm btn-outline-primary join-btn" data-family="' + p.family_id + '">Request to Join Their Family</button>';
+    var actions = '';
+    if (!p.in_my_family) {
+      actions += '<button class="btn btn-sm btn-outline-primary join-btn" data-family="' + p.family_id + '">Request to Join Their Family</button>';
+    }
+    if (p.can_personal_crew) {
+      actions += '<button class="btn btn-sm btn-outline-success crew-person-btn" data-player="' + p.player_id + '">Crew up with me</button>';
+    }
     return '<div class="result-row">' +
       '<div class="result-avatar">' + esc(initial(p.name)) + '</div>' +
       '<div class="result-info">' +
         '<div class="name">' + esc(p.name) + (p.is_claimed ? '' : ' <span class="badge bg-secondary" style="font-size:0.65rem;">No account yet</span>') + '</div>' +
         '<div class="sub">' + esc(p.family_label) + (p.in_my_family ? ' - your family' : '') + '</div>' +
       '</div>' +
-      '<div class="result-actions">' + joinBtn + '</div>' +
+      '<div class="result-actions">' + actions + '</div>' +
     '</div>';
+  }
+
+  function requestPersonalCrew(playerId, btn) {
+    btn.disabled = true;
+    fetch('/api/crew-links', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ player_id: parseInt(playerId, 10) })
+    })
+      .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+      .then(function(res) {
+        toast(res.j.message || res.j.error || 'Done', res.ok);
+        if (!res.ok) btn.disabled = false;
+        else btn.textContent = 'Request sent';
+      })
+      .catch(function() { toast('Request failed', false); btn.disabled = false; });
   }
 
   function renderPeople(list, container) {
@@ -199,6 +219,9 @@
     container.innerHTML = list.map(personRowHtml).join('');
     container.querySelectorAll('.join-btn').forEach(function(b) {
       b.addEventListener('click', function() { requestJoin(b.dataset.family, b); });
+    });
+    container.querySelectorAll('.crew-person-btn').forEach(function(b) {
+      b.addEventListener('click', function() { requestPersonalCrew(b.dataset.player, b); });
     });
   }
 

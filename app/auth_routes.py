@@ -652,6 +652,7 @@ def verify_email(token):
                                    'user_id', %s::int,
                                    'user_email', %s,
                                    'user_name', %s,
+                                   'url', '/auth/admin/users',
                                    'actions', jsonb_build_array(
                                        jsonb_build_object(
                                            'label', 'Approve',

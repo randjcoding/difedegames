@@ -904,6 +904,13 @@
               else if (n.type === 'release_request') icon = 'fa-people-arrows text-warning';
               else if (n.type === 'family_invite') icon = 'fa-envelope-open-text text-warning';
               else if (n.type === 'user_feedback') icon = 'fa-comment-dots text-warning';
+              else if (n.type === 'user_feedback_reply') icon = 'fa-reply text-warning';
+              else if (n.type === 'personal_crew_request') icon = 'fa-user-friends text-warning';
+              else if (n.type === 'personal_crew_accepted') icon = 'fa-user-check text-success';
+
+              var dataObj = {};
+              try { dataObj = typeof n.data === 'string' ? JSON.parse(n.data) : (n.data || {}); } catch(e) {}
+              var destUrl = dataObj.url || '';
 
               var actions = '';
               if (!n.is_read) {
@@ -919,7 +926,10 @@
               }
 
               var ago = timeAgo(n.created_at);
-              html += '<div class="dropdown-item px-3 py-2 border-bottom ' + cls + '" style="white-space:normal;cursor:pointer;" onclick="markRead(' + n.id + ',this)">' +
+              var clickAttr = destUrl
+                ? (' data-url="' + destUrl.replace(/"/g, '&quot;') + '" onclick="openNotif(' + n.id + ', this)"')
+                : (' onclick="markRead(' + n.id + ',this)"');
+              html += '<div class="dropdown-item px-3 py-2 border-bottom ' + cls + '" style="white-space:normal;cursor:pointer;"' + clickAttr + '>' +
                 '<div class="d-flex align-items-start">' +
                   dot + '<i class="fas ' + icon + ' me-2 mt-1" style="color:var(--df-accent);"></i>' +
                   '<div style="flex:1;min-width:0;">' +
@@ -978,6 +988,12 @@
       window.markRead = function(id, el) {
         fetch('/api/notifications/' + id + '/read', {method:'POST'}).then(function(){ loadNotifCount(); });
         if (el) el.classList.add('opacity-50');
+      };
+
+      window.openNotif = function(id, el) {
+        var url = el && el.getAttribute('data-url');
+        markRead(id, el);
+        if (url) window.location.href = url;
       };
 
       document.getElementById('markAllReadBtn').addEventListener('click', function(e){

@@ -264,9 +264,9 @@ content %}
 </style>
 {% endblock %} {% block scripts %}
 {% include 'partials/game_layouts.html' %}
+{% include 'partials/player_picker.html' %}
 <script>
 $(document).ready(function(){
-  var players=[];
   var GAME_ID={{ game_def.id }};
   var GAME_PLAYERS=[
     {% for player in game_players %}
@@ -274,37 +274,34 @@ $(document).ready(function(){
     {% endfor %}
   ];
   var currentRound=1;
+  var pendingAddSeat=null;
+  var picker=PlayerPicker.mount({
+    container:'#playerSelections',
+    countSelector:'#playerCount',
+    onAddNew:function(seatIdx){
+      pendingAddSeat=seatIdx;
+      $("#addPlayerForm")[0].reset();
+      new bootstrap.Modal($("#addPlayerModal")).show();
+    }
+  });
 
   function loadPlayers(){
-    $.get("/api/players",function(data){players=data;updatePlayerSelections();if(!window._gameLayoutsReady&&$("#gameLayoutsPanel").length){window._gameLayoutsReady=true;GameLayouts.init({gameId:{{ game_def.id }},isLead:{{ 'true' if is_lead else 'false' }},hasSettings:true,rebuild:updatePlayerSelections});}});
-  }
-
-  function updatePlayerSelections(){
-    var count=parseInt($("#playerCount").val());
-    var container=$("#playerSelections");
-    container.empty();
-    for(var i=1;i<=count;i++){
-      var div=$("<div>").addClass("mb-3");
-      div.append($("<label>").addClass("form-label").text("Player "+i));
-      var select=$("<select>").addClass("form-select player-select").attr("required",true).attr("data-player-num",i);
-      select.append($("<option>").val("").text("Select Player"));
-      select.append($("<option>").val("new").text("+ Add New Player"));
-      var familyP=players.filter(function(p){return !p.is_guest;});
-      var crewP=players.filter(function(p){return p.is_guest;});
-      var crewG={};
-      crewP.forEach(function(p){var gn=p.guest_family_name||"Other";if(!crewG[gn])crewG[gn]=[];crewG[gn].push(p);});
-      function pLabel(p){return p.display_name+(p.has_duplicate?" ("+p.first_name+" "+p.last_name+")":"");}
-      if(familyP.length){var grp=$("<optgroup>").attr("label","Your Family");familyP.forEach(function(p){grp.append($("<option>").val(p.id).text(pLabel(p)));});select.append(grp);}
-      Object.keys(crewG).sort().forEach(function(name){var grp=$("<optgroup>").attr("label","Crew - "+name);crewG[name].forEach(function(p){grp.append($("<option>").val(p.id).text(pLabel(p)));});select.append(grp);});
-      div.append(select);container.append(div);
-    }
-    $(".player-select").change(function(){
-      if($(this).val()==="new"){window.currentPlayerSelect=$(this);$("#addPlayerForm")[0].reset();new bootstrap.Modal($("#addPlayerModal")).show();$(this).val("");}
+    $.get("/api/players",function(data){
+      picker.setCatalog(data||[]);
+      if(!window._gameLayoutsReady&&$("#gameLayoutsPanel").length){
+        window._gameLayoutsReady=true;
+        GameLayouts.init({
+          gameId:{{ game_def.id }},
+          isLead:{{ 'true' if is_lead else 'false' }},
+          hasSettings:true,
+          getPlayerIds:function(){return picker.getIds();},
+          setPlayerIds:function(ids){picker.setIds(ids);},
+          rebuild:function(){picker.rebuild();if(window.GameLayouts)GameLayouts.afterRebuild();}
+        });
+      } else if(window.GameLayouts){GameLayouts.afterRebuild();}
     });
-      if (window.GameLayouts) GameLayouts.afterRebuild();
   }
 
-  $("#playerCount").change(updatePlayerSelections);
   loadPlayers();
 
   $("#targetScore").change(function(){
@@ -315,14 +312,19 @@ $(document).ready(function(){
   $("#savePlayer").click(function(){
     var fn=$("#firstName").val(),ln=$("#lastName").val(),dn=$("#displayName").val();
     $.ajax({url:"/api/players",method:"POST",contentType:"application/json",data:JSON.stringify({first_name:fn,last_name:ln,display_name:dn}),
-      success:function(r){bootstrap.Modal.getInstance($("#addPlayerModal")).hide();var t=r.display_name+(r.has_duplicate?" ("+r.first_name+" "+r.last_name+")":"");$(".player-select").each(function(){$(this).find('option[value="new"]').before($("<option>").val(r.id).text(t));});if(window.currentPlayerSelect){window.currentPlayerSelect.val(r.id);window.currentPlayerSelect=null;}},
+      success:function(r){
+        bootstrap.Modal.getInstance($("#addPlayerModal")).hide();
+        picker.addPlayerToCatalog(r);
+        if(pendingAddSeat!=null){picker.setSeat(pendingAddSeat,r.id);pendingAddSeat=null;}
+        else picker.rebuild();
+      },
       error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to add player");}
     });
   });
 
   $("#newGameForm").submit(function(e){
     e.preventDefault();
-    var ids=$(".player-select").map(function(){return $(this).val();}).get();
+    var ids=picker.getIds();
     if(ids.some(function(id){return !id;})){AppModal.warning("Missing Players","Please select all players before starting.");return;}
     if(new Set(ids).size!==ids.length){AppModal.warning("Duplicate Players","Each player can only be selected once!");return;}
     var targetSel=$("#targetScore").val();

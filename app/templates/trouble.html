@@ -447,9 +447,9 @@ content %}
 </style>
 {% endblock %} {% block scripts %}
 {% include 'partials/game_layouts.html' %}
+{% include 'partials/player_picker.html' %}
 <script>
   $(document).ready(function () {
-    let players = [];
     const GAME_ID = {{ game_def.id }};
     const TROUBLE_COLORS = [
       { name: 'Red', hex: '#E31937' },
@@ -458,6 +458,7 @@ content %}
       { name: 'Yellow', hex: '#FFD700' }
     ];
     var setupColorAssignments = {};
+    var pendingAddSeat = null;
     const GAME_PLAYERS = [
       {% for player in game_players %}
       { id: {{ player.id }}, name: "{{ player.display_name }}" }{% if not loop.last %},{% endif %}
@@ -468,29 +469,29 @@ content %}
     boardColorAssignments[{{ player.id }}] = '{{ ['#E31937','#0072BC','#00A651','#FFD700'][loop.index0 % 4] }}';
     {% endfor %}
 
-    function loadPlayers() {
-      $.get("/api/players", function (data) {
-        players = data;
-        updatePlayerSelections();
-        if (!window._gameLayoutsReady && $("#gameLayoutsPanel").length) {
-          window._gameLayoutsReady = true;
-          GameLayouts.init({
-            gameId: {{ game_def.id }},
-            isLead: {{ 'true' if is_lead else 'false' }},
-            hasSettings: false,
-            rebuild: updatePlayerSelections
-          });
-        }
-      });
-    }
+    var picker = PlayerPicker.mount({
+      container: '#playerSelections',
+      countSelector: '#playerCount',
+      onAddNew: function(seatIdx) {
+        pendingAddSeat = seatIdx;
+        $("#addPlayerForm")[0].reset();
+        new bootstrap.Modal($("#addPlayerModal")).show();
+      }
+    });
+
+    var baseRebuild = picker.rebuild;
+    picker.rebuild = function() {
+      baseRebuild();
+      initTroubleColorRows();
+    };
 
     function refreshSetupColorDots() {
       $(".setup-color-dot").each(function () {
         var hex = $(this).data("color");
-        var playerNum = $(this).closest(".player-row").find(".player-select").data("player-num");
+        var playerNum = parseInt($(this).closest(".player-row").attr("data-player-num"), 10);
         var assignedTo = null;
         for (var k in setupColorAssignments) {
-          if (setupColorAssignments[k] === hex) { assignedTo = parseInt(k); break; }
+          if (setupColorAssignments[k] === hex) { assignedTo = parseInt(k, 10); break; }
         }
         $(this).removeClass("selected taken");
         if (assignedTo === playerNum) {
@@ -501,100 +502,83 @@ content %}
       });
     }
 
-    function updatePlayerSelections() {
-      const count = parseInt($("#playerCount").val());
-      const container = $("#playerSelections");
-      container.empty();
+    function initTroubleColorRows() {
+      var oldAssignments = $.extend({}, setupColorAssignments);
       setupColorAssignments = {};
 
-      for (let i = 1; i <= count; i++) {
-        if (i <= TROUBLE_COLORS.length) {
-          setupColorAssignments[i] = TROUBLE_COLORS[i - 1].hex;
+      $("#playerSelections .pp-seat").each(function(idx) {
+        var seatNum = idx + 1;
+        $(this).addClass("player-row").attr("data-player-num", seatNum);
+
+        if (oldAssignments[seatNum]) {
+          setupColorAssignments[seatNum] = oldAssignments[seatNum];
+        } else if (seatNum <= TROUBLE_COLORS.length) {
+          setupColorAssignments[seatNum] = TROUBLE_COLORS[seatNum - 1].hex;
         }
 
-        const div = $("<div>").addClass("mb-3 player-row");
-        const labelRow = $("<div>").addClass("d-flex align-items-center justify-content-between mb-1");
-        labelRow.append($("<label>").addClass("form-label mb-0").text("Player " + i));
+        if ($(this).find(".setup-color-row").length) return;
 
-        var colorRow = $("<span>").addClass("setup-color-row");
+        var $label = $(this).children(".form-label").first();
+        if (!$label.length) return;
+
+        var labelRow = $('<div class="d-flex align-items-center justify-content-between mb-1">');
+        $label.detach().addClass("mb-0");
+        labelRow.append($label);
+
+        var colorRow = $('<span class="setup-color-row">');
         TROUBLE_COLORS.forEach(function (c) {
-          var dot = $("<span>").addClass("setup-color-dot")
+          colorRow.append($('<span>').addClass("setup-color-dot")
             .css("background", c.hex)
             .attr("data-color", c.hex)
-            .attr("title", c.name);
-          colorRow.append(dot);
+            .attr("title", c.name));
         });
         labelRow.append(colorRow);
-        div.append(labelRow);
-
-        const select = $("<select>")
-          .addClass("form-select player-select")
-          .attr("required", true)
-          .attr("data-player-num", i);
-
-        select.append($("<option>").val("").text("Select Player"));
-        select.append($("<option>").val("new").text("+ Add New Player"));
-
-        var familyPlayers = players.filter(function(p) { return !p.is_guest; });
-        var crewPlayers = players.filter(function(p) { return p.is_guest; });
-        var crewGroups = {};
-        crewPlayers.forEach(function(p) {
-          var gn = p.guest_family_name || "Other";
-          if (!crewGroups[gn]) crewGroups[gn] = [];
-          crewGroups[gn].push(p);
-        });
-
-        function playerLabel(p) {
-          return p.display_name + (p.has_duplicate ? " (" + p.first_name + " " + p.last_name + ")" : "");
-        }
-
-        if (familyPlayers.length) {
-          var grp = $("<optgroup>").attr("label", "Your Family");
-          familyPlayers.forEach(function(p) { grp.append($("<option>").val(p.id).text(playerLabel(p))); });
-          select.append(grp);
-        }
-        Object.keys(crewGroups).sort().forEach(function(name) {
-          var grp = $("<optgroup>").attr("label", "Crew - " + name);
-          crewGroups[name].forEach(function(p) { grp.append($("<option>").val(p.id).text(playerLabel(p))); });
-          select.append(grp);
-        });
-
-        div.append(select);
-        container.append(div);
-      }
+        $(this).prepend(labelRow);
+      });
 
       refreshSetupColorDots();
-
-      $(document).off("click", ".setup-color-dot").on("click", ".setup-color-dot", function () {
-        var hex = $(this).data("color");
-        var playerNum = $(this).closest(".player-row").find(".player-select").data("player-num");
-        var currentOwner = null;
-        for (var k in setupColorAssignments) {
-          if (setupColorAssignments[k] === hex) { currentOwner = parseInt(k); break; }
-        }
-        if (currentOwner === playerNum) return;
-        var myOldColor = setupColorAssignments[playerNum];
-        if (currentOwner !== null && myOldColor) {
-          setupColorAssignments[currentOwner] = myOldColor;
-        } else if (currentOwner !== null) {
-          delete setupColorAssignments[currentOwner];
-        }
-        setupColorAssignments[playerNum] = hex;
-        refreshSetupColorDots();
-      });
-
-      $(".player-select").change(function () {
-        if ($(this).val() === "new") {
-          window.currentPlayerSelect = $(this);
-          $("#addPlayerForm")[0].reset();
-          new bootstrap.Modal($("#addPlayerModal")).show();
-          $(this).val("");
-        }
-      });
-      if (window.GameLayouts) GameLayouts.afterRebuild();
     }
 
-    $("#playerCount").change(updatePlayerSelections);
+    $(document).off("click.troubleColors", ".setup-color-dot").on("click.troubleColors", ".setup-color-dot", function () {
+      var hex = $(this).data("color");
+      var playerNum = parseInt($(this).closest(".player-row").attr("data-player-num"), 10);
+      var currentOwner = null;
+      for (var k in setupColorAssignments) {
+        if (setupColorAssignments[k] === hex) { currentOwner = parseInt(k, 10); break; }
+      }
+      if (currentOwner === playerNum) return;
+      var myOldColor = setupColorAssignments[playerNum];
+      if (currentOwner !== null && myOldColor) {
+        setupColorAssignments[currentOwner] = myOldColor;
+      } else if (currentOwner !== null) {
+        delete setupColorAssignments[currentOwner];
+      }
+      setupColorAssignments[playerNum] = hex;
+      refreshSetupColorDots();
+    });
+
+    function loadPlayers() {
+      $.get("/api/players", function (data) {
+        picker.setCatalog(data || []);
+        if (!window._gameLayoutsReady && $("#gameLayoutsPanel").length) {
+          window._gameLayoutsReady = true;
+          GameLayouts.init({
+            gameId: {{ game_def.id }},
+            isLead: {{ 'true' if is_lead else 'false' }},
+            hasSettings: false,
+            getPlayerIds: function() { return picker.getIds(); },
+            setPlayerIds: function(ids) { picker.setIds(ids); },
+            rebuild: function() {
+              picker.rebuild();
+              if (window.GameLayouts) GameLayouts.afterRebuild();
+            }
+          });
+        } else if (window.GameLayouts) {
+          GameLayouts.afterRebuild();
+        }
+      });
+    }
+
     loadPlayers();
 
     $("#savePlayer").click(function () {
@@ -609,13 +593,12 @@ content %}
         data: JSON.stringify({ first_name: firstName, last_name: lastName, display_name: displayName }),
         success: function (response) {
           bootstrap.Modal.getInstance($("#addPlayerModal")).hide();
-          var playerText = response.display_name + (response.has_duplicate ? " (" + response.first_name + " " + response.last_name + ")" : "");
-          $(".player-select").each(function () {
-            $(this).find('option[value="new"]').before($("<option>").val(response.id).text(playerText));
-          });
-          if (window.currentPlayerSelect) {
-            window.currentPlayerSelect.val(response.id);
-            window.currentPlayerSelect = null;
+          picker.addPlayerToCatalog(response);
+          if (pendingAddSeat != null) {
+            picker.setSeat(pendingAddSeat, response.id);
+            pendingAddSeat = null;
+          } else {
+            picker.rebuild();
           }
         },
         error: function (xhr) {
@@ -626,7 +609,7 @@ content %}
 
     $("#newGameForm").submit(function (e) {
       e.preventDefault();
-      var playerIds = $(".player-select").map(function () { return $(this).val(); }).get();
+      var playerIds = picker.getIds();
 
       if (playerIds.some(function (id) { return !id; })) {
         AppModal.warning("Missing Players", "Please select all players before starting.");

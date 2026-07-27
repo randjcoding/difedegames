@@ -695,84 +695,43 @@ content %}
 </style>
 {% endblock %} {% block scripts %}
 {% include 'partials/game_layouts.html' %}
+{% include 'partials/player_picker.html' %}
 <script>
   $(document).ready(function () {
-    let players = [];
     const GAME_ID = {{ game_def.id }};
+    var pendingAddSeat = null;
+    var picker = PlayerPicker.mount({
+      container: '#playerSelections',
+      countSelector: '#playerCount',
+      onAddNew: function(seatIdx) {
+        pendingAddSeat = seatIdx;
+        $("#addPlayerForm")[0].reset();
+        new bootstrap.Modal($("#addPlayerModal")).show();
+      }
+    });
 
     function loadPlayers() {
       $.get("/api/players", function (data) {
-        players = data;
-        updatePlayerSelections();
+        picker.setCatalog(data || []);
         if (!window._gameLayoutsReady && $("#gameLayoutsPanel").length) {
           window._gameLayoutsReady = true;
           GameLayouts.init({
             gameId: {{ game_def.id }},
             isLead: {{ 'true' if is_lead else 'false' }},
             hasSettings: true,
-            rebuild: updatePlayerSelections
+            getPlayerIds: function() { return picker.getIds(); },
+            setPlayerIds: function(ids) { picker.setIds(ids); },
+            rebuild: function() {
+              picker.rebuild();
+              if (window.GameLayouts) GameLayouts.afterRebuild();
+            }
           });
+        } else if (window.GameLayouts) {
+          GameLayouts.afterRebuild();
         }
       });
     }
 
-    function updatePlayerSelections() {
-      const count = parseInt($("#playerCount").val());
-      const container = $("#playerSelections");
-      container.empty();
-
-      for (let i = 1; i <= count; i++) {
-        const div = $("<div>").addClass("mb-3");
-        div.append($("<label>").addClass("form-label").text("Player " + i));
-
-        const select = $("<select>")
-          .addClass("form-select player-select")
-          .attr("required", true)
-          .attr("data-player-num", i);
-
-        select.append($("<option>").val("").text("Select Player"));
-        select.append($("<option>").val("new").text("+ Add New Player"));
-
-        var familyPlayers = players.filter(function(p) { return !p.is_guest; });
-        var crewPlayers = players.filter(function(p) { return p.is_guest; });
-        var crewGroups = {};
-        crewPlayers.forEach(function(p) {
-          var gn = p.guest_family_name || "Other";
-          if (!crewGroups[gn]) crewGroups[gn] = [];
-          crewGroups[gn].push(p);
-        });
-
-        function playerLabel(p) {
-          return p.display_name + (p.has_duplicate ? " (" + p.first_name + " " + p.last_name + ")" : "");
-        }
-
-        if (familyPlayers.length) {
-          var grp = $("<optgroup>").attr("label", "Your Family");
-          familyPlayers.forEach(function(p) { grp.append($("<option>").val(p.id).text(playerLabel(p))); });
-          select.append(grp);
-        }
-        Object.keys(crewGroups).sort().forEach(function(name) {
-          var grp = $("<optgroup>").attr("label", "Crew - " + name);
-          crewGroups[name].forEach(function(p) { grp.append($("<option>").val(p.id).text(playerLabel(p))); });
-          select.append(grp);
-        });
-
-        div.append(select);
-        container.append(div);
-      }
-
-      $(".player-select").change(function () {
-        if ($(this).val() === "new") {
-          window.currentPlayerSelect = $(this);
-          $("#addPlayerForm")[0].reset();
-          new bootstrap.Modal($("#addPlayerModal")).show();
-          $(this).val("");
-        }
-      });
-      if (window.GameLayouts) GameLayouts.afterRebuild();
-    }
-
-    $("#playerCount").change(updatePlayerSelections);
     loadPlayers();
 
     $(".target-preset").click(function () {
@@ -822,13 +781,12 @@ content %}
         data: JSON.stringify({ first_name: firstName, last_name: lastName, display_name: displayName }),
         success: function (response) {
           bootstrap.Modal.getInstance($("#addPlayerModal")).hide();
-          const playerText = response.display_name + (response.has_duplicate ? " (" + response.first_name + " " + response.last_name + ")" : "");
-          $(".player-select").each(function () {
-            $(this).find('option[value="new"]').before($("<option>").val(response.id).text(playerText));
-          });
-          if (window.currentPlayerSelect) {
-            window.currentPlayerSelect.val(response.id);
-            window.currentPlayerSelect = null;
+          picker.addPlayerToCatalog(response);
+          if (pendingAddSeat != null) {
+            picker.setSeat(pendingAddSeat, response.id);
+            pendingAddSeat = null;
+          } else {
+            picker.rebuild();
           }
         },
         error: function (xhr) {
@@ -839,7 +797,7 @@ content %}
 
     $("#newGameForm").submit(function (e) {
       e.preventDefault();
-      const playerIds = $(".player-select").map(function () { return $(this).val(); }).get();
+      const playerIds = picker.getIds();
 
       if (playerIds.some(function (id) { return !id; })) {
         AppModal.warning("Missing Players", "Please select all players before starting.");
