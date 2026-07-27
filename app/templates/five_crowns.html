@@ -76,6 +76,7 @@ content %}
     <div class="new-game-section">
       <h3>Start New Game</h3>
       <form id="newGameForm" class="mt-4">
+        <div id="gameLayoutsPanel" class="mb-3"></div>
         <div class="mb-3">
           <label for="playerCount" class="form-label"
             >Number of Players ({{ game_def.min_players }}-{{ game_def.max_players }})</label
@@ -934,6 +935,7 @@ content %}
   }
 </style>
 {% endblock %} {% block scripts %}
+{% include 'partials/game_layouts.html' %}
 <script>
   $(document).ready(function () {
     let players = [];
@@ -942,6 +944,15 @@ content %}
       $.get("/api/players", function (data) {
         players = data;
         updatePlayerSelections();
+        if (!window._gameLayoutsReady && $("#gameLayoutsPanel").length) {
+          window._gameLayoutsReady = true;
+          GameLayouts.init({
+            gameId: {{ game_def.id }},
+            isLead: {{ 'true' if is_lead else 'false' }},
+            hasSettings: false,
+            rebuild: updatePlayerSelections
+          });
+        }
       });
     }
 
@@ -996,21 +1007,11 @@ content %}
         }
       });
 
-      if (count === 2) {
-        const kimPlayer = players.find(p => p.display_name === "Kim");
-        const joePlayer = players.find(p => p.display_name === "Joe");
-        if (kimPlayer) {
-          $(".player-select[data-player-num='1']").val(kimPlayer.id);
-        }
-        if (joePlayer) {
-          $(".player-select[data-player-num='2']").val(joePlayer.id);
-        }
-      }
+      if (window.GameLayouts) GameLayouts.afterRebuild();
     }
 
     $("#playerCount").change(updatePlayerSelections);
     loadPlayers();
-    updatePlayerSelections();
 
     $("#savePlayer").click(function () {
       const firstName = $("#firstName").val();

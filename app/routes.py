@@ -290,6 +290,8 @@ def game_page(slug, game_id):
         scores = {(s['player_id'], s['round_number']): s['score'] for s in scores_data}
     
     all_players = get_family_players(user.get('family_id'), include_crew=True)
+    family_id = user.get('family_id')
+    lead = is_family_lead(conn, user, family_id) if family_id else False
     conn.close()
     
     template = slug.replace('-', '_') + '.html'
@@ -302,7 +304,8 @@ def game_page(slug, game_id):
         scores=scores,
         players=all_players,
         game_family_id=game_family_id,
-        user_family_id=user.get('family_id'))
+        user_family_id=family_id,
+        is_lead=lead)
 
 @main.route('/')
 def index():
@@ -2952,6 +2955,8 @@ def game_landing(slug):
 
         game_url = SLUG_TO_URL.get(slug, '/' + slug)
 
+        family_id = user.get('family_id')
+        lead = is_family_lead(conn, user, family_id) if family_id else False
         return render_template('game_landing.html',
             game=game_def,
             rules=rules,
@@ -2959,7 +2964,8 @@ def game_landing(slug):
             total_games=total_games['c'],
             family_games=family_games['c'],
             game_url=game_url,
-            slug=slug)
+            slug=slug,
+            is_lead=lead)
     finally:
         conn.close()
 
@@ -3012,6 +3018,223 @@ def sevens():
 @login_required
 def skyjo():
     return game_page('skyjo', 11)
+
+
+def _parse_layout_player_ids(raw):
+    """Normalize JSON/list player ids into a list of ints."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        import json as _json
+        try:
+            raw = _json.loads(raw)
+        except Exception:
+            return []
+    out = []
+    for x in raw:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _validate_layout_players(conn, family_id, player_ids, game):
+    if not player_ids:
+        return 'Select at least one player'
+    if len(player_ids) != len(set(player_ids)):
+        return 'Each player can only appear once'
+    mn = game.get('min_players') or 1
+    mx = game.get('max_players') or 20
+    if len(player_ids) < mn or len(player_ids) > mx:
+        return f'This game needs {mn} to {mx} players'
+    allowed = {p['id'] for p in get_family_players(family_id, include_crew=True)}
+    missing = [pid for pid in player_ids if pid not in allowed]
+    if missing:
+        return 'One or more players are not available to your family'
+    return None
+
+
+def _layout_row_to_dict(row):
+    return {
+        'id': row['id'],
+        'family_id': row['family_id'],
+        'game_id': row['game_id'],
+        'name': row['name'],
+        'player_ids': _parse_layout_player_ids(row.get('player_ids')),
+        'scoring_direction': row.get('scoring_direction'),
+        'target_score': row.get('target_score'),
+        'is_default': bool(row.get('is_default')),
+    }
+
+
+@main.route('/api/games/<int:game_id>/layouts', methods=['GET', 'POST'])
+@login_required
+def game_layouts(game_id):
+    """List or create saved layouts for a game type within the user's family."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        family_id = user.get('family_id')
+        if not family_id:
+            return jsonify({'error': 'You need a family to use layouts'}), 400
+        game = execute_query_one(conn, 'SELECT * FROM games WHERE id = %s', (game_id,))
+        if not game:
+            return jsonify({'error': 'Game not found'}), 404
+
+        if request.method == 'GET':
+            rows = execute_query(conn, '''
+                SELECT * FROM game_layouts
+                WHERE family_id = %s AND game_id = %s
+                ORDER BY is_default DESC, name ASC
+            ''', (family_id, game_id))
+            return jsonify({
+                'layouts': [_layout_row_to_dict(r) for r in rows],
+                'is_lead': is_family_lead(conn, user, family_id),
+            })
+
+        if not is_family_lead(conn, user, family_id):
+            return jsonify({'error': 'Only the family lead can save layouts'}), 403
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        if not name or len(name) > 80:
+            return jsonify({'error': 'Layout name is required (max 80 characters)'}), 400
+        player_ids = _parse_layout_player_ids(data.get('player_ids'))
+        err = _validate_layout_players(conn, family_id, player_ids, game)
+        if err:
+            return jsonify({'error': err}), 400
+        scoring_direction = data.get('scoring_direction') or None
+        if scoring_direction and scoring_direction not in ('high_wins', 'low_wins'):
+            return jsonify({'error': 'Invalid scoring direction'}), 400
+        target_score = data.get('target_score')
+        if target_score is not None and target_score != '':
+            try:
+                target_score = int(target_score)
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Target score must be a number'}), 400
+            if target_score < 1:
+                return jsonify({'error': 'Target score must be at least 1'}), 400
+        else:
+            target_score = None
+        make_default = bool(data.get('is_default'))
+        import json as _json
+        if make_default:
+            execute_modify(conn, '''
+                UPDATE game_layouts SET is_default = FALSE
+                WHERE family_id = %s AND game_id = %s AND is_default = TRUE
+            ''', (family_id, game_id))
+        row = execute_query_one(conn, '''
+            INSERT INTO game_layouts
+                (family_id, game_id, name, player_ids, scoring_direction, target_score,
+                 is_default, created_by_user_id)
+            VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s, %s)
+            RETURNING *
+        ''', (family_id, game_id, name, _json.dumps(player_ids),
+              scoring_direction, target_score, make_default, user['id']))
+        conn.commit()
+        return jsonify({'message': 'Layout saved', 'layout': _layout_row_to_dict(row)})
+    except Exception as e:
+        conn.rollback()
+        if 'game_layouts_name_unique' in str(e):
+            return jsonify({'error': 'A layout with that name already exists'}), 409
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@main.route('/api/layouts/<int:layout_id>', methods=['PUT', 'DELETE'])
+@login_required
+def game_layout_detail(layout_id):
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        layout = execute_query_one(conn, 'SELECT * FROM game_layouts WHERE id = %s', (layout_id,))
+        if not layout:
+            return jsonify({'error': 'Layout not found'}), 404
+        if not is_family_lead(conn, user, layout['family_id']):
+            return jsonify({'error': 'Only the family lead can change layouts'}), 403
+
+        if request.method == 'DELETE':
+            execute_modify(conn, 'DELETE FROM game_layouts WHERE id = %s', (layout_id,))
+            conn.commit()
+            return jsonify({'message': 'Layout deleted'})
+
+        data = request.get_json(silent=True) or {}
+        game = execute_query_one(conn, 'SELECT * FROM games WHERE id = %s', (layout['game_id'],))
+        name = (data.get('name') if 'name' in data else layout['name']) or ''
+        name = name.strip()
+        if not name or len(name) > 80:
+            return jsonify({'error': 'Layout name is required (max 80 characters)'}), 400
+        player_ids = _parse_layout_player_ids(
+            data['player_ids'] if 'player_ids' in data else layout.get('player_ids'))
+        err = _validate_layout_players(conn, layout['family_id'], player_ids, game)
+        if err:
+            return jsonify({'error': err}), 400
+        scoring_direction = data['scoring_direction'] if 'scoring_direction' in data \
+            else layout.get('scoring_direction')
+        if scoring_direction and scoring_direction not in ('high_wins', 'low_wins'):
+            return jsonify({'error': 'Invalid scoring direction'}), 400
+        target_score = data['target_score'] if 'target_score' in data else layout.get('target_score')
+        if target_score is not None and target_score != '':
+            try:
+                target_score = int(target_score)
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Target score must be a number'}), 400
+        else:
+            target_score = None
+        make_default = bool(data['is_default']) if 'is_default' in data else bool(layout['is_default'])
+        import json as _json
+        if make_default:
+            execute_modify(conn, '''
+                UPDATE game_layouts SET is_default = FALSE
+                WHERE family_id = %s AND game_id = %s AND is_default = TRUE AND id <> %s
+            ''', (layout['family_id'], layout['game_id'], layout_id))
+        row = execute_query_one(conn, '''
+            UPDATE game_layouts
+            SET name = %s, player_ids = %s::jsonb, scoring_direction = %s,
+                target_score = %s, is_default = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            RETURNING *
+        ''', (name, _json.dumps(player_ids), scoring_direction, target_score,
+              make_default, layout_id))
+        conn.commit()
+        return jsonify({'message': 'Layout updated', 'layout': _layout_row_to_dict(row)})
+    except Exception as e:
+        conn.rollback()
+        if 'game_layouts_name_unique' in str(e):
+            return jsonify({'error': 'A layout with that name already exists'}), 409
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@main.route('/api/layouts/<int:layout_id>/set-default', methods=['POST'])
+@login_required
+def game_layout_set_default(layout_id):
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        layout = execute_query_one(conn, 'SELECT * FROM game_layouts WHERE id = %s', (layout_id,))
+        if not layout:
+            return jsonify({'error': 'Layout not found'}), 404
+        if not is_family_lead(conn, user, layout['family_id']):
+            return jsonify({'error': 'Only the family lead can set the default layout'}), 403
+        execute_modify(conn, '''
+            UPDATE game_layouts SET is_default = FALSE
+            WHERE family_id = %s AND game_id = %s AND is_default = TRUE
+        ''', (layout['family_id'], layout['game_id']))
+        execute_modify(conn, '''
+            UPDATE game_layouts SET is_default = TRUE, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        ''', (layout_id,))
+        conn.commit()
+        return jsonify({'message': 'Default layout updated'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
 
 @main.route('/api/players', methods=['GET', 'POST'])
 @login_required

@@ -96,6 +96,8 @@ def activate_and_login(conn, client, email):
 
 def schema_audit(conn):
     print('\n== Section 1: schema and FK data-safety audit ==')
+    check('table game_layouts exists',
+          q1(conn, "SELECT to_regclass('public.game_layouts') IS NOT NULL AS ok")['ok'])
     expected = {
         'fk_active_games_user_id': 'n',
         'game_scores_player_fkey': 'r',
@@ -189,6 +191,7 @@ def cleanup(conn, ids):
     run(conn, """DELETE FROM family_alliances
         WHERE requesting_family_id = ANY(%s) OR target_family_id = ANY(%s)""",
         (fam_ids or [0], fam_ids or [0]))
+    run(conn, 'DELETE FROM game_layouts WHERE family_id = ANY(%s)', (fam_ids or [0],))
     run(conn, 'UPDATE families SET lead_user_id = NULL WHERE id = ANY(%s)', (fam_ids or [0],))
     for tbl in ('players', 'families', 'users'):
         run(conn, f'UPDATE {tbl} SET archived_by_user_id = NULL WHERE archived_by_user_id = ANY(%s)',
@@ -576,6 +579,90 @@ def main():
             acts = data.get('actions') or []
             check('approval notification has Approve action',
                   any(a.get('label') == 'Approve' and 'approve-user' in (a.get('url') or '') for a in acts))
+
+        print('\n== Section 11: family game layouts ==')
+        # Use UNO Classic (game_id 3) so Five Crowns DiFede seed is untouched.
+        uno_id = 3
+        # Restore lead A as family lead (was promoted to super_admin above).
+        run(conn, "UPDATE users SET role = 'family_admin' WHERE id = %s", (user_a['id'],))
+        conn.commit()
+        p_home = qall(conn, """
+            SELECT p.id FROM players p
+            JOIN player_family_memberships m ON m.player_id = p.id
+            WHERE m.family_id = %s AND m.status = 'active' AND p.archived_at IS NULL
+              AND p.purged_at IS NULL
+            ORDER BY p.id LIMIT 2
+        """, (fam_a['id'],))
+        check('Alpha has two roster players for layout', len(p_home) >= 2)
+        layout_pids = [p_home[0]['id'], p_home[1]['id']] if len(p_home) >= 2 else []
+
+        # Non-lead Alpha member (invited newbie) cannot create/delete layouts.
+        newbie = q1(conn, "SELECT id FROM users WHERE email = 'zztest.newbie@example.com'")
+        client_inv = app.test_client()
+        if newbie and layout_pids:
+            activate_and_login(conn, client_inv, 'zztest.newbie@example.com')
+            r = client_inv.post(f'/api/games/{uno_id}/layouts', json={
+                'name': 'Zztest Blocked', 'player_ids': layout_pids,
+                'scoring_direction': 'high_wins', 'target_score': 500})
+            check('non-lead cannot create a layout', r.status_code == 403, str(r.get_json()))
+
+        r = client_a.post(f'/api/games/{uno_id}/layouts', json={
+            'name': 'Zztest Nightly', 'player_ids': layout_pids,
+            'scoring_direction': 'high_wins', 'target_score': 200, 'is_default': True})
+        check('lead can create a default layout', r.status_code == 200, str(r.get_json()))
+        layout = (r.get_json() or {}).get('layout') or {}
+        layout_id = layout.get('id')
+        check('created layout marked default', layout.get('is_default') is True)
+        check('created layout stores player order', layout.get('player_ids') == layout_pids)
+        check('created layout stores target score', layout.get('target_score') == 200)
+
+        r = client_b.get(f'/api/games/{uno_id}/layouts')
+        b_layouts = (r.get_json() or {}).get('layouts') or []
+        check('other family does not see Alpha layouts',
+              not any(L.get('id') == layout_id for L in b_layouts))
+
+        r = client_a.get(f'/api/games/{uno_id}/layouts')
+        a_layouts = (r.get_json() or {}).get('layouts') or []
+        check('lead can list family layouts',
+              any(L.get('id') == layout_id and L.get('is_default') for L in a_layouts))
+        if newbie:
+            r = client_inv.get(f'/api/games/{uno_id}/layouts')
+            check('family member can list layouts',
+                  any(L.get('id') == layout_id for L in (r.get_json() or {}).get('layouts', [])))
+
+        r = client_a.post(f'/api/games/{uno_id}/layouts', json={
+            'name': 'Zztest Alt', 'player_ids': list(reversed(layout_pids)),
+            'scoring_direction': 'low_wins', 'target_score': 100})
+        check('lead can create a second layout', r.status_code == 200, str(r.get_json()))
+        alt_id = (r.get_json() or {}).get('layout', {}).get('id')
+        r = client_a.post(f'/api/layouts/{alt_id}/set-default')
+        check('lead can change default layout', r.status_code == 200, str(r.get_json()))
+        defaults = qall(conn, """
+            SELECT id FROM game_layouts
+            WHERE family_id = %s AND game_id = %s AND is_default = TRUE
+        """, (fam_a['id'], uno_id))
+        check('only one default layout per family+game',
+              len(defaults) == 1 and defaults[0]['id'] == alt_id)
+
+        r = client_a.post('/api/games/new', json={
+            'game_id': uno_id, 'player_ids': layout_pids,
+            'scoring_direction': 'high_wins', 'target_score': 200})
+        check('can start game from layout players', r.status_code == 200, str(r.get_json()))
+
+        if newbie and layout_id:
+            r = client_inv.delete(f'/api/layouts/{layout_id}')
+            check('non-lead cannot delete a layout', r.status_code == 403, str(r.get_json()))
+        r = client_a.delete(f'/api/layouts/{layout_id}')
+        check('lead can delete a layout', r.status_code == 200, str(r.get_json()))
+        check('deleted layout is gone',
+              q1(conn, 'SELECT COUNT(*) AS n FROM game_layouts WHERE id = %s', (layout_id,))['n'] == 0)
+
+        seed = q1(conn, """
+            SELECT name, player_ids, is_default FROM game_layouts
+            WHERE family_id = 1 AND game_id = 1 AND name = 'Kim & Joe'
+        """)
+        check('DiFede Five Crowns Kim & Joe layout seeded',
+              seed and seed['is_default'] is True, str(seed))
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')

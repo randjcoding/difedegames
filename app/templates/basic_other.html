@@ -54,7 +54,9 @@ content %}
     <div class="new-game-section">
       <h3>Start New Game</h3>
       <form id="newGameForm" class="mt-4">
-        <div class="mb-3">
+        
+        <div id="gameLayoutsPanel" class="mb-3"></div>
+<div class="mb-3">
           <label for="customGameName" class="form-label">Game Name</label>
           <input type="text" class="form-control" id="customGameName" placeholder="e.g. Rummy, Poker, Yahtzee..." autocomplete="off" required list="gameNameSuggestions">
           <datalist id="gameNameSuggestions"></datalist>
@@ -376,6 +378,7 @@ content %}
   }
 </style>
 {% endblock %} {% block scripts %}
+{% include 'partials/game_layouts.html' %}
 <script>
 $(document).ready(function () {
   let players = [];
@@ -410,9 +413,18 @@ $(document).ready(function () {
 
   function loadPlayers() {
     $.get("/api/players", function (data) {
-      players = data;
-      updatePlayerSelections();
-    });
+        players = data;
+        updatePlayerSelections();
+        if (!window._gameLayoutsReady && $("#gameLayoutsPanel").length) {
+          window._gameLayoutsReady = true;
+          GameLayouts.init({
+            gameId: {{ game_def.id }},
+            isLead: {{ 'true' if is_lead else 'false' }},
+            hasSettings: true,
+            rebuild: updatePlayerSelections
+          });
+        }
+      });
   }
 
   function updatePlayerSelections() {
@@ -468,12 +480,7 @@ $(document).ready(function () {
         $(this).val("");
       }
     });
-    if (count === 2) {
-      var kim = players.find(function (p) { return p.display_name === "Kim"; });
-      var joe = players.find(function (p) { return p.display_name === "Joe"; });
-      if (kim) $(".player-select[data-player-num='1']").val(kim.id);
-      if (joe) $(".player-select[data-player-num='2']").val(joe.id);
-    }
+      if (window.GameLayouts) GameLayouts.afterRebuild();
   }
 
   $("#playerCount").change(updatePlayerSelections);

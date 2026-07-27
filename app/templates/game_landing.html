@@ -308,6 +308,7 @@
       </div>
       <div class="gl-rules-body">
         <form id="glNewGameForm">
+          <div id="gameLayoutsPanel" class="mb-3"></div>
           <div class="mb-3">
             <label for="glPlayerCount" class="form-label fw-bold">
               Number of Players ({{ game.min_players }}–{{ game.max_players }})
@@ -446,6 +447,7 @@
 {% endblock %}
 
 {% block scripts %}
+{% include 'partials/game_layouts.html' %}
 <script>
 (function() {
   const SLUG = "{{ slug }}";
@@ -460,6 +462,21 @@
     $.get("/api/players", function(data) {
       players = data;
       updatePlayerSelections();
+      if (!window._gameLayoutsReady && $("#gameLayoutsPanel").length) {
+        window._gameLayoutsReady = true;
+        GameLayouts.init({
+          gameId: GAME_ID,
+          isLead: {{ 'true' if is_lead else 'false' }},
+          hasSettings: SLUG !== "five-crowns",
+          playerCount: "#glPlayerCount",
+          playerSelect: ".gl-player-select",
+          scoringDirName: "glScoringDir",
+          targetScore: "#glTargetScore",
+          targetPreset: ".gl-target-preset",
+          customTarget: "#glCustomTarget",
+          rebuild: updatePlayerSelections
+        });
+      }
     });
   }
 
@@ -516,6 +533,7 @@
         $(this).val("");
       }
     });
+    if (window.GameLayouts) GameLayouts.afterRebuild();
   }
 
   $("#glPlayerCount").change(updatePlayerSelections);

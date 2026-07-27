@@ -1,0 +1,327 @@
+{# Shared saved-layout UI. Place <div id="gameLayoutsPanel"></div> in the New Game form,
+   then include this partial in the scripts block and call GameLayouts.init({...}). #}
+<style>
+  #gameLayoutsPanel .gl-layout-title {
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-bottom: 0.4rem;
+    color: var(--df-text-card, #212529);
+  }
+  #gameLayoutsPanel .gl-layout-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+  }
+  #gameLayoutsPanel .gl-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    border: 1px solid var(--df-border, #ced4da);
+    background: #fff;
+    color: #212529;
+    border-radius: 8px;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #gameLayoutsPanel .gl-chip:hover { border-color: var(--df-accent); }
+  #gameLayoutsPanel .gl-chip.active {
+    border-color: var(--df-accent);
+    background: color-mix(in srgb, var(--df-accent) 12%, #fff);
+  }
+  #gameLayoutsPanel .gl-chip .gl-default-tag {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--df-accent);
+    text-transform: uppercase;
+  }
+  #gameLayoutsPanel .gl-chip-actions {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 2px;
+  }
+  #gameLayoutsPanel .gl-chip-actions button {
+    border: none;
+    background: transparent;
+    color: #6c757d;
+    padding: 0 3px;
+    font-size: 0.75rem;
+    line-height: 1;
+  }
+  #gameLayoutsPanel .gl-chip-actions button:hover { color: #212529; }
+  #gameLayoutsPanel .gl-chip-actions button.gl-del:hover { color: #dc3545; }
+  #gameLayoutsPanel .gl-empty {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-bottom: 0.4rem;
+  }
+  #gameLayoutsPanel .gl-save-row { margin-top: 0.25rem; }
+</style>
+
+<div class="modal fade" id="gameLayoutSaveModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background:#fff;color:#212529;">
+      <div class="modal-header">
+        <h5 class="modal-title">Save Layout</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2" style="font-size:0.88rem;color:#495057;">
+          Save the current players and settings so you can start this setup again quickly.
+        </p>
+        <label class="form-label fw-semibold" for="glSaveName">Layout name</label>
+        <input type="text" class="form-control" id="glSaveName" maxlength="80" placeholder="e.g. Kim &amp; Joe">
+        <div class="form-check mt-3">
+          <input class="form-check-input" type="checkbox" id="glSaveDefault">
+          <label class="form-check-label" for="glSaveDefault">Use as the default for this game</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="glSaveConfirmBtn">Save Layout</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+window.GameLayouts = (function() {
+  var cfg = null;
+  var layouts = [];
+  var pending = null;
+  var autoApplied = false;
+  var activeId = null;
+
+  function esc(s) {
+    return $('<div>').text(s == null ? '' : String(s)).html();
+  }
+
+  function toast(msg, ok) {
+    if (typeof AppModal !== 'undefined') {
+      if (ok) AppModal.success('Layouts', msg); else AppModal.error('Layouts', msg);
+      return;
+    }
+    alert(msg);
+  }
+
+  function readPlayerIds() {
+    return $(cfg.playerSelect).map(function() {
+      var v = $(this).val();
+      return v && v !== 'new' ? parseInt(v, 10) : null;
+    }).get().filter(function(x) { return !!x; });
+  }
+
+  function readSettings() {
+    if (!cfg.hasSettings) return { scoring_direction: null, target_score: null };
+    var dir = $('input[name="' + cfg.scoringDirName + '"]:checked').val() || null;
+    var target = parseInt($(cfg.targetScore).val(), 10);
+    return {
+      scoring_direction: dir,
+      target_score: isNaN(target) ? null : target
+    };
+  }
+
+  function applySettings(layout) {
+    if (!cfg.hasSettings) return;
+    if (layout.scoring_direction) {
+      var $r = $('input[name="' + cfg.scoringDirName + '"][value="' + layout.scoring_direction + '"]');
+      if ($r.length) $r.prop('checked', true);
+    }
+    if (layout.target_score != null && cfg.targetScore) {
+      var t = String(layout.target_score);
+      $(cfg.targetScore).val(t);
+      if (cfg.targetPreset) {
+        var matched = false;
+        $(cfg.targetPreset).removeClass('active').each(function() {
+          if (String($(this).data('target')) === t) {
+            $(this).addClass('active');
+            matched = true;
+          }
+        });
+        if (!matched && cfg.customTarget) {
+          $(cfg.targetPreset + '[data-target="custom"]').addClass('active');
+          $(cfg.customTarget).removeClass('d-none').show().val(t);
+        } else if (cfg.customTarget) {
+          $(cfg.customTarget).addClass('d-none').hide();
+        }
+      }
+    }
+  }
+
+  function render() {
+    var $root = $('#gameLayoutsPanel');
+    if (!$root.length || !cfg) return;
+    var html = '<div class="gl-layout-title">Saved layouts</div>';
+    if (!layouts.length) {
+      html += '<div class="gl-empty">No saved layouts yet.' +
+        (cfg.isLead ? ' Pick players, then save a layout for next time.' : '') + '</div>';
+    } else {
+      html += '<div class="gl-layout-chips">';
+      layouts.forEach(function(L) {
+        html += '<button type="button" class="gl-chip' + (activeId === L.id ? ' active' : '') +
+          '" data-id="' + L.id + '" title="Fill the form with this layout">' +
+          '<span>' + esc(L.name) + '</span>' +
+          (L.is_default ? '<span class="gl-default-tag">Default</span>' : '') +
+          (cfg.isLead ? '<span class="gl-chip-actions">' +
+            (!L.is_default ? '<button type="button" class="gl-set-default" data-id="' + L.id +
+              '" title="Make default" aria-label="Make default"><i class="fas fa-star" aria-hidden="true"></i></button>' : '') +
+            '<button type="button" class="gl-del" data-id="' + L.id +
+              '" title="Delete layout" aria-label="Delete layout"><i class="fas fa-times" aria-hidden="true"></i></button>' +
+            '</span>' : '') +
+          '</button>';
+      });
+      html += '</div>';
+    }
+    if (cfg.isLead) {
+      html += '<div class="gl-save-row">' +
+        '<button type="button" class="btn btn-sm btn-outline-secondary" id="glSaveLayoutBtn">' +
+        '<i class="fas fa-bookmark me-1" aria-hidden="true"></i>Save current as layout</button></div>';
+    }
+    $root.html(html);
+
+    $root.find('.gl-chip').on('click', function(e) {
+      if ($(e.target).closest('.gl-chip-actions').length) return;
+      var id = parseInt($(this).data('id'), 10);
+      var L = layouts.find(function(x) { return x.id === id; });
+      if (L) applyLayout(L);
+    });
+    $root.find('.gl-set-default').on('click', function(e) {
+      e.stopPropagation();
+      var id = parseInt($(this).data('id'), 10);
+      $.post('/api/layouts/' + id + '/set-default')
+        .done(function() { load(true); })
+        .fail(function(xhr) { toast((xhr.responseJSON && xhr.responseJSON.error) || 'Could not set default', false); });
+    });
+    $root.find('.gl-del').on('click', function(e) {
+      e.stopPropagation();
+      var id = parseInt($(this).data('id'), 10);
+      var L = layouts.find(function(x) { return x.id === id; });
+      var doDel = function() {
+        $.ajax({ url: '/api/layouts/' + id, method: 'DELETE' })
+          .done(function() {
+            if (activeId === id) activeId = null;
+            load(true);
+          })
+          .fail(function(xhr) { toast((xhr.responseJSON && xhr.responseJSON.error) || 'Could not delete', false); });
+      };
+      if (typeof AppModal !== 'undefined') {
+        AppModal.confirm('Delete Layout', 'Delete <strong>' + esc(L ? L.name : 'this layout') + '</strong>?', doDel);
+      } else if (confirm('Delete this layout?')) doDel();
+    });
+    $root.find('#glSaveLayoutBtn').on('click', openSaveModal);
+  }
+
+  function openSaveModal() {
+    var ids = readPlayerIds();
+    if (!ids.length) {
+      toast('Select the players first, then save the layout.', false);
+      return;
+    }
+    $('#glSaveName').val('');
+    $('#glSaveDefault').prop('checked', layouts.length === 0);
+    new bootstrap.Modal(document.getElementById('gameLayoutSaveModal')).show();
+  }
+
+  function saveCurrent() {
+    var name = ($('#glSaveName').val() || '').trim();
+    if (!name) { toast('Enter a layout name.', false); return; }
+    var ids = readPlayerIds();
+    if (!ids.length) { toast('Select the players first.', false); return; }
+    var settings = readSettings();
+    $.ajax({
+      url: '/api/games/' + cfg.gameId + '/layouts',
+      method: 'POST',
+      contentType: 'application/json',
+      data: JSON.stringify({
+        name: name,
+        player_ids: ids,
+        scoring_direction: settings.scoring_direction,
+        target_score: settings.target_score,
+        is_default: $('#glSaveDefault').is(':checked')
+      })
+    }).done(function(resp) {
+      bootstrap.Modal.getInstance(document.getElementById('gameLayoutSaveModal')).hide();
+      toast((resp && resp.message) || 'Layout saved', true);
+      load(true);
+    }).fail(function(xhr) {
+      toast((xhr.responseJSON && xhr.responseJSON.error) || 'Could not save layout', false);
+    });
+  }
+
+  function applyLayout(layout) {
+    pending = layout;
+    activeId = layout.id;
+    var n = (layout.player_ids || []).length;
+    if (n < 1) { pending = null; return; }
+    var $count = $(cfg.playerCount);
+    if ($count.val() !== String(n)) {
+      $count.val(String(n)).trigger('change');
+    } else if (typeof cfg.rebuild === 'function') {
+      cfg.rebuild();
+    } else {
+      afterRebuild();
+    }
+  }
+
+  function afterRebuild() {
+    if (!pending) return;
+    var layout = pending;
+    pending = null;
+    var ids = layout.player_ids || [];
+    ids.forEach(function(pid, idx) {
+      var $sel = $(cfg.playerSelect + '[data-player-num="' + (idx + 1) + '"]');
+      if ($sel.find('option[value="' + pid + '"]').length) {
+        $sel.val(String(pid));
+      }
+    });
+    applySettings(layout);
+    render();
+  }
+
+  function load(skipAuto) {
+    if (!cfg || !cfg.gameId) return;
+    $.get('/api/games/' + cfg.gameId + '/layouts')
+      .done(function(data) {
+        layouts = (data && data.layouts) || [];
+        if (typeof data.is_lead === 'boolean') cfg.isLead = data.is_lead;
+        render();
+        if (!skipAuto && !autoApplied) {
+          var def = layouts.find(function(L) { return L.is_default; });
+          if (def) {
+            autoApplied = true;
+            applyLayout(def);
+          }
+        }
+      })
+      .fail(function() { /* silent: panel stays empty */ });
+  }
+
+  function init(options) {
+    cfg = $.extend({
+      gameId: null,
+      isLead: false,
+      hasSettings: false,
+      playerCount: '#playerCount',
+      playerSelect: '.player-select',
+      scoringDirName: 'scoringDir',
+      targetScore: '#targetScore',
+      targetPreset: '.target-preset',
+      customTarget: '#customTargetScore',
+      rebuild: null
+    }, options || {});
+    autoApplied = false;
+    pending = null;
+    activeId = null;
+    $('#glSaveConfirmBtn').off('click.gl').on('click.gl', saveCurrent);
+    load(false);
+  }
+
+  return {
+    init: init,
+    afterRebuild: afterRebuild,
+    reload: function() { load(true); }
+  };
+})();
+</script>
