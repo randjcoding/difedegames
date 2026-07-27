@@ -563,6 +563,11 @@
               </a>
             </li>
             {% endif %}
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('main.feedback_page') }}">
+                <i class="fas fa-comment-dots"></i> Feedback
+              </a>
+            </li>
             {% if current_user.role == 'super_admin' %}
             <li class="nav-item">
               <a class="nav-link" href="{{ url_for('main.admin') }}">
@@ -660,11 +665,6 @@
                 <li>
                   <a class="dropdown-item" href="{{ url_for('auth.change_password') }}">
                     <i class="fas fa-key"></i> Change Password
-                  </a>
-                </li>
-                <li>
-                  <a class="dropdown-item" href="{{ url_for('main.feedback_page') }}">
-                    <i class="fas fa-comment-dots"></i> Send Feedback
                   </a>
                 </li>
                 {% if current_user.role == 'super_admin' %}

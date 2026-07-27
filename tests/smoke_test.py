@@ -753,6 +753,13 @@ def main():
 
         r = client_a.get('/admin/feedback')
         check('feedback inbox page loads', r.status_code == 200)
+        r = client_b.get('/feedback')
+        page = r.get_data(as_text=True)
+        check('feedback page loads for members', r.status_code == 200)
+        # Primary navbar link (not buried in the user dropdown).
+        primary = page.split('navbar-nav ms-auto', 1)[0] if 'navbar-nav ms-auto' in page else ''
+        check('Feedback link is on the primary navbar',
+              "href=\"/feedback\"" in primary or "Send Feedback" in primary or '>Feedback<' in primary)
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')
