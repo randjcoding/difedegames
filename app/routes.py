@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, jsonify, request, g, url_for, session, redirect
+from flask import Blueprint, render_template, jsonify, request, g, url_for, session, redirect, flash
 from app import get_db_connection, socketio
 from datetime import datetime
 from flask_socketio import emit
@@ -376,6 +376,267 @@ def notify_family_lead(conn, family_id, ntype, title, message, data=None):
     lead = execute_query_one(conn, 'SELECT lead_user_id FROM families WHERE id = %s', (family_id,))
     if lead and lead.get('lead_user_id'):
         notify_user(conn, lead['lead_user_id'], ntype, title, message, data)
+
+
+def notify_super_admins(conn, ntype, title, message, data=None):
+    """Notify every active super_admin (site owners / operators)."""
+    admins = execute_query(conn, '''
+        SELECT id FROM users
+        WHERE role = 'super_admin' AND is_active = TRUE AND archived_at IS NULL
+    ''')
+    for admin in admins:
+        notify_user(conn, admin['id'], ntype, title, message, data)
+
+
+FEEDBACK_CATEGORIES = {
+    'bug': 'Bug report',
+    'enhancement': 'Enhancement request',
+    'new_game': 'New game request',
+    'feedback': 'General feedback',
+    'other': 'Other',
+}
+FEEDBACK_STATUSES = {
+    'open': 'Open',
+    'in_progress': 'In progress',
+    'closed': 'Closed',
+}
+
+
+def _record_feedback_view(conn, feedback_id, user_id):
+    """Upsert paper-trail row: first_seen stays, last_seen updates."""
+    execute_modify(conn, '''
+        INSERT INTO feedback_views (feedback_id, user_id, first_seen_at, last_seen_at)
+        VALUES (%s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (feedback_id, user_id) DO UPDATE
+        SET last_seen_at = CURRENT_TIMESTAMP
+    ''', (feedback_id, user_id))
+    # Mark matching unread feedback notifications as read for this admin.
+    execute_modify(conn, '''
+        UPDATE notifications
+        SET is_read = TRUE
+        WHERE user_id = %s AND is_read = FALSE AND type = 'user_feedback'
+          AND (data->>'feedback_id') = %s
+    ''', (user_id, str(feedback_id)))
+
+
+@main.route('/feedback', methods=['GET', 'POST'])
+@login_required
+def feedback_page():
+    """Any logged-in user can send feedback to super admins."""
+    user = get_current_user()
+    conn = get_db_connection()
+    try:
+        if request.method == 'POST':
+            category = (request.form.get('category') or '').strip()
+            subject = (request.form.get('subject') or '').strip()
+            body = (request.form.get('body') or '').strip()
+            if category not in FEEDBACK_CATEGORIES:
+                flash('Choose a feedback type.', 'error')
+                return redirect(url_for('main.feedback_page'))
+            if not subject or len(subject) > 200:
+                flash('Enter a short subject (max 200 characters).', 'error')
+                return redirect(url_for('main.feedback_page'))
+            if not body or len(body) > 10000:
+                flash('Enter your message (max 10,000 characters).', 'error')
+                return redirect(url_for('main.feedback_page'))
+
+            row = execute_query_one(conn, '''
+                INSERT INTO feedback_items (user_id, category, subject, body)
+                VALUES (%s, %s, %s, %s) RETURNING id
+            ''', (user['id'], category, subject, body))
+            cat_label = FEEDBACK_CATEGORIES[category]
+            who = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or user.get('email')
+            notify_super_admins(
+                conn, 'user_feedback',
+                f'{cat_label}: {subject}',
+                f'{who} sent {cat_label.lower()}.',
+                {
+                    'feedback_id': row['id'],
+                    'category': category,
+                    'actions': [{
+                        'label': 'Open',
+                        'style': 'primary',
+                        'method': 'GET',
+                        'url': f"/admin/feedback/{row['id']}",
+                    }],
+                })
+            conn.commit()
+            flash('Thanks. Your message was sent to the site admins.', 'success')
+            return redirect(url_for('main.feedback_page'))
+
+        mine = list(execute_query(conn, '''
+            SELECT id, category, subject, status, created_at
+            FROM feedback_items
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            LIMIT 20
+        ''', (user['id'],)))
+        return render_template('feedback.html',
+                               categories=FEEDBACK_CATEGORIES,
+                               statuses=FEEDBACK_STATUSES,
+                               my_items=mine)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+@main.route('/api/feedback', methods=['POST'])
+@login_required
+def api_submit_feedback():
+    """JSON submit (used by smoke tests and alternate clients)."""
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    category = (data.get('category') or '').strip()
+    subject = (data.get('subject') or '').strip()
+    body = (data.get('body') or '').strip()
+    if category not in FEEDBACK_CATEGORIES:
+        return jsonify({'error': 'Choose a feedback type'}), 400
+    if not subject or len(subject) > 200:
+        return jsonify({'error': 'Subject is required (max 200 characters)'}), 400
+    if not body or len(body) > 10000:
+        return jsonify({'error': 'Message is required (max 10,000 characters)'}), 400
+    conn = get_db_connection()
+    try:
+        row = execute_query_one(conn, '''
+            INSERT INTO feedback_items (user_id, category, subject, body)
+            VALUES (%s, %s, %s, %s) RETURNING id, category, subject, status, created_at
+        ''', (user['id'], category, subject, body))
+        cat_label = FEEDBACK_CATEGORIES[category]
+        who = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or user.get('email')
+        notify_super_admins(
+            conn, 'user_feedback',
+            f'{cat_label}: {subject}',
+            f'{who} sent {cat_label.lower()}.',
+            {
+                'feedback_id': row['id'],
+                'category': category,
+                'actions': [{
+                    'label': 'Open',
+                    'style': 'primary',
+                    'method': 'GET',
+                    'url': f"/admin/feedback/{row['id']}",
+                }],
+            })
+        conn.commit()
+        return jsonify({
+            'message': 'Feedback sent to site admins.',
+            'id': row['id'],
+            'feedback': {
+                'id': row['id'], 'category': row['category'],
+                'subject': row['subject'], 'status': row['status'],
+            },
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@main.route('/admin/feedback')
+@admin_required
+def admin_feedback_list():
+    conn = get_db_connection()
+    try:
+        status = (request.args.get('status') or '').strip()
+        params = []
+        where = ''
+        if status in FEEDBACK_STATUSES:
+            where = 'WHERE f.status = %s'
+            params.append(status)
+        rows = list(execute_query(conn, f'''
+            SELECT f.id, f.category, f.subject, f.status, f.created_at,
+                   u.first_name, u.last_name, u.email,
+                   (SELECT COUNT(*) FROM feedback_views v WHERE v.feedback_id = f.id) AS seen_count
+            FROM feedback_items f
+            JOIN users u ON u.id = f.user_id
+            {where}
+            ORDER BY
+                CASE f.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+                f.created_at DESC
+            LIMIT 200
+        ''', tuple(params) if params else None))
+        open_count = execute_query_one(conn, '''
+            SELECT COUNT(*) AS n FROM feedback_items WHERE status = 'open'
+        ''')['n']
+        return render_template('admin_feedback.html',
+                               items=rows,
+                               categories=FEEDBACK_CATEGORIES,
+                               statuses=FEEDBACK_STATUSES,
+                               filter_status=status,
+                               open_count=open_count)
+    finally:
+        conn.close()
+
+
+@main.route('/admin/feedback/<int:feedback_id>')
+@admin_required
+def admin_feedback_detail(feedback_id):
+    user = get_current_user()
+    conn = get_db_connection()
+    try:
+        item = execute_query_one(conn, '''
+            SELECT f.*, u.first_name, u.last_name, u.email, u.family_name
+            FROM feedback_items f
+            JOIN users u ON u.id = f.user_id
+            WHERE f.id = %s
+        ''', (feedback_id,))
+        if not item:
+            flash('That feedback item was not found.', 'error')
+            return redirect(url_for('main.admin_feedback_list'))
+
+        _record_feedback_view(conn, feedback_id, user['id'])
+        conn.commit()
+
+        viewers = list(execute_query(conn, '''
+            SELECT v.first_seen_at, v.last_seen_at,
+                   u.id AS user_id, u.first_name, u.last_name, u.email
+            FROM feedback_views v
+            JOIN users u ON u.id = v.user_id
+            WHERE v.feedback_id = %s
+            ORDER BY v.first_seen_at ASC
+        ''', (feedback_id,)))
+        return render_template('admin_feedback_detail.html',
+                               item=item,
+                               viewers=viewers,
+                               categories=FEEDBACK_CATEGORIES,
+                               statuses=FEEDBACK_STATUSES)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+@main.route('/api/admin/feedback/<int:feedback_id>/status', methods=['POST'])
+@admin_required
+def admin_feedback_set_status(feedback_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    if status not in FEEDBACK_STATUSES:
+        return jsonify({'error': 'Invalid status'}), 400
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        row = execute_query_one(conn, '''
+            UPDATE feedback_items
+            SET status = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            RETURNING id, status
+        ''', (status, feedback_id))
+        if not row:
+            return jsonify({'error': 'Feedback not found'}), 404
+        _record_feedback_view(conn, feedback_id, user['id'])
+        conn.commit()
+        return jsonify({'message': f'Status set to {FEEDBACK_STATUSES[status]}.',
+                        'status': row['status']})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 @main.route('/my-team')
 @login_required

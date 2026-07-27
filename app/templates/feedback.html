@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Send Feedback{% endblock %}
+
+{% block styles %}
+<style>
+  .fb-hero {
+    background: var(--df-card-header);
+    border-radius: 12px;
+    color: var(--df-dt-header-text);
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.25rem;
+  }
+  .fb-hero h1 { font-weight: 700; font-size: 1.4rem; margin: 0 0 0.25rem; }
+  .fb-hero p { margin: 0; opacity: 0.85; font-size: 0.9rem; }
+  .fb-card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    background: var(--df-surface);
+    color: var(--df-text);
+    overflow: hidden;
+    margin-bottom: 1.25rem;
+  }
+  .fb-card .card-header {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text);
+    font-weight: 700;
+    border-bottom: 2px solid var(--df-accent);
+  }
+  .fb-card .card-body { color: var(--df-text); }
+  .fb-card .form-label { color: var(--df-text); font-weight: 600; }
+  .fb-card .form-control, .fb-card .form-select {
+    background: #fff;
+    color: #212529;
+  }
+  .fb-mine-row {
+    display: flex; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+    padding: 0.65rem 0; border-bottom: 1px solid var(--df-border, #2a2a4a);
+    font-size: 0.9rem;
+  }
+  .fb-mine-row:last-child { border-bottom: none; }
+  .fb-status {
+    font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+    background: color-mix(in srgb, var(--df-text) 12%, transparent);
+    color: var(--df-muted); border: 1px solid var(--df-border);
+  }
+  .fb-status.open { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .fb-status.in_progress { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+  .fb-status.closed { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3" style="max-width:720px;">
+  <div class="fb-hero">
+    <h1><i class="fas fa-comment-dots me-2"></i>Send Feedback</h1>
+    <p>Report a bug, request an enhancement or new game, or share general feedback. Site admins get a notification and can open it from there.</p>
+  </div>
+
+  <div class="fb-card card">
+    <div class="card-header">New message</div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('main.feedback_page') }}">
+        <div class="mb-3">
+          <label class="form-label" for="category">Type</label>
+          <select class="form-select" id="category" name="category" required>
+            <option value="">Choose one...</option>
+            {% for key, label in categories.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="subject">Subject</label>
+          <input type="text" class="form-control" id="subject" name="subject" maxlength="200" required
+                 placeholder="Short summary">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="body">Details</label>
+          <textarea class="form-control" id="body" name="body" rows="6" maxlength="10000" required
+                    placeholder="What happened, what you expected, or what you would like added"></textarea>
+        </div>
+        <button type="submit" class="btn w-100" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">
+          <i class="fas fa-paper-plane me-1"></i>Send to Admins
+        </button>
+      </form>
+    </div>
+  </div>
+
+  {% if my_items %}
+  <div class="fb-card card">
+    <div class="card-header">Your recent messages</div>
+    <div class="card-body">
+      {% for item in my_items %}
+      <div class="fb-mine-row">
+        <div>
+          <div style="font-weight:600;">{{ item.subject }}</div>
+          <div style="font-size:0.8rem;color:var(--df-muted);">
+            {{ categories.get(item.category, item.category) }}
+            &middot; {{ item.created_at.strftime('%b %d, %Y') if item.created_at else '' }}
+          </div>
+        </div>
+        <span class="fb-status {{ item.status }}">{{ statuses.get(item.status, item.status) }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

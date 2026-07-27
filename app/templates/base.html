@@ -662,6 +662,18 @@
                     <i class="fas fa-key"></i> Change Password
                   </a>
                 </li>
+                <li>
+                  <a class="dropdown-item" href="{{ url_for('main.feedback_page') }}">
+                    <i class="fas fa-comment-dots"></i> Send Feedback
+                  </a>
+                </li>
+                {% if current_user.role == 'super_admin' %}
+                <li>
+                  <a class="dropdown-item" href="{{ url_for('main.admin_feedback_list') }}">
+                    <i class="fas fa-inbox"></i> Feedback Inbox
+                  </a>
+                </li>
+                {% endif %}
                 <li><hr class="dropdown-divider" /></li>
                 <li>
                   <a class="dropdown-item" href="{{ url_for('auth.logout') }}">
@@ -891,6 +903,7 @@
               else if (n.type === 'family_join_request') icon = 'fa-user-plus text-warning';
               else if (n.type === 'release_request') icon = 'fa-people-arrows text-warning';
               else if (n.type === 'family_invite') icon = 'fa-envelope-open-text text-warning';
+              else if (n.type === 'user_feedback') icon = 'fa-comment-dots text-warning';
 
               var actions = '';
               if (!n.is_read) {

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Feedback #{{ item.id }}{% endblock %}
+
+{% block styles %}
+<style>
+  .afd-card {
+    border: none; border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    background: #fff; color: #212529;
+    margin-bottom: 1.25rem; overflow: hidden;
+  }
+  .afd-card .card-header {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text);
+    font-weight: 700;
+    border-bottom: 2px solid var(--df-accent);
+  }
+  .afd-card .card-body, .afd-card .form-label { color: #212529; }
+  .afd-body {
+    white-space: pre-wrap;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    color: #212529;
+  }
+  .afd-viewer {
+    display: flex; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+    padding: 0.55rem 0; border-bottom: 1px solid #e9ecef; font-size: 0.9rem;
+  }
+  .afd-viewer:last-child { border-bottom: none; }
+  .afd-status {
+    font-size: 0.75rem; font-weight: 700; padding: 3px 9px; border-radius: 10px;
+  }
+  .afd-status.open { background: #fef3c7; color: #92400e; }
+  .afd-status.in_progress { background: #dbeafe; color: #1e40af; }
+  .afd-status.closed { background: #d1fae5; color: #065f46; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3" style="max-width:800px;">
+  <div class="mb-3">
+    <a href="{{ url_for('main.admin_feedback_list') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="fas fa-arrow-left me-1"></i>Back to inbox
+    </a>
+  </div>
+
+  <div class="afd-card card">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span>{{ item.subject }}</span>
+      <span class="afd-status {{ item.status }}" id="statusBadge">{{ statuses.get(item.status, item.status) }}</span>
+    </div>
+    <div class="card-body">
+      <div class="mb-2" style="font-size:0.88rem;color:#6c757d;">
+        {{ categories.get(item.category, item.category) }}
+        &middot; From {{ item.first_name }} {{ item.last_name }}
+        {% if item.email %}({{ item.email }}){% endif %}
+        {% if item.family_name %}&middot; {{ item.family_name }}{% endif %}
+        &middot; {{ item.created_at.strftime('%b %d, %Y %I:%M %p') if item.created_at else '' }}
+      </div>
+      <div class="afd-body mb-3">{{ item.body }}</div>
+
+      <label class="form-label fw-semibold">Status</label>
+      <div class="d-flex flex-wrap gap-2">
+        {% for key, label in statuses.items() %}
+        <button type="button" class="btn btn-sm status-btn {% if item.status == key %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+                data-status="{{ key }}">{{ label }}</button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="afd-card card">
+    <div class="card-header"><i class="fas fa-shoe-prints me-2"></i>Seen by (paper trail)</div>
+    <div class="card-body">
+      {% if not viewers %}
+      <div class="text-muted">No one has opened this yet.</div>
+      {% endif %}
+      {% for v in viewers %}
+      <div class="afd-viewer">
+        <div>
+          <strong>{{ v.first_name }} {{ v.last_name }}</strong>
+          <div style="font-size:0.8rem;color:#6c757d;">{{ v.email }}</div>
+        </div>
+        <div style="font-size:0.8rem;color:#6c757d;text-align:right;">
+          First seen {{ v.first_seen_at.strftime('%b %d, %Y %I:%M %p') if v.first_seen_at else '' }}<br>
+          Last seen {{ v.last_seen_at.strftime('%b %d, %Y %I:%M %p') if v.last_seen_at else '' }}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var fid = {{ item.id }};
+  document.querySelectorAll('.status-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var status = btn.getAttribute('data-status');
+      fetch('/api/admin/feedback/' + fid + '/status', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ status: status })
+      }).then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+        .then(function(res) {
+          if (res.ok) location.reload();
+          else if (window.AppModal) AppModal.error('Error', res.j.error || 'Could not update status');
+          else alert(res.j.error || 'Could not update status');
+        });
+    });
+  });
+})();
+</script>
+{% endblock %}

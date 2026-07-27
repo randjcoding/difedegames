@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Feedback Inbox{% endblock %}
+
+{% block styles %}
+<style>
+  .afb-hero {
+    background: var(--df-card-header);
+    border-radius: 12px;
+    color: var(--df-dt-header-text);
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.25rem;
+  }
+  .afb-hero h1 { font-weight: 700; font-size: 1.4rem; margin: 0 0 0.25rem; }
+  .afb-hero p { margin: 0; opacity: 0.85; font-size: 0.9rem; }
+  .afb-card {
+    border: none; border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    background: #fff; color: #212529; overflow: hidden;
+  }
+  .afb-card .card-header {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text);
+    font-weight: 700;
+    border-bottom: 2px solid var(--df-accent);
+  }
+  .afb-row {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 0.75rem; padding: 0.85rem 1rem;
+    border-bottom: 1px solid #e9ecef; color: #212529;
+    text-decoration: none;
+  }
+  .afb-row:hover { background: #f8f9fa; color: #212529; }
+  .afb-row:last-child { border-bottom: none; }
+  .afb-filters .btn { font-size: 0.8rem; }
+  .afb-status {
+    font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+  }
+  .afb-status.open { background: #fef3c7; color: #92400e; }
+  .afb-status.in_progress { background: #dbeafe; color: #1e40af; }
+  .afb-status.closed { background: #d1fae5; color: #065f46; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3" style="max-width:900px;">
+  <div class="afb-hero">
+    <h1><i class="fas fa-inbox me-2"></i>Feedback Inbox</h1>
+    <p>{{ open_count }} open item{{ 's' if open_count != 1 else '' }}. Open an item to mark it seen and view the paper trail of who has read it.</p>
+  </div>
+
+  <div class="afb-filters d-flex flex-wrap gap-2 mb-3">
+    <a href="{{ url_for('main.admin_feedback_list') }}" class="btn btn-sm {% if not filter_status %}btn-primary{% else %}btn-outline-secondary{% endif %}">All</a>
+    {% for key, label in statuses.items() %}
+    <a href="{{ url_for('main.admin_feedback_list', status=key) }}"
+       class="btn btn-sm {% if filter_status == key %}btn-primary{% else %}btn-outline-secondary{% endif %}">{{ label }}</a>
+    {% endfor %}
+  </div>
+
+  <div class="afb-card card">
+    <div class="card-header">Messages</div>
+    <div class="card-body p-0">
+      {% if not items %}
+      <div class="text-center text-muted py-4">No feedback in this view.</div>
+      {% endif %}
+      {% for item in items %}
+      <a class="afb-row" href="{{ url_for('main.admin_feedback_detail', feedback_id=item.id) }}">
+        <div style="min-width:0;flex:1;">
+          <div style="font-weight:700;">{{ item.subject }}</div>
+          <div style="font-size:0.8rem;color:#6c757d;">
+            {{ categories.get(item.category, item.category) }}
+            &middot; {{ item.first_name }} {{ item.last_name }}
+            &middot; {{ item.created_at.strftime('%b %d, %Y %I:%M %p') if item.created_at else '' }}
+            &middot; Seen by {{ item.seen_count }}
+          </div>
+        </div>
+        <span class="afb-status {{ item.status }}">{{ statuses.get(item.status, item.status) }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

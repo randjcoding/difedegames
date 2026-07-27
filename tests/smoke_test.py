@@ -98,6 +98,10 @@ def schema_audit(conn):
     print('\n== Section 1: schema and FK data-safety audit ==')
     check('table game_layouts exists',
           q1(conn, "SELECT to_regclass('public.game_layouts') IS NOT NULL AS ok")['ok'])
+    check('table feedback_items exists',
+          q1(conn, "SELECT to_regclass('public.feedback_items') IS NOT NULL AS ok")['ok'])
+    check('table feedback_views exists',
+          q1(conn, "SELECT to_regclass('public.feedback_views') IS NOT NULL AS ok")['ok'])
     expected = {
         'fk_active_games_user_id': 'n',
         'game_scores_player_fkey': 'r',
@@ -183,6 +187,11 @@ def cleanup(conn, ids):
     run(conn, "DELETE FROM invitations WHERE invited_by_user_id = ANY(%s) OR email LIKE 'zztest%%'",
         (user_ids or [0],))
     run(conn, 'DELETE FROM notifications WHERE user_id = ANY(%s)', (user_ids or [0],))
+    run(conn, '''DELETE FROM feedback_views
+        WHERE user_id = ANY(%s)
+           OR feedback_id IN (SELECT id FROM feedback_items WHERE user_id = ANY(%s))''',
+        (user_ids or [0], user_ids or [0]))
+    run(conn, 'DELETE FROM feedback_items WHERE user_id = ANY(%s)', (user_ids or [0],))
     run(conn, 'DELETE FROM user_audit_log WHERE user_id = ANY(%s)', (user_ids or [0],))
     run(conn, 'UPDATE user_audit_log SET record_id = NULL WHERE table_name = %s AND record_id = ANY(%s)',
         ('players', player_ids or [0]))
@@ -663,6 +672,87 @@ def main():
         """)
         check('DiFede Five Crowns Kim & Joe layout seeded',
               seed and seed['is_default'] is True, str(seed))
+
+        print('\n== Section 12: user feedback to super admins ==')
+        run(conn, "UPDATE users SET role = 'super_admin' WHERE id = %s", (user_a['id'],))
+        conn.commit()
+
+        r = client_b.post('/api/feedback', json={
+            'category': 'bug',
+            'subject': 'Zztest score sheet stuck',
+            'body': 'On mobile the Five Crowns score cell does not accept input.',
+        })
+        check('member can submit feedback', r.status_code == 200, str(r.get_json()))
+        fb_id = (r.get_json() or {}).get('id')
+        check('feedback id returned', bool(fb_id))
+
+        notif = q1(conn, """
+            SELECT id, type, title, data, is_read FROM notifications
+            WHERE user_id = %s AND type = 'user_feedback'
+            ORDER BY id DESC LIMIT 1
+        """, (user_a['id'],))
+        check('super admin got feedback notification',
+              notif is not None and notif['is_read'] is False, str(notif))
+        if notif:
+            data = notif['data'] or {}
+            if isinstance(data, str):
+                import json as _json
+                data = _json.loads(data)
+            acts = data.get('actions') or []
+            check('feedback notification has Open action',
+                  any(a.get('label') == 'Open' and f'/admin/feedback/{fb_id}' in (a.get('url') or '')
+                      for a in acts), str(data))
+
+        r = client_a.get('/api/notifications')
+        a_notifs = r.get_json() or []
+        check('feedback appears in super admin notification API',
+              any(n.get('type') == 'user_feedback' for n in a_notifs))
+
+        r = client_a.get(f'/admin/feedback/{fb_id}')
+        check('super admin can open feedback from inbox route', r.status_code == 200)
+        view_a = q1(conn, """
+            SELECT first_seen_at, last_seen_at FROM feedback_views
+            WHERE feedback_id = %s AND user_id = %s
+        """, (fb_id, user_a['id']))
+        check('opening feedback records seen-by for admin A', view_a is not None)
+        notif_after = q1(conn, 'SELECT is_read FROM notifications WHERE id = %s', (notif['id'],)) if notif else None
+        check('opening feedback marks admin notification read',
+              notif_after and notif_after['is_read'] is True)
+
+        # Second super admin also opens it — paper trail grows.
+        run(conn, "UPDATE users SET role = 'super_admin' WHERE id = %s", (user_b['id'],))
+        conn.commit()
+        r = client_b.get(f'/admin/feedback/{fb_id}')
+        check('second super admin can open feedback', r.status_code == 200)
+        viewers = qall(conn, """
+            SELECT user_id FROM feedback_views WHERE feedback_id = %s ORDER BY first_seen_at
+        """, (fb_id,))
+        check('paper trail includes both super admins',
+              {v['user_id'] for v in viewers} == {user_a['id'], user_b['id']},
+              str([v['user_id'] for v in viewers]))
+
+        r = client_a.post(f'/api/admin/feedback/{fb_id}/status', json={'status': 'in_progress'})
+        check('super admin can set feedback status', r.status_code == 200, str(r.get_json()))
+        check('feedback status persisted',
+              q1(conn, 'SELECT status FROM feedback_items WHERE id = %s', (fb_id,))['status'] == 'in_progress')
+
+        # Non-admin cannot open admin inbox.
+        newbie = q1(conn, "SELECT id FROM users WHERE email = 'zztest.newbie@example.com'")
+        if newbie:
+            client_n = app.test_client()
+            activate_and_login(conn, client_n, 'zztest.newbie@example.com')
+            r = client_n.get(f'/admin/feedback/{fb_id}', follow_redirects=False)
+            check('non-admin cannot open feedback detail',
+                  r.status_code in (302, 403), f'status={r.status_code}')
+            r = client_n.post('/api/feedback', json={
+                'category': 'new_game',
+                'subject': 'Zztest wants Phase 10',
+                'body': 'Please add Phase 10 scoring.',
+            })
+            check('regular user can still submit feedback', r.status_code == 200, str(r.get_json()))
+
+        r = client_a.get('/admin/feedback')
+        check('feedback inbox page loads', r.status_code == 200)
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')
