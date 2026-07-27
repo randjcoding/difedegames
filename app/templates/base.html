@@ -926,14 +926,21 @@
                 var act = notifActionRegistry[parseInt(btn.dataset.actionIdx, 10)];
                 if (!act) return;
                 btn.disabled = true;
-                fetch(act.url, { method: act.method, headers: {'Content-Type': 'application/json'} })
+                var method = (act.method || 'POST').toUpperCase();
+                if (method === 'GET') {
+                  markRead(act.notifId);
+                  window.location.href = act.url;
+                  return;
+                }
+                fetch(act.url, { method: method, headers: {'Content-Type': 'application/json'} })
                   .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
                   .then(function(res){
                     if (res.ok) {
                       markRead(act.notifId);
                       loadNotifications();
                       loadNotifCount();
-                      if (res.j.message && window.AppModal) window.AppModal.success('Done', res.j.message);
+                      if (res.j.message && window.AppModal) window.AppModal.success('Done', res.j.message || 'Approved.');
+                      else if (res.j.success && window.AppModal) window.AppModal.success('Done', 'User approved.');
                     } else {
                       btn.disabled = false;
                       if (window.AppModal) window.AppModal.error('Error', res.j.error || 'Action failed.');

@@ -213,6 +213,27 @@ def send_site_invite_email(to_email: str, inviter_name: str, family_name: str | 
     return send_email(to_email, subject, body)
 
 
+def send_set_password_email(to_email: str, person_name: str, family_name: str, inviter_name: str, link: str) -> bool:
+    subject = f"Set your password for DiFede Games"
+    body = f"""
+    Hi {person_name},
+
+    {inviter_name} added you to the {family_name} family on DiFede Games and invited you to create a login. Your game history (if any) is already attached to this profile.
+
+    Set your password here:
+
+    {link}
+
+    After that you can view the leaderboard, start games, and play with crewed-up families. Family lead tools stay with your family lead.
+
+    The link expires in 7 days. If you were not expecting this, you can ignore this message.
+
+    — DiFede Games
+    {APP_BASE_URL}
+    """
+    return send_email(to_email, subject, body)
+
+
 def send_claim_invite_email(to_email: str, person_name: str, family_name: str, inviter_name: str, link: str) -> bool:
     subject = f"Claim your player profile on DiFede Games"
     body = f"""

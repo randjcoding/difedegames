@@ -173,6 +173,11 @@
           title="Invite someone by email to join this family or the site" aria-label="Invite someone by email">
           <i class="fas fa-envelope me-1" aria-hidden="true"></i>Invite by Email
         </button>
+        <button type="button" class="btn btn-sm btn-outline-light" style="font-weight:600;border-radius:8px;"
+          data-bs-toggle="modal" data-bs-target="#crewUpTeamModal"
+          title="Invite another family to crew up for game nights" aria-label="Crew up with another family">
+          <i class="fas fa-handshake me-1" aria-hidden="true"></i>Crew Up
+        </button>
       </div>
       {% endif %}
     </div>
@@ -204,6 +209,11 @@
   <div class="section-card" id="transfersCard" style="display:none;">
     <div class="card-header"><span><i class="fas fa-people-arrows me-2"></i>Transfer Requests</span></div>
     <div class="card-body p-0" id="transfersBody"></div>
+  </div>
+
+  <div class="section-card" id="duplicatesCard" style="display:none;">
+    <div class="card-header"><span><i class="fas fa-clone me-2"></i>Possible Duplicates</span></div>
+    <div class="card-body p-0" id="duplicatesBody"></div>
   </div>
   {% endif %}
 
@@ -279,11 +289,11 @@
           </button>
           {% endif %}
           {% if is_lead and not p.account_id %}
-          <button type="button" class="btn btn-outline-secondary claim-invite-btn"
-            title="Email a claim invite so they can create a login for this profile"
-            aria-label="Email a claim invite so they can create a login for this profile"
+          <button type="button" class="btn btn-outline-secondary password-invite-btn"
+            title="Add their email and send a link to set a password (keeps this profile and all scores)"
+            aria-label="Send login invite for this player"
             data-id="{{ p.id }}" data-name="{{ p.display_name }}" data-email="{{ p.player_email or '' }}">
-            <i class="fas fa-envelope" aria-hidden="true"></i>
+            <i class="fas fa-key" aria-hidden="true"></i>
           </button>
           {% endif %}
           {% if is_lead and p.account_id != lead_user_id %}
@@ -449,23 +459,74 @@
   </div>
 </div>
 
-<!-- Claim Invite Modal -->
-<div class="modal fade" id="claimInviteModal" tabindex="-1">
+<!-- Password / login invite for an existing roster member -->
+<div class="modal fade" id="passwordInviteModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="fas fa-envelope me-2"></i>Send Claim Invite</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        <h5 class="modal-title"><i class="fas fa-key me-2"></i>Send Login Invite</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <p style="font-size:0.9rem;">Email <strong id="ciName"></strong> a link to claim their player profile. Their game history is already attached; clicking the link lets them create a login that owns it.</p>
+        <p style="font-size:0.9rem;">Email <strong id="piName"></strong> a link to set a password. This uses their existing player profile — game history stays put. They can play and view leaderboards, but they will not get family lead tools.</p>
         <label class="form-label fw-semibold">Their email address</label>
-        <input type="email" class="form-control" id="ciEmail">
-        <input type="hidden" id="ciPlayerId">
+        <input type="email" class="form-control" id="piEmail" placeholder="them@example.com">
+        <input type="hidden" id="piPlayerId">
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn" id="sendClaimInviteBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Send Invite</button>
+        <button type="button" class="btn" id="sendPasswordInviteBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Send Invite</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Not the same person -->
+<div class="modal fade" id="notSameModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-user-friends me-2"></i>These Are Different People</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="help-text" style="font-size:0.88rem;">Give each person a clear display name so score sheets stay readable (for example Mike and Grandpa, or Noah and Noah Jr).</p>
+        <input type="hidden" id="nsIdA"><input type="hidden" id="nsIdB">
+        <div class="mb-2">
+          <label class="form-label fw-semibold" id="nsLabelA">Person A</label>
+          <input type="text" class="form-control" id="nsNameA" maxlength="60">
+        </div>
+        <div class="mb-2">
+          <label class="form-label fw-semibold" id="nsLabelB">Person B</label>
+          <input type="text" class="form-control" id="nsNameB" maxlength="60">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn" id="saveNotSameBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Save as Different</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Crew Up from My Team -->
+<div class="modal fade" id="crewUpTeamModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-handshake me-2"></i>Crew Up</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="help-text" style="font-size:0.88rem;">Search for a family and send a crew-up request. Only family leads can accept. Crewed families can play together, and you can see each other's children in the directory.</p>
+        <div class="input-group mb-2">
+          <input type="text" class="form-control" id="crewTeamQuery" placeholder="Family name (at least 2 letters)" autocomplete="off">
+          <button type="button" class="btn btn-outline-secondary" id="crewTeamSearchBtn" title="Search families" aria-label="Search families"><i class="fas fa-search" aria-hidden="true"></i></button>
+        </div>
+        <div id="crewTeamResults" class="join-empty">Type at least 2 letters to find a family.</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
       </div>
     </div>
   </div>
@@ -581,24 +642,123 @@ $(function() {
     });
   });
 
-  $(".claim-invite-btn").click(function() {
-    $("#ciPlayerId").val($(this).data("id"));
-    $("#ciName").text($(this).data("name"));
-    $("#ciEmail").val($(this).data("email"));
-    new bootstrap.Modal($("#claimInviteModal")).show();
+  $(".password-invite-btn").click(function() {
+    $("#piPlayerId").val($(this).data("id"));
+    $("#piName").text($(this).data("name"));
+    $("#piEmail").val($(this).data("email"));
+    new bootstrap.Modal($("#passwordInviteModal")).show();
   });
 
-  $("#sendClaimInviteBtn").click(function() {
-    var email = $("#ciEmail").val().trim();
+  $("#sendPasswordInviteBtn").click(function() {
+    var email = $("#piEmail").val().trim();
     if (!email) return;
-    post("/api/players/" + $("#ciPlayerId").val() + "/claim-invite", { email: email }, function(d) {
-      bootstrap.Modal.getInstance(document.getElementById('claimInviteModal')).hide();
+    post("/api/players/" + $("#piPlayerId").val() + "/password-invite", { email: email }, function(d) {
+      bootstrap.Modal.getInstance(document.getElementById('passwordInviteModal')).hide();
       if (typeof AppModal !== 'undefined') AppModal.success('Invite', d.message || 'Sent.'); else alert(d.message || 'Sent.');
     });
   });
 
   {% if is_lead %}
   function escText(s) { return $('<div>').text(s == null ? '' : String(s)).html(); }
+
+  function loadDuplicates() {
+    $.get('/api/team/duplicate-suggestions', function(data) {
+      var pairs = data.pairs || [];
+      if (!pairs.length) { $("#duplicatesCard").hide(); return; }
+      var html = '';
+      pairs.forEach(function(pair) {
+        function chip(p) {
+          return '<div><strong>' + escText(p.display_name) + '</strong> ' +
+            '<span class="tag ' + (p.has_login ? 'tag-login' : 'tag-nologin') + ' ms-1">' +
+            (p.has_login ? 'Has login' : 'No login') + '</span>' +
+            '<div style="font-size:0.78rem;color:var(--df-muted);">' +
+            escText(p.first_name + ' ' + p.last_name) + ' - ' + p.games + ' games, ' + p.scores + ' scores</div></div>';
+        }
+        html += '<div class="p-3 border-bottom">' +
+          '<div style="font-size:0.8rem;color:var(--df-muted);margin-bottom:0.5rem;">' + escText(pair.reason) + '</div>' +
+          '<div class="d-flex flex-column flex-md-row gap-3 mb-2">' + chip(pair.a) + chip(pair.b) + '</div>' +
+          '<button type="button" class="btn btn-sm btn-success me-1 same-person-btn" data-a="' + pair.a.id + '" data-b="' + pair.b.id + '" title="Merge into one person, keeping game history">Same person</button>' +
+          '<button type="button" class="btn btn-sm btn-outline-secondary not-same-btn" data-a="' + pair.a.id + '" data-b="' + pair.b.id + '"' +
+          ' data-name-a="' + escText(pair.a.display_name) + '" data-name-b="' + escText(pair.b.display_name) + '"' +
+          ' data-label-a="' + escText(pair.a.first_name + ' ' + pair.a.last_name) + '" data-label-b="' + escText(pair.b.first_name + ' ' + pair.b.last_name) + '"' +
+          ' title="Keep both profiles and give them different display names">Not the same</button>' +
+          '</div>';
+      });
+      $("#duplicatesBody").html(html);
+      $("#duplicatesCard").show();
+      $(".same-person-btn").click(function() {
+        var a = $(this).data('a'), b = $(this).data('b');
+        $.get('/api/team/same-person/preview', { a: a, b: b }, function(prev) {
+          if (prev.error) { fail({ responseJSON: prev }); return; }
+          var msg = prev.message + '<br><br><strong>Keep:</strong> ' + escText(prev.keep.display_name) +
+            ' (' + prev.keep.history.games + ' games)' +
+            (prev.keep.has_login || prev.discard.has_login ? '<br><strong>Login moves to:</strong> ' + escText(prev.keep.display_name) : '') +
+            '<br><strong>Remove empty duplicate:</strong> ' + escText(prev.discard.display_name);
+          AppModal.confirm('Same Person?', msg, function() {
+            post('/api/team/same-person', { player_a_id: a, player_b_id: b }, function(d) {
+              AppModal.success('Merged', d.message || 'Done.');
+              setTimeout(function(){ location.reload(); }, 1200);
+            });
+          }, { confirmText: 'Confirm Merge' });
+        }).fail(fail);
+      });
+      $(".not-same-btn").click(function() {
+        $("#nsIdA").val($(this).data('a'));
+        $("#nsIdB").val($(this).data('b'));
+        $("#nsLabelA").text($(this).data('label-a'));
+        $("#nsLabelB").text($(this).data('label-b'));
+        $("#nsNameA").val($(this).data('name-a'));
+        $("#nsNameB").val($(this).data('name-b'));
+        new bootstrap.Modal(document.getElementById('notSameModal')).show();
+      });
+    });
+  }
+  loadDuplicates();
+
+  $("#saveNotSameBtn").click(function() {
+    post('/api/team/not-same-person', {
+      player_a_id: parseInt($("#nsIdA").val(), 10),
+      player_b_id: parseInt($("#nsIdB").val(), 10),
+      display_name_a: $("#nsNameA").val().trim(),
+      display_name_b: $("#nsNameB").val().trim()
+    }, function(d) {
+      bootstrap.Modal.getInstance(document.getElementById('notSameModal')).hide();
+      AppModal.success('Saved', d.message || 'Done.');
+      setTimeout(function(){ location.reload(); }, 1000);
+    });
+  });
+
+  function searchCrewFamilies() {
+    var q = $("#crewTeamQuery").val().trim();
+    var box = $("#crewTeamResults");
+    if (q.length < 2) { box.attr('class','join-empty').html('Type at least 2 letters to find a family.'); return; }
+    box.attr('class','join-empty').html('Searching...');
+    $.get('/api/directory/families', { q: q }, function(data) {
+      var list = (data.results || []).filter(function(f){ return f.can_crew_up; });
+      if (!list.length) { box.attr('class','join-empty').html('No families available to crew up with for that name.'); return; }
+      var html = list.map(function(f) {
+        return '<div class="join-result-row"><div><div class="name">' + escText(f.name) + '</div>' +
+          '<div class="sub">' + escText(f.label || '') + ' - ' + f.member_count + ' members</div></div>' +
+          '<button type="button" class="btn btn-sm crew-send-btn" data-id="' + f.family_id + '" data-name="' + escText(f.name) + '" ' +
+          'style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Crew Up</button></div>';
+      }).join('');
+      box.removeClass('join-empty').html(html);
+    }).fail(function(xhr){ box.attr('class','join-empty').html((xhr.responseJSON && xhr.responseJSON.error) || 'Search failed.'); });
+  }
+  $("#crewTeamSearchBtn").click(searchCrewFamilies);
+  $("#crewTeamQuery").on('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); searchCrewFamilies(); } });
+  $("#crewTeamResults").on('click', '.crew-send-btn', function() {
+    var btn = $(this);
+    post('/api/alliances', { target_family_id: parseInt(btn.data('id'), 10) }, function() {
+      bootstrap.Modal.getInstance(document.getElementById('crewUpTeamModal')).hide();
+      AppModal.success('Crew Up Sent', 'Request sent to ' + btn.data('name') + '.');
+    });
+  });
+  $('#crewUpTeamModal').on('shown.bs.modal', function() {
+    $("#crewTeamQuery").val('').trigger('focus');
+    $("#crewTeamResults").attr('class','join-empty').html('Type at least 2 letters to find a family.');
+  });
+
   function renderTransfers(data) {
     var rows = '';
     (data.incoming || []).forEach(function(b) {

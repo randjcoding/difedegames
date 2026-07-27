@@ -67,8 +67,13 @@ def run(conn, sql, params=None):
 
 
 def extract_link(kind):
-    """Pull the newest /claim/ or /invite/ or /action/ link out of captured mail."""
+    """Pull the newest /claim/, /invite/, /action/, or /auth/set-password/ link."""
     for mail in reversed(SENT_EMAILS):
+        if kind == 'set-password':
+            m = re.search(r'/auth/set-password/([A-Za-z0-9_\-]+)', mail['body'])
+            if m:
+                return m.group(1)
+            continue
         m = re.search(rf'/({kind})/([A-Za-z0-9_\-]+)', mail['body'])
         if m:
             return m.group(2)
@@ -167,6 +172,9 @@ def cleanup(conn, ids):
     run(conn, """DELETE FROM player_release_requests
         WHERE player_id = ANY(%s) OR from_family_id = ANY(%s) OR to_family_id = ANY(%s)""",
         (player_ids or [0], fam_ids or [0], fam_ids or [0]))
+    run(conn, """DELETE FROM player_not_duplicates
+        WHERE player_a_id = ANY(%s) OR player_b_id = ANY(%s)""",
+        (player_ids or [0], player_ids or [0]))
     run(conn, """DELETE FROM action_tokens
         WHERE player_id = ANY(%s) OR user_id = ANY(%s) OR family_id = ANY(%s)""",
         (player_ids or [0], user_ids or [0], fam_ids or [0]))
@@ -447,6 +455,126 @@ def main():
             WHERE user_id = ANY(%s)
         """, (list(ids['users']),))
         check('audit log recorded lifecycle actions', audit_rows['n'] > 0)
+
+        print('\n== Section 10: same-person smart keep + password invite (no live data) ==')
+        # History player with scores, empty twin with a login — Noah-shaped, disposable.
+        r = client_b.post('/api/team/players', json={
+            'first_name': 'Zztesttwin', 'last_name': 'History', 'display_name': 'Zztesttwin'})
+        hist_pid = r.get_json().get('id')
+        ids['players'].add(hist_pid)
+        r = client_b.post('/api/team/players', json={
+            'first_name': 'Zztesttwin', 'last_name': 'History', 'display_name': 'Zztesttwin'})
+        empty_pid = r.get_json().get('id')
+        ids['players'].add(empty_pid)
+        # Attach scores to history player via a finished game already owned by B's family.
+        game_def = q1(conn, 'SELECT id FROM games ORDER BY id LIMIT 1')
+        r = client_b.post('/api/games/new', json={
+            'game_id': game_def['id'], 'player_ids': [hist_pid, user_b['player_id']]})
+        ag2 = r.get_json().get('id')
+        client_b.post('/api/scores', json={
+            'game_id': ag2, 'player_id': hist_pid, 'round_number': 1, 'score': 12})
+        run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (ag2,))
+        # Fake login on the empty twin only.
+        run(conn, """
+            INSERT INTO users (email, password_hash, first_name, last_name, family_name,
+                               role, is_verified, is_approved, is_active, family_id, player_id)
+            VALUES ('zztest.twinlogin@example.com', %s, 'Zztesttwin', 'History', 'Zztest Beta',
+                    'family_admin', TRUE, TRUE, TRUE, %s, %s)
+        """, ('x', fam_b['id'], empty_pid))
+        twin_user = q1(conn, "SELECT id FROM users WHERE email = 'zztest.twinlogin@example.com'")
+        ids['users'].add(twin_user['id'])
+        conn.commit()
+
+        r = client_b.get('/api/team/duplicate-suggestions')
+        pairs = (r.get_json() or {}).get('pairs') or []
+        check('duplicate suggestions finds the twin pair',
+              any({p['a']['id'], p['b']['id']} == {hist_pid, empty_pid} for p in pairs))
+        r = client_b.get('/api/team/same-person/preview', query_string={'a': hist_pid, 'b': empty_pid})
+        prev = r.get_json() or {}
+        check('same-person preview keeps the history profile',
+              r.status_code == 200 and prev.get('keep', {}).get('id') == hist_pid,
+              str(prev))
+        r = client_b.post('/api/team/same-person', json={'player_a_id': hist_pid, 'player_b_id': empty_pid})
+        check('same-person smart merge succeeds', r.status_code == 200, str(r.get_json()))
+        check('empty twin player row removed',
+              q1(conn, 'SELECT COUNT(*) AS n FROM players WHERE id = %s', (empty_pid,))['n'] == 0)
+        check('login moved onto the history player',
+              q1(conn, 'SELECT player_id FROM users WHERE id = %s', (twin_user['id'],))['player_id'] == hist_pid)
+        check('scores still on the kept player',
+              q1(conn, 'SELECT COUNT(*) AS n FROM game_scores WHERE player_id = %s', (hist_pid,))['n'] >= 1)
+
+        # Not-the-same: two Michaels with distinct display names.
+        r = client_b.post('/api/team/players', json={
+            'first_name': 'Zztestmike', 'last_name': 'Smith', 'display_name': 'Zztestmike'})
+        mike1 = r.get_json().get('id')
+        r = client_b.post('/api/team/players', json={
+            'first_name': 'Zztestmike', 'last_name': 'Smith', 'display_name': 'Zztestmike'})
+        mike2 = r.get_json().get('id')
+        ids['players'].update({mike1, mike2})
+        r = client_b.post('/api/team/not-same-person', json={
+            'player_a_id': mike1, 'player_b_id': mike2,
+            'display_name_a': 'Mike', 'display_name_b': 'Grandpa'})
+        check('not-the-same requires distinct names and saves', r.status_code == 200, str(r.get_json()))
+        r = client_b.get('/api/team/duplicate-suggestions')
+        check('not-the-same pair no longer suggested',
+              not any({p['a']['id'], p['b']['id']} == {mike1, mike2} for p in (r.get_json() or {}).get('pairs', [])))
+
+        # Password invite binds existing player — never creates a second players row.
+        SENT_EMAILS.clear()
+        r = client_b.post('/api/team/players', json={
+            'first_name': 'Zztestinvite', 'last_name': 'Member', 'display_name': 'Zztestinvite'})
+        invite_pid = r.get_json().get('id')
+        ids['players'].add(invite_pid)
+        before = q1(conn, 'SELECT COUNT(*) AS n FROM players')['n']
+        r = client_b.post(f'/api/players/{invite_pid}/password-invite',
+                          json={'email': 'zztest.invitee@example.com'})
+        check('password invite sends', r.status_code == 200, str(r.get_json()))
+        tok = extract_link('set-password')
+        # extract_link looks for /claim|invite|action — extend for set-password
+        if not tok:
+            for mail in reversed(SENT_EMAILS):
+                import re as _re
+                m = _re.search(r'/auth/set-password/([A-Za-z0-9_\-]+)', mail['body'])
+                if m:
+                    tok = m.group(1)
+                    break
+        check('password invite email has set-password link', tok is not None)
+        if tok:
+            client_pw = app.test_client()
+            r = client_pw.post(f'/auth/set-password/{tok}', data={
+                'password': PASSWORD, 'confirm_password': PASSWORD}, follow_redirects=True)
+            check('set-password completes', r.status_code == 200)
+            after = q1(conn, 'SELECT COUNT(*) AS n FROM players')['n']
+            check('set-password did not create a new players row', after == before)
+            u = q1(conn, "SELECT id, player_id FROM users WHERE email = 'zztest.invitee@example.com'")
+            check('new login bound to the existing player', u and u['player_id'] == invite_pid)
+            if u:
+                ids['users'].add(u['id'])
+
+        # Approval notification payload includes Approve action.
+        run(conn, """
+            INSERT INTO notifications (user_id, type, title, message, data)
+            VALUES (%s, 'user_pending_approval', 'New User Needs Approval', 'test',
+                    jsonb_build_object('user_id', %s, 'actions',
+                        jsonb_build_array(jsonb_build_object(
+                            'label','Approve','style','success','method','POST',
+                            'url', %s))))
+        """, (user_a['id'], twin_user['id'], f"/auth/admin/approve-user/{twin_user['id']}"))
+        conn.commit()
+        run(conn, "UPDATE users SET role = 'super_admin' WHERE id = %s", (user_a['id'],))
+        conn.commit()
+        r = client_a.get('/api/notifications')
+        notifs = r.get_json() or []
+        pending = [n for n in notifs if n.get('type') == 'user_pending_approval']
+        check('approval notification exists for super admin', len(pending) > 0)
+        if pending:
+            data = pending[0].get('data') or {}
+            if isinstance(data, str):
+                import json as _json
+                data = _json.loads(data)
+            acts = data.get('actions') or []
+            check('approval notification has Approve action',
+                  any(a.get('label') == 'Approve' and 'approve-user' in (a.get('url') or '') for a in acts))
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')

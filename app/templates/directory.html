@@ -240,6 +240,11 @@
     if (!f.is_my_family) {
       actions += '<button class="btn btn-sm btn-outline-primary join-btn" data-family="' + f.family_id + '">Request to Join</button>';
     }
+    if (f.can_crew_up) {
+      actions += '<button class="btn btn-sm btn-outline-success crew-btn" data-family="' + f.family_id + '" data-name="' + esc(f.name) + '" title="Ask this family to crew up for game nights">Crew Up</button>';
+    } else if (f.is_allied) {
+      actions += '<span class="badge bg-success align-self-center" style="font-size:0.7rem;">Crewed up</span>';
+    }
     actions += '<button class="btn btn-sm btn-outline-secondary roster-btn" data-family="' + f.family_id + '">View Roster</button>';
     return '<div class="result-row" id="fam-' + f.family_id + '">' +
       '<div class="result-avatar"><i class="fas fa-home"></i></div>' +
@@ -327,6 +332,22 @@
         box.innerHTML = list.map(familyRowHtml).join('');
         box.querySelectorAll('.join-btn').forEach(function(b) {
           b.addEventListener('click', function() { requestJoin(b.dataset.family, b); });
+        });
+        box.querySelectorAll('.crew-btn').forEach(function(b) {
+          b.addEventListener('click', function() {
+            b.disabled = true;
+            fetch('/api/alliances', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ target_family_id: parseInt(b.dataset.family, 10) })
+            })
+              .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+              .then(function(res) {
+                toast(res.ok ? ('Crew up request sent to ' + b.dataset.name) : (res.j.error || 'Failed'), res.ok);
+                if (!res.ok) b.disabled = false;
+                else b.textContent = 'Sent';
+              })
+              .catch(function() { toast('Request failed', false); b.disabled = false; });
+          });
         });
         box.querySelectorAll('.roster-btn').forEach(function(b) {
           b.addEventListener('click', function() {

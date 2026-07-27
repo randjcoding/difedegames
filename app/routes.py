@@ -771,6 +771,32 @@ def decide_membership(membership_id):
                 notify_user(conn, target_account['id'], 'family_join_approved',
                     'Join request approved',
                     f"You are now a member of {family['name']}.")
+            # If another roster member looks like the same person, nudge the lead.
+            twin = execute_query_one(conn, '''
+                SELECT p2.id, COALESCE(p2.display_name, p2.first_name) AS display_name
+                FROM players p1
+                JOIN players p2 ON p2.id <> p1.id
+                  AND lower(p2.first_name) = lower(p1.first_name)
+                  AND lower(p2.last_name) = lower(p1.last_name)
+                  AND p2.archived_at IS NULL AND p2.purged_at IS NULL
+                JOIN player_family_memberships m2 ON m2.player_id = p2.id
+                  AND m2.family_id = %s AND m2.status = 'active'
+                WHERE p1.id = %s
+                  AND NOT EXISTS (
+                    SELECT 1 FROM player_not_duplicates nd
+                    WHERE nd.player_a_id = LEAST(p1.id, p2.id)
+                      AND nd.player_b_id = GREATEST(p1.id, p2.id))
+                LIMIT 1
+            ''', (membership['family_id'], membership['player_id']))
+            if twin:
+                notify_family_lead(conn, membership['family_id'], 'possible_duplicate',
+                    'Possible duplicate player',
+                    f"{membership.get('display_name') or membership.get('first_name')} may be the same person as "
+                    f"{twin['display_name']}. Open My Team to confirm or mark them as different.",
+                    {'actions': [
+                        {'label': 'Open My Team', 'style': 'primary', 'method': 'GET',
+                         'url': '/my-team'},
+                    ]})
             msg = 'Member added'
         else:
             execute_modify(conn, 'DELETE FROM player_family_memberships WHERE id = %s', (membership_id,))
@@ -999,6 +1025,8 @@ def directory_families():
         ''', (f'%{q}%', (page - 1) * 25))
 
         my_family = user.get('family_id')
+        i_am_lead = bool(my_family and is_family_lead(conn, user, my_family))
+        allied = set(allied_family_ids(conn, my_family)) if my_family else set()
         results = []
         for r in rows:
             lead_name = None
@@ -1018,8 +1046,10 @@ def directory_families():
                 'member_count': r['member_count'],
                 'roster_visible': bool(r['show_roster']),
                 'is_my_family': r['id'] == my_family,
+                'is_allied': r['id'] in allied,
+                'can_crew_up': i_am_lead and r['id'] != my_family and r['id'] not in allied,
             })
-        return jsonify({'page': page, 'results': results})
+        return jsonify({'page': page, 'results': results, 'i_am_lead': i_am_lead})
     finally:
         conn.close()
 
@@ -2159,6 +2189,11 @@ def merge_players():
         execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (dup_id,))
 
         execute_modify(conn, 'DELETE FROM players WHERE id = %s', (dup_id,))
+        execute_modify(conn, '''
+            DELETE FROM player_not_duplicates
+            WHERE player_a_id = %s OR player_b_id = %s
+               OR player_a_id = %s OR player_b_id = %s
+        ''', (keep_id, keep_id, dup_id, dup_id))
         audit(conn, user['id'], 'players_merged', 'players', keep_id,
               old={'duplicate_id': dup_id,
                    'duplicate_name': f"{dup.get('first_name','')} {dup.get('last_name','')}".strip()},
@@ -2170,6 +2205,330 @@ def merge_players():
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+
+def _choose_keep_player(conn, a_id, b_id):
+    """Smart keep: prefer more game history; tie-break to the one with a login.
+    Returns (keep_id, discard_id, reason) or raises ValueError."""
+    rows = {}
+    for pid in (a_id, b_id):
+        hist = _player_history_counts(conn, pid)
+        acct = execute_query_one(conn, 'SELECT id, email FROM users WHERE player_id = %s', (pid,))
+        p = execute_query_one(conn, '''
+            SELECT id, first_name, last_name,
+                COALESCE(display_name, first_name) AS display_name, email, family_id
+            FROM players WHERE id = %s AND purged_at IS NULL
+        ''', (pid,))
+        if not p:
+            raise ValueError('Player not found')
+        rows[pid] = {'player': p, 'history': hist, 'account': acct,
+                     'score': (hist.get('games') or 0) * 1000 + (hist.get('scores') or 0)}
+    both_accounts = bool(rows[a_id]['account'] and rows[b_id]['account'])
+    if both_accounts:
+        raise ValueError(
+            'Both profiles have logins. Ask a super admin to merge these, or revoke one account first.')
+    if rows[a_id]['score'] > rows[b_id]['score']:
+        keep, discard, why = a_id, b_id, 'more game history'
+    elif rows[b_id]['score'] > rows[a_id]['score']:
+        keep, discard, why = b_id, a_id, 'more game history'
+    elif rows[a_id]['account'] and not rows[b_id]['account']:
+        keep, discard, why = a_id, b_id, 'has the login'
+    elif rows[b_id]['account'] and not rows[a_id]['account']:
+        keep, discard, why = b_id, a_id, 'has the login'
+    else:
+        keep, discard, why = min(a_id, b_id), max(a_id, b_id), 'older profile id'
+    return keep, discard, why, rows
+
+
+@main.route('/api/team/duplicate-suggestions')
+@login_required
+def team_duplicate_suggestions():
+    """Possible same-person pairs in the lead's family."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        family_id = user.get('family_id')
+        if not family_id or not is_family_lead(conn, user, family_id):
+            return jsonify({'pairs': []})
+        rows = execute_query(conn, '''
+            SELECT p.id, p.first_name, p.last_name,
+                COALESCE(p.display_name, p.first_name) AS display_name,
+                EXISTS (SELECT 1 FROM users u WHERE u.player_id = p.id) AS has_login,
+                (SELECT COUNT(DISTINCT agp.active_game_id) FROM active_game_players agp
+                  WHERE agp.player_id = p.id) AS games,
+                (SELECT COUNT(*) FROM game_scores gs WHERE gs.player_id = p.id) AS scores
+            FROM player_family_memberships m
+            JOIN players p ON p.id = m.player_id
+            WHERE m.family_id = %s AND m.status = 'active'
+              AND p.archived_at IS NULL AND p.purged_at IS NULL
+            ORDER BY p.first_name, p.last_name, p.id
+        ''', (family_id,))
+        blocked = {(r['player_a_id'], r['player_b_id']) for r in execute_query(conn, '''
+            SELECT player_a_id, player_b_id FROM player_not_duplicates
+            WHERE player_a_id = ANY(%s) OR player_b_id = ANY(%s)
+        ''', ([p['id'] for p in rows] or [0], [p['id'] for p in rows] or [0]))}
+        pairs = []
+        seen = set()
+        for i, a in enumerate(rows):
+            for b in rows[i + 1:]:
+                key = (min(a['id'], b['id']), max(a['id'], b['id']))
+                if key in blocked or key in seen:
+                    continue
+                same_full = (a['first_name'] or '').lower() == (b['first_name'] or '').lower() \
+                    and (a['last_name'] or '').lower() == (b['last_name'] or '').lower()
+                same_initial = (a['first_name'] or '').lower() == (b['first_name'] or '').lower() \
+                    and (a['last_name'] or '')[:1].lower() == (b['last_name'] or '')[:1].lower() \
+                    and bool(a['last_name']) and bool(b['last_name'])
+                one_login = bool(a['has_login']) != bool(b['has_login'])
+                if same_full or (same_initial and one_login):
+                    seen.add(key)
+                    pairs.append({
+                        'a': dict(a), 'b': dict(b),
+                        'reason': 'Same first and last name' if same_full else 'Same first name and last initial; one has a login',
+                    })
+        return jsonify({'pairs': pairs})
+    finally:
+        conn.close()
+
+
+@main.route('/api/team/same-person/preview')
+@login_required
+def same_person_preview():
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        a = request.args.get('a', type=int)
+        b = request.args.get('b', type=int)
+        if not a or not b or a == b:
+            return jsonify({'error': 'Pick two different players'}), 400
+        if not _can_merge(conn, user, a, b):
+            return jsonify({'error': 'Only the family lead of both home families can do this'}), 403
+        try:
+            keep, discard, why, rows = _choose_keep_player(conn, a, b)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        def pack(pid):
+            r = rows[pid]
+            return {
+                'id': pid,
+                'display_name': r['player']['display_name'],
+                'first_name': r['player']['first_name'],
+                'last_name': r['player']['last_name'],
+                'has_login': bool(r['account']),
+                'login_email': r['account']['email'] if r['account'] else None,
+                'history': r['history'],
+            }
+        return jsonify({
+            'keep': pack(keep), 'discard': pack(discard), 'reason': why,
+            'message': (
+                f"Keep {rows[keep]['player']['display_name']} ({why}). "
+                f"Move any login onto that profile and remove the empty duplicate. "
+                f"All game scores stay with the kept profile."
+            ),
+        })
+    finally:
+        conn.close()
+
+
+@main.route('/api/team/same-person', methods=['POST'])
+@login_required
+def same_person_confirm():
+    """Lead confirms two profiles are one person. Smart-keeps history."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        data = request.get_json(silent=True) or {}
+        a = data.get('player_a_id') or data.get('a')
+        b = data.get('player_b_id') or data.get('b')
+        if not a or not b or int(a) == int(b):
+            return jsonify({'error': 'Pick two different players'}), 400
+        a, b = int(a), int(b)
+        if not _can_merge(conn, user, a, b):
+            return jsonify({'error': 'Only the family lead of both home families can do this'}), 403
+        try:
+            keep_id, dup_id, why, rows = _choose_keep_player(conn, a, b)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+
+        # Prefer email from the account side onto the kept player.
+        keep_email = rows[keep_id]['player'].get('email')
+        discard_email = rows[dup_id]['player'].get('email')
+        acct = rows[dup_id]['account'] or rows[keep_id]['account']
+        if acct and acct.get('email'):
+            keep_email = keep_email or acct['email']
+        elif discard_email and not keep_email:
+            keep_email = discard_email
+        if keep_email:
+            execute_modify(conn, 'UPDATE players SET email = COALESCE(email, %s) WHERE id = %s',
+                           (keep_email, keep_id))
+
+        for tbl in ('game_scores', 'five_crowns_scores'):
+            execute_modify(conn, f'''
+                DELETE FROM {tbl} x WHERE x.player_id = %s AND EXISTS (
+                    SELECT 1 FROM {tbl} y
+                    WHERE y.active_game_id = x.active_game_id
+                      AND y.round_number = x.round_number AND y.player_id = %s)
+            ''', (dup_id, keep_id))
+            execute_modify(conn, f'UPDATE {tbl} SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
+        execute_modify(conn, '''
+            DELETE FROM active_game_players x WHERE x.player_id = %s AND EXISTS (
+                SELECT 1 FROM active_game_players y
+                WHERE y.active_game_id = x.active_game_id AND y.player_id = %s)
+        ''', (dup_id, keep_id))
+        execute_modify(conn, 'UPDATE active_game_players SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
+        execute_modify(conn, 'UPDATE game_stats SET winner_id = %s WHERE winner_id = %s', (keep_id, dup_id))
+        execute_modify(conn, '''
+            INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+            SELECT %s, d.family_id, FALSE, d.status, 'member'
+            FROM player_family_memberships d
+            WHERE d.player_id = %s AND NOT EXISTS (
+                SELECT 1 FROM player_family_memberships k
+                WHERE k.player_id = %s AND k.family_id = d.family_id)
+        ''', (keep_id, dup_id, keep_id))
+        execute_modify(conn, 'DELETE FROM player_family_memberships WHERE player_id = %s', (dup_id,))
+        has_primary = execute_query_one(conn, '''
+            SELECT 1 FROM player_family_memberships WHERE player_id = %s AND is_primary
+        ''', (keep_id,))
+        if not has_primary:
+            execute_modify(conn, '''
+                UPDATE player_family_memberships SET is_primary = TRUE
+                WHERE id = (SELECT id FROM player_family_memberships
+                            WHERE player_id = %s ORDER BY joined_at ASC, id ASC LIMIT 1)
+            ''', (keep_id,))
+        execute_modify(conn, '''
+            UPDATE users SET player_id = %s, family_id = COALESCE(family_id, %s)
+            WHERE player_id = %s AND NOT EXISTS (SELECT 1 FROM users WHERE player_id = %s)
+        ''', (keep_id, rows[keep_id]['player'].get('family_id'), dup_id, keep_id))
+        execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (dup_id,))
+        execute_modify(conn, '''
+            UPDATE invitations SET player_id = %s WHERE player_id = %s
+        ''', (keep_id, dup_id))
+        execute_modify(conn, 'DELETE FROM players WHERE id = %s', (dup_id,))
+        execute_modify(conn, '''
+            DELETE FROM player_not_duplicates
+            WHERE player_a_id IN (%s, %s) OR player_b_id IN (%s, %s)
+        ''', (keep_id, dup_id, keep_id, dup_id))
+        audit(conn, user['id'], 'same_person_merged', 'players', keep_id,
+              old={'discarded_id': dup_id, 'reason': why},
+              new={'kept_id': keep_id})
+        conn.commit()
+        kept_name = rows[keep_id]['player']['display_name']
+        return jsonify({
+            'success': True,
+            'kept_id': keep_id,
+            'message': f'Merged into {kept_name}. History preserved ({why}).',
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@main.route('/api/team/not-same-person', methods=['POST'])
+@login_required
+def not_same_person():
+    """Lead says two similar profiles are different people. Requires distinct
+    display names and remembers the pair so suggestions stop."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        data = request.get_json(silent=True) or {}
+        a = data.get('player_a_id') or data.get('a')
+        b = data.get('player_b_id') or data.get('b')
+        name_a = (data.get('display_name_a') or '').strip()
+        name_b = (data.get('display_name_b') or '').strip()
+        if not a or not b or int(a) == int(b):
+            return jsonify({'error': 'Pick two different players'}), 400
+        a, b = int(a), int(b)
+        if not _can_merge(conn, user, a, b):
+            return jsonify({'error': 'Only the family lead of both home families can do this'}), 403
+        if not name_a or not name_b:
+            return jsonify({'error': 'Give each person a different display name so score sheets stay clear'}), 400
+        if name_a.lower() == name_b.lower():
+            return jsonify({'error': 'Display names must be different (for example Mike and Grandpa)'}), 400
+        execute_modify(conn, 'UPDATE players SET display_name = %s WHERE id = %s', (name_a, a))
+        execute_modify(conn, 'UPDATE players SET display_name = %s WHERE id = %s', (name_b, b))
+        lo, hi = min(a, b), max(a, b)
+        execute_modify(conn, '''
+            INSERT INTO player_not_duplicates (player_a_id, player_b_id, decided_by_user_id)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (player_a_id, player_b_id) DO UPDATE
+              SET decided_by_user_id = EXCLUDED.decided_by_user_id,
+                  created_at = CURRENT_TIMESTAMP
+        ''', (lo, hi, user['id']))
+        audit(conn, user['id'], 'not_same_person', 'players', lo,
+              new={'player_a': a, 'player_b': b, 'display_a': name_a, 'display_b': name_b})
+        conn.commit()
+        return jsonify({'message': 'Saved. They will stay separate and will not be suggested again.'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@main.route('/api/players/<int:player_id>/password-invite', methods=['POST'])
+@login_required
+def send_password_invite(player_id):
+    """Lead adds/updates email on an existing player and emails a set-password
+    link. Never creates a second players row."""
+    from app.auth import create_action_token
+    from app.email_utils import send_set_password_email
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        player = execute_query_one(conn, '''
+            SELECT * FROM players WHERE id = %s AND purged_at IS NULL AND archived_at IS NULL
+        ''', (player_id,))
+        if not player:
+            return jsonify({'error': 'Player not found'}), 404
+        if not is_family_lead(conn, user, player.get('family_id')):
+            return jsonify({'error': 'Only the family lead can send login invites'}), 403
+        if execute_query_one(conn, 'SELECT 1 FROM users WHERE player_id = %s', (player_id,)):
+            return jsonify({'error': 'That profile already has a login'}), 400
+        email = ((request.get_json(silent=True) or {}).get('email') or player.get('email') or '').strip().lower()
+        if not email or '@' not in email:
+            return jsonify({'error': 'A valid email address is required'}), 400
+        taken_user = execute_query_one(conn, 'SELECT id, player_id FROM users WHERE lower(email) = %s', (email,))
+        if taken_user and taken_user.get('player_id') and taken_user['player_id'] != player_id:
+            return jsonify({'error': 'That email already belongs to another account'}), 409
+        taken_player = execute_query_one(conn, '''
+            SELECT id FROM players WHERE lower(email) = %s AND id <> %s AND purged_at IS NULL
+        ''', (email, player_id))
+        if taken_player:
+            return jsonify({'error': 'That email is already on another player profile'}), 409
+
+        execute_modify(conn, 'UPDATE players SET email = %s, email_verified = FALSE WHERE id = %s',
+                       (email, player_id))
+        token = create_action_token('set_password', player_id=player_id,
+                                   payload={'email': email}, ttl_hours=168)
+        if not token:
+            conn.rollback()
+            return jsonify({'error': 'Could not create the invite. Try again.'}), 500
+        execute_query_one(conn, '''
+            INSERT INTO invitations (email, invited_by_user_id, family_id, player_id, invite_type, token, expires_at, status)
+            VALUES (%s, %s, %s, %s, 'set_password', %s, CURRENT_TIMESTAMP + INTERVAL '7 days', 'sent')
+            RETURNING id
+        ''', (email, user['id'], player['family_id'], player_id, token))
+        family = execute_query_one(conn, 'SELECT name FROM families WHERE id = %s', (player['family_id'],))
+        inviter = execute_query_one(conn, 'SELECT * FROM players WHERE id = %s', (user['player_id'],)) if user.get('player_id') else None
+        inviter_name = public_person_name(inviter) if inviter else user['first_name']
+        sent = send_set_password_email(
+            email, player.get('display_name') or player['first_name'],
+            family['name'] if family else 'their', inviter_name,
+            f"{APP_BASE_URL}/auth/set-password/{token}")
+        audit(conn, user['id'], 'password_invite_sent', 'players', player_id, new={'email': email})
+        conn.commit()
+        if sent:
+            return jsonify({'message': f'Password setup invite sent to {email}.'})
+        return jsonify({'message': 'Email saved, but the invite could not be sent. Try again shortly.'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
 
 @main.route('/api/admin/player/<int:player_id>/details', methods=['GET'])
 @admin_required

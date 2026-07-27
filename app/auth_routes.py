@@ -2,9 +2,10 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from werkzeug.security import generate_password_hash, check_password_hash
 from .database import get_db_connection
 from .auth import (
-    validate_email, validate_password, 
+    validate_email, validate_password,
     create_verification_token, verify_email_token, resend_verification_email,
-    login_required, admin_required, load_current_user
+    login_required, admin_required, load_current_user,
+    peek_action_token, consume_action_token,
 )
 from .email_utils import send_verification_email, send_registration_notification, APP_BASE_URL
 from .identity import unique_family_slug, audit
@@ -630,17 +631,50 @@ def verify_email(token):
                 try:
                     conn = get_db_connection()
                     cursor = conn.cursor()
+                    pending_id = result.get('user_id')
+                    if not pending_id:
+                        cursor.execute(
+                            'SELECT id, first_name, last_name, email FROM users WHERE lower(email) = %s',
+                            ((result.get('email') or '').lower(),))
+                        row = cursor.fetchone()
+                        if row:
+                            pending_id = row['id'] if isinstance(row, dict) else row[0]
+                            if isinstance(row, dict):
+                                result.setdefault('first_name', row.get('first_name'))
+                                result.setdefault('last_name', row.get('last_name'))
+                    display = f"{result.get('first_name', '')} {result.get('last_name', '')}".strip() or result.get('email', 'A user')
                     cursor.execute('''
                         INSERT INTO notifications (user_id, type, title, message, data)
                         SELECT id, 'user_pending_approval',
                                'New User Needs Approval',
                                %s,
-                               jsonb_build_object('user_email', %s, 'user_name', %s)
-                        FROM users WHERE role = 'super_admin'
+                               jsonb_build_object(
+                                   'user_id', %s::int,
+                                   'user_email', %s,
+                                   'user_name', %s,
+                                   'actions', jsonb_build_array(
+                                       jsonb_build_object(
+                                           'label', 'Approve',
+                                           'style', 'success',
+                                           'method', 'POST',
+                                           'url', %s
+                                       ),
+                                       jsonb_build_object(
+                                           'label', 'Open list',
+                                           'style', 'outline-secondary',
+                                           'method', 'GET',
+                                           'url', '/auth/admin/users'
+                                       )
+                                   )
+                               )
+                        FROM users WHERE role = 'super_admin' AND is_active = TRUE
+                          AND archived_at IS NULL
                     ''', (
-                        f"{result.get('first_name', '')} {result.get('last_name', '')} ({result.get('email', '')}) has verified their email and needs approval.",
+                        f"{display} ({result.get('email', '')}) has verified their email and needs approval.",
+                        pending_id,
                         result.get('email', ''),
-                        f"{result.get('first_name', '')} {result.get('last_name', '')}"
+                        display,
+                        f"/auth/admin/approve-user/{pending_id}",
                     ))
                     conn.commit()
                     cursor.close()
@@ -869,3 +903,134 @@ def admin_set_role(user_id):
         return jsonify({'error': 'Failed to change role'}), 500
     finally:
         conn.close()
+
+
+@auth_bp.route('/set-password/<token>', methods=['GET', 'POST'])
+def set_password(token):
+    """Lead-invited password setup for an EXISTING player. Never creates a
+    second players row — the login binds to the player_id on the token."""
+    conn = get_db_connection()
+    try:
+        tok = peek_action_token(conn, token, expected_purpose='set_password')
+        if not tok:
+            flash('This password link is invalid or has expired. Ask your family lead to send a new one.', 'error')
+            return redirect(url_for('auth.login'))
+
+        player = None
+        if tok.get('player_id'):
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT p.id, p.first_name, p.last_name, p.display_name, p.email, p.family_id,
+                       f.name AS family_name
+                FROM players p
+                LEFT JOIN families f ON f.id = p.family_id
+                WHERE p.id = %s AND p.purged_at IS NULL
+            ''', (tok['player_id'],))
+            player = cursor.fetchone()
+            cursor.close()
+        if not player:
+            flash('That player profile no longer exists.', 'error')
+            return redirect(url_for('auth.login'))
+
+        payload = tok.get('payload') or {}
+        if isinstance(payload, str):
+            import json as _json
+            try:
+                payload = _json.loads(payload)
+            except Exception:
+                payload = {}
+        email = (payload.get('email') or player.get('email') or '').strip().lower()
+        if not email:
+            flash('This invite has no email address. Ask your family lead to send a new one.', 'error')
+            return redirect(url_for('auth.login'))
+
+        if request.method == 'GET':
+            return render_template('auth/set_password.html',
+                                   token=token,
+                                   email=email,
+                                   display_name=player.get('display_name') or player.get('first_name'),
+                                   family_name=player.get('family_name') or 'your family')
+
+        password = request.form.get('password', '')
+        confirm = request.form.get('confirm_password', '')
+        if password != confirm:
+            flash('Passwords do not match.', 'error')
+            return render_template('auth/set_password.html', token=token, email=email,
+                                   display_name=player.get('display_name') or player.get('first_name'),
+                                   family_name=player.get('family_name') or 'your family')
+        if not validate_password(password):
+            flash('Password must be at least 8 characters and include upper, lower, digit, and special character.', 'error')
+            return render_template('auth/set_password.html', token=token, email=email,
+                                   display_name=player.get('display_name') or player.get('first_name'),
+                                   family_name=player.get('family_name') or 'your family')
+
+        consumed = consume_action_token(conn, token, expected_purpose='set_password')
+        if not consumed:
+            flash('This password link is invalid or has already been used.', 'error')
+            return redirect(url_for('auth.login'))
+
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, player_id FROM users WHERE lower(email) = %s', (email,))
+        existing = cursor.fetchone()
+        pwd_hash = generate_password_hash(password)
+
+        if existing:
+            if existing.get('player_id') and existing['player_id'] != player['id']:
+                conn.rollback()
+                flash('That email already belongs to a different account.', 'error')
+                return redirect(url_for('auth.login'))
+            cursor.execute('''
+                UPDATE users SET password_hash = %s, player_id = %s, family_id = COALESCE(family_id, %s),
+                    first_name = COALESCE(NULLIF(first_name, ''), %s),
+                    last_name = COALESCE(NULLIF(last_name, ''), %s),
+                    family_name = COALESCE(NULLIF(family_name, ''), %s),
+                    is_verified = TRUE, is_approved = TRUE, is_active = TRUE,
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING id
+            ''', (pwd_hash, player['id'], player.get('family_id'),
+                  player['first_name'], player['last_name'],
+                  player.get('family_name') or '', existing['id']))
+            user_id = cursor.fetchone()['id']
+        else:
+            # Never INSERT into players here — bind to the existing identity.
+            cursor.execute('''
+                INSERT INTO users (first_name, last_name, family_name, email, password_hash,
+                                   is_verified, is_approved, is_active, family_id, player_id, role, created_at)
+                VALUES (%s, %s, %s, %s, %s, TRUE, TRUE, TRUE, %s, %s, 'family_admin', NOW())
+                RETURNING id
+            ''', (player['first_name'], player['last_name'], player.get('family_name') or '',
+                  email, pwd_hash, player.get('family_id'), player['id']))
+            user_id = cursor.fetchone()['id']
+
+        cursor.execute('''
+            UPDATE players SET email = %s, email_verified = TRUE WHERE id = %s
+        ''', (email, player['id']))
+        cursor.execute('''
+            INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+            VALUES (%s, %s, TRUE, 'active', 'member')
+            ON CONFLICT (player_id, family_id) DO UPDATE SET status = 'active'
+        ''', (player['id'], player.get('family_id')))
+        cursor.execute('''
+            UPDATE invitations SET status = 'accepted', accepted_at = NOW()
+            WHERE token = %s AND status = 'sent'
+        ''', (token,))
+        audit(conn, user_id, 'password_set_via_invite', 'players', player['id'],
+              new={'email': email})
+        conn.commit()
+        cursor.close()
+
+        session.clear()
+        session['user_id'] = user_id
+        session.permanent = True
+        flash('Password set. Welcome! Your game history is already on this profile.', 'success')
+        return redirect(url_for('main.dashboard'))
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"set_password error: {e}")
+        flash('Could not set your password. Please try again or ask your family lead for a new invite.', 'error')
+        return redirect(url_for('auth.login'))
+    finally:
+        if conn:
+            conn.close()
