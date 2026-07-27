@@ -268,7 +268,8 @@ def main():
         check('adult is discoverable in the directory', any(x['player_id'] == adult_id for x in results))
         if results:
             hit = [x for x in results if x['player_id'] == adult_id]
-            check('directory shows last initial only', hit and hit[0]['name'].endswith(' G.'),
+            check('directory shows full name for easy finding',
+                  hit and 'Grownup' in hit[0]['name'],
                   f"got {hit[0]['name'] if hit else 'none'}")
 
         r = client_b.get('/api/directory/people?q=Zztestminor')

@@ -265,7 +265,9 @@
           </div>
           <div class="sub">
             {{ p.first_name }} {{ p.last_name }}
-            {% if p.account_email %}<span class="tag tag-login ms-1"><i class="fas fa-check"></i> {{ p.account_email }}</span>{% else %}<span class="tag tag-nologin ms-1">No Login</span>{% endif %}
+            {% if p.account_email %}<span class="tag tag-login ms-1"><i class="fas fa-check"></i> {{ p.account_email }}</span>
+            {% elif p.player_email %}<span class="tag tag-nologin ms-1">Invite pending: {{ p.player_email }}</span>
+            {% else %}<span class="tag tag-nologin ms-1">No Login</span>{% endif %}
           </div>
         </div>
         <div class="player-actions">
@@ -284,16 +286,17 @@
           <button type="button" class="btn btn-outline-secondary edit-player-btn"
             title="Edit player details" aria-label="Edit player details"
             data-id="{{ p.id }}" data-first="{{ p.first_name }}" data-last="{{ p.last_name }}"
-            data-display="{{ p.display_name }}" data-email="{{ p.player_email or '' }}">
+            data-display="{{ p.display_name }}" data-email="{{ p.player_email or '' }}"
+            data-has-login="{{ 1 if p.account_id else 0 }}">
             <i class="fas fa-pen" aria-hidden="true"></i>
           </button>
           {% endif %}
           {% if is_lead and not p.account_id %}
-          <button type="button" class="btn btn-outline-secondary password-invite-btn"
-            title="Add their email and send a link to set a password (keeps this profile and all scores)"
-            aria-label="Send login invite for this player"
+          <button type="button" class="btn btn-outline-primary password-invite-btn"
+            title="Add their email and send a link so they can set a password and log in"
+            aria-label="Add email and send login invite"
             data-id="{{ p.id }}" data-name="{{ p.display_name }}" data-email="{{ p.player_email or '' }}">
-            <i class="fas fa-key" aria-hidden="true"></i>
+            <i class="fas fa-envelope me-1" aria-hidden="true"></i>{% if p.player_email %}Resend Login{% else %}Add Email{% endif %}
           </button>
           {% endif %}
           {% if is_lead and p.account_id != lead_user_id %}
@@ -413,11 +416,16 @@
             <div class="col-6"><label class="form-label fw-semibold">Last Name</label><input type="text" class="form-control" id="apLastName" required></div>
           </div>
           <div class="mb-2"><label class="form-label fw-semibold">Display Name</label><input type="text" class="form-control" id="apDisplayName" required placeholder="Nickname shown in games"></div>
-          <div class="mb-2"><label class="form-label fw-semibold">Email <small class="text-muted">(optional)</small></label><input type="email" class="form-control" id="apEmail" placeholder="For future login access"></div>
+          <div class="mb-2"><label class="form-label fw-semibold">Email <small class="text-muted">(optional)</small></label><input type="email" class="form-control" id="apEmail" placeholder="them@example.com"></div>
+          <div class="form-check mb-2" id="apSendLoginWrap">
+            <input class="form-check-input" type="checkbox" id="apSendLogin" checked>
+            <label class="form-check-label" for="apSendLogin">Email them a link to set a password and log in</label>
+            <div class="help-text" style="font-size:0.75rem;">Uses this same player profile so their scores stay attached. Needs an email above.</div>
+          </div>
           <div class="form-check mt-2">
             <input class="form-check-input" type="checkbox" id="apIsMinor">
             <label class="form-check-label" for="apIsMinor">This is a child</label>
-            <div class="help-text" style="font-size:0.75rem;">Children are never shown in public search. Only your family and directly allied crews can see them.</div>
+            <div class="help-text" style="font-size:0.75rem;">Children only show up in Directory for your family and directly allied crews.</div>
           </div>
         </form>
       </div>
@@ -449,7 +457,7 @@
             <option value="join_site">Join the site with their own family</option>
           </select>
         </div>
-        <p class="mb-0 help-text" style="font-size:0.78rem;">If they already have an account here, they get an in-app invitation instead of an email. If the address belongs to an unclaimed player profile, they get a claim invite.</p>
+        <p class="mb-0 help-text" style="font-size:0.78rem;">For someone not already on your roster. To give login access to a family member who is already listed, use Add Email next to their name instead.</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -464,18 +472,19 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="fas fa-key me-2"></i>Send Login Invite</h5>
+        <h5 class="modal-title"><i class="fas fa-envelope me-2"></i>Add Email and Send Login</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <p style="font-size:0.9rem;">Email <strong id="piName"></strong> a link to set a password. This uses their existing player profile — game history stays put. They can play and view leaderboards, but they will not get family lead tools.</p>
+        <p style="font-size:0.9rem;">Enter an email for <strong id="piName"></strong>. They get a link to set their own password and log in. This keeps their existing player profile and all scores — it does not create a second person.</p>
         <label class="form-label fw-semibold">Their email address</label>
-        <input type="email" class="form-control" id="piEmail" placeholder="them@example.com">
+        <input type="email" class="form-control" id="piEmail" placeholder="them@example.com" autocomplete="email">
         <input type="hidden" id="piPlayerId">
+        <p class="mt-2 mb-0 help-text" style="font-size:0.78rem;">The link works for 7 days. You can resend anytime if they need a new one.</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn" id="sendPasswordInviteBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Send Invite</button>
+        <button type="button" class="btn" id="sendPasswordInviteBtn" style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">Send Login Email</button>
       </div>
     </div>
   </div>
@@ -547,7 +556,11 @@
           <div class="col-6"><label class="form-label fw-semibold">Last Name</label><input type="text" class="form-control" id="epLastName" required></div>
         </div>
         <div class="mb-2"><label class="form-label fw-semibold">Display Name</label><input type="text" class="form-control" id="epDisplayName" required></div>
-        <div class="mb-2"><label class="form-label fw-semibold">Email</label><input type="email" class="form-control" id="epEmail"></div>
+        <div class="mb-2"><label class="form-label fw-semibold">Email</label><input type="email" class="form-control" id="epEmail" placeholder="them@example.com"></div>
+        <div class="form-check" id="epSendLoginWrap" style="display:none;">
+          <input class="form-check-input" type="checkbox" id="epSendLogin">
+          <label class="form-check-label" for="epSendLogin">Also email them a link to set a password and log in</label>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -626,11 +639,25 @@ $(function() {
   });
 
   $("#saveNewPlayer").click(function() {
+    var email = ($("#apEmail").val() || "").trim();
+    var sendLogin = $("#apSendLogin").is(":checked") && !!email;
     var data = { first_name: $("#apFirstName").val(), last_name: $("#apLastName").val(),
-      display_name: $("#apDisplayName").val(), email: $("#apEmail").val(),
+      display_name: $("#apDisplayName").val(), email: email,
       is_minor: $("#apIsMinor").is(":checked") };
     if (!data.first_name || !data.last_name || !data.display_name) return;
-    post("/api/team/players", data);
+    post("/api/team/players", data, function(d) {
+      if (sendLogin && d.id) {
+        post("/api/players/" + d.id + "/password-invite", { email: email }, function(inv) {
+          bootstrap.Modal.getInstance(document.getElementById('addPlayerModal')).hide();
+          if (typeof AppModal !== 'undefined') {
+            AppModal.success('Player Added', inv.message || 'Login invite sent.');
+          } else { alert(inv.message || 'Login invite sent.'); }
+          setTimeout(function(){ location.reload(); }, 900);
+        });
+        return;
+      }
+      location.reload();
+    });
   });
 
   $("#sendInviteBtn").click(function() {
@@ -654,7 +681,8 @@ $(function() {
     if (!email) return;
     post("/api/players/" + $("#piPlayerId").val() + "/password-invite", { email: email }, function(d) {
       bootstrap.Modal.getInstance(document.getElementById('passwordInviteModal')).hide();
-      if (typeof AppModal !== 'undefined') AppModal.success('Invite', d.message || 'Sent.'); else alert(d.message || 'Sent.');
+      if (typeof AppModal !== 'undefined') AppModal.success('Login Invite', d.message || 'Sent.'); else alert(d.message || 'Sent.');
+      setTimeout(function(){ location.reload(); }, 900);
     });
   });
 
@@ -810,15 +838,30 @@ $(function() {
     $("#epLastName").val($b.data("last"));
     $("#epDisplayName").val($b.data("display"));
     $("#epEmail").val($b.data("email"));
+    var hasLogin = String($b.data("has-login")) === "1";
+    $("#epSendLoginWrap").toggle(!hasLogin);
+    $("#epSendLogin").prop("checked", !hasLogin && !!($b.data("email")));
     new bootstrap.Modal($("#editPlayerModal")).show();
   });
 
   $("#saveEditPlayer").click(function() {
     var pid = $("#epId").val();
+    var email = ($("#epEmail").val() || "").trim();
+    var sendLogin = $("#epSendLoginWrap").is(":visible") && $("#epSendLogin").is(":checked") && !!email;
     var data = { first_name: $("#epFirstName").val(), last_name: $("#epLastName").val(),
-      display_name: $("#epDisplayName").val(), email: $("#epEmail").val() };
+      display_name: $("#epDisplayName").val(), email: email };
     $.ajax({ url: "/api/team/players/" + pid, method: "PUT", contentType: "application/json",
-      data: JSON.stringify(data), success: function(){ location.reload(); }, error: fail });
+      data: JSON.stringify(data),
+      success: function() {
+        if (!sendLogin) { location.reload(); return; }
+        post("/api/players/" + pid + "/password-invite", { email: email }, function(d) {
+          bootstrap.Modal.getInstance(document.getElementById('editPlayerModal')).hide();
+          if (typeof AppModal !== 'undefined') AppModal.success('Saved', d.message || 'Login invite sent.');
+          else alert(d.message || 'Login invite sent.');
+          setTimeout(function(){ location.reload(); }, 900);
+        });
+      },
+      error: fail });
   });
 
   $(".remove-player-btn").click(function() {

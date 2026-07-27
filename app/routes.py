@@ -878,7 +878,9 @@ def _visible_family_ids_for_minors(conn, user):
     return [family_id] + allied_family_ids(conn, family_id)
 
 def _family_label(row):
-    """'DiFede (led by Joe D.)' - lead shown by public name, never email."""
+    """'DiFede (led by Joe D.)' - lead shown by name, never email.
+    Emails are never shown on family labels (privacy). Lead name is how
+    families with the same name are told apart."""
     name = row.get('family_name') or row.get('name') or 'Unknown family'
     lead = None
     if row.get('lead_first_name'):
@@ -886,9 +888,23 @@ def _family_label(row):
             'first_name': row.get('lead_first_name'),
             'last_name': row.get('lead_last_name'),
             'display_name': row.get('lead_display_name'),
-            'show_full_last_name': row.get('lead_show_full_last_name'),
+            'show_full_last_name': True,
         })
     return f'{name} (led by {lead})' if lead else name
+
+
+def _directory_person_name(player):
+    """Full first + last for logged-in Directory search (easy find). Emails never shown."""
+    first = (player.get('display_name') or player.get('first_name') or 'Player').strip()
+    last = (player.get('last_name') or '').strip()
+    if not last:
+        return first
+    # If display_name already looks like a full name, keep it; else append last.
+    if player.get('display_name') and last.lower() in (player.get('display_name') or '').lower():
+        return player['display_name']
+    if player.get('display_name') and player.get('display_name') != player.get('first_name'):
+        return f"{player['display_name']} ({player.get('first_name')} {last})"
+    return f'{first} {last}'
 
 _LEAD_JOIN = '''
     LEFT JOIN users lu ON lu.id = f.lead_user_id
@@ -919,6 +935,10 @@ def directory_people():
     try:
         minor_families = _visible_family_ids_for_minors(conn, user) or [-1]
         like = f'%{q}%'
+        # Logged-in search is intentionally easy to use while Joe is the sole
+        # approving authority. Minors still require a direct crew alliance.
+        # Emails are never returned. Full names are shown so families are easy
+        # to tell apart; tighten privacy later if the user base grows.
         rows = execute_query(conn, f'''
             SELECT p.id, p.first_name, p.last_name, p.display_name,
                 p.show_full_last_name, p.is_minor, p.family_id,
@@ -929,19 +949,19 @@ def directory_people():
             JOIN families f ON f.id = p.family_id
             {_LEAD_JOIN}
             WHERE p.archived_at IS NULL AND p.purged_at IS NULL
-              AND p.is_discoverable = TRUE
               AND f.archived_at IS NULL
               AND (p.first_name ILIKE %s OR p.last_name ILIKE %s
-                   OR COALESCE(p.display_name, '') ILIKE %s)
+                   OR COALESCE(p.display_name, '') ILIKE %s
+                   OR f.name ILIKE %s)
               AND (p.is_minor = FALSE OR p.family_id = ANY(%s))
             ORDER BY p.first_name, p.last_name
-            LIMIT 25 OFFSET %s
-        ''', (like, like, like, minor_families, (page - 1) * 25))
+            LIMIT 40 OFFSET %s
+        ''', (like, like, like, like, minor_families, (page - 1) * 40))
 
         my_family = user.get('family_id')
         return jsonify({'page': page, 'results': [{
             'player_id': r['id'],
-            'name': public_person_name(r),
+            'name': _directory_person_name(r),
             'family_id': r['family_id'],
             'family_name': r['family_name'],
             'family_label': _family_label(r),
@@ -974,19 +994,20 @@ def directory_lookup_email():
             JOIN families f ON f.id = p.family_id
             {_LEAD_JOIN}
             WHERE p.archived_at IS NULL AND p.purged_at IS NULL
+              AND f.archived_at IS NULL
               AND (lower(p.email) = %s
                    OR p.id = (SELECT player_id FROM users u WHERE lower(u.email) = %s))
             LIMIT 1
         ''', (email, email))
 
-        if not row or not row['is_discoverable'] or row['family_archived']:
+        if not row or row['family_archived']:
             return jsonify({'found': False})
         if row['is_minor'] and row['family_id'] not in _visible_family_ids_for_minors(conn, user):
             return jsonify({'found': False})
         return jsonify({
             'found': True,
             'player_id': row['id'],
-            'name': public_person_name(row),
+            'name': _directory_person_name(row),
             'family_id': row['family_id'],
             'family_label': _family_label(row),
         })
@@ -1018,11 +1039,11 @@ def directory_families():
                 {_LEAD_COLS}
             FROM families f
             {_LEAD_JOIN}
-            WHERE f.archived_at IS NULL AND f.is_discoverable = TRUE
+            WHERE f.archived_at IS NULL
               AND f.name ILIKE %s
             ORDER BY f.name
-            LIMIT 25 OFFSET %s
-        ''', (f'%{q}%', (page - 1) * 25))
+            LIMIT 40 OFFSET %s
+        ''', (f'%{q}%', (page - 1) * 40))
 
         my_family = user.get('family_id')
         i_am_lead = bool(my_family and is_family_lead(conn, user, my_family))
@@ -1064,7 +1085,7 @@ def directory_family_roster(family_id):
     try:
         family = execute_query_one(conn, '''
             SELECT id, name, show_roster FROM families
-            WHERE id = %s AND archived_at IS NULL AND is_discoverable = TRUE
+            WHERE id = %s AND archived_at IS NULL
         ''', (family_id,))
         if not family:
             return jsonify({'error': 'Family not found'}), 404
@@ -1089,13 +1110,13 @@ def directory_family_roster(family_id):
             FROM player_family_memberships m
             JOIN players p ON p.id = m.player_id
             WHERE m.family_id = %s AND m.status = 'active'
-              AND p.archived_at IS NULL AND p.is_discoverable = TRUE
+              AND p.archived_at IS NULL
             ORDER BY p.first_name, p.last_name
         ''', (family_id,))
 
         members = [{
             'player_id': r['id'],
-            'name': public_person_name(r),
+            'name': _directory_person_name(r),
             'is_claimed': bool(r['is_claimed']),
             'is_minor': bool(r['is_minor']),
         } for r in rows if can_see_minors or not r['is_minor']]

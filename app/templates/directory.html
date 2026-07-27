@@ -99,7 +99,7 @@
 <div class="container py-3" style="max-width: 900px;">
   <div class="dir-hero">
     <h1><i class="fas fa-search me-2"></i>Directory</h1>
-    <p>Find players and families, confirm you have the right one, and send a join request. People appear by first name and last initial; email addresses are never shown.</p>
+    <p>Find players and families by name, confirm you have the right one, and send a join request. Full names and family leads are shown so you can tell people apart. Email addresses are never displayed.</p>
   </div>
 
   <ul class="nav nav-tabs dir-tabs mb-3" role="tablist">
@@ -113,10 +113,10 @@
         <div class="card-header">Search People</div>
         <div class="card-body">
           <div class="input-group mb-2">
-            <input type="text" class="form-control" id="peopleQuery" placeholder="Name (at least 2 letters)" autocomplete="off">
+            <input type="text" class="form-control" id="peopleQuery" placeholder="First name, last name, or family name" autocomplete="off">
             <button class="btn btn-primary" id="peopleSearchBtn"><i class="fas fa-search"></i></button>
           </div>
-          <div id="peopleResults"><div class="dir-empty">Search by first or last name.</div></div>
+          <div id="peopleResults"><div class="dir-empty">Search by first name, last name, or family name.</div></div>
         </div>
       </div>
 
@@ -193,7 +193,7 @@
 
   function renderPeople(list, container) {
     if (!list.length) {
-      container.innerHTML = '<div class="dir-empty">No one found. They may not exist here yet, or they may have chosen not to be listed.</div>';
+      container.innerHTML = '<div class="dir-empty">No one found. Try another spelling, or search Families by family name.</div>';
       return;
     }
     container.innerHTML = list.map(personRowHtml).join('');
