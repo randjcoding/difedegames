@@ -1113,20 +1113,29 @@ content %}
       body.innerHTML = tbl;
       fsUpdateTotals();
 
-      $(body).off("change input", ".fs-score-input").on("change", ".fs-score-input", function() {
-        var $inp = $(this);
-        var pid = $inp.data("pid");
-        var rnd = $inp.data("rnd");
-        var val = $inp.val().trim();
-        var origCell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rnd + '"]');
-        if (origCell.length) {
-          updateScore(origCell, val, origCell.text().trim());
-          setTimeout(function() {
-            $inp.val(origCell.text().trim());
+      $(body).off("change input blur", ".fs-score-input")
+        .on("change blur", ".fs-score-input", function() {
+          var $inp = $(this);
+          var pid = $inp.data("pid");
+          var rnd = $inp.data("rnd");
+          var val = $inp.val().trim();
+          var origCell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rnd + '"]');
+          if (origCell.length) {
+            saveCellScore(origCell, val, { leaveEditing: false, syncDom: true });
             fsUpdateTotals();
-          }, 500);
-        }
-      });
+          }
+        })
+        .on("input", ".fs-score-input", function() {
+          var $inp = $(this);
+          var pid = $inp.data("pid");
+          var rnd = $inp.data("rnd");
+          var cell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rnd + '"]');
+          clearTimeout($inp.data("saveTimer"));
+          $inp.data("saveTimer", setTimeout(function() {
+            if (cell.length) saveCellScore(cell, $inp.val().trim(), { leaveEditing: false, syncDom: true });
+            fsUpdateTotals();
+          }, 800));
+        });
 
       var fsModal = bootstrap.Modal.getOrCreateInstance(document.getElementById("fullscreenTableModal"));
       fsModal.show();
@@ -1176,112 +1185,164 @@ content %}
 
     window.reSaveCurrentRound = function () {
       var rd = FC_ROUNDS[reCurrentIdx];
-      var gameId = $(".game-board").data("game-id");
       $(".round-player-score").each(function () {
         var pid = $(this).data("pid");
         var val = $(this).val().trim();
         var cell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rd.num + '"]');
-        var oldVal = cell.text().trim();
-        if (val !== oldVal && val !== "") {
-          cell.text(val);
-          $.ajax({
-            url: "/api/scores",
-            method: "POST",
-            contentType: "application/json",
-            data: JSON.stringify({ game_id: gameId, player_id: pid, round_number: rd.num, score: parseInt(val) })
-          });
+        if (cell.length) {
+          saveCellScore(cell, val, { leaveEditing: false, syncDom: true });
         }
       });
       updateTotals();
+      highlightDealer();
     };
+
+    // Save as soon as a round-entry field changes — even if the user never taps Next.
+    $(document).off("blur.reScore input.reScore", ".round-player-score")
+      .on("blur.reScore", ".round-player-score", function () {
+        var rd = FC_ROUNDS[reCurrentIdx];
+        var pid = $(this).data("pid");
+        var cell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rd.num + '"]');
+        if (cell.length) {
+          saveCellScore(cell, $(this).val().trim(), { leaveEditing: false, syncDom: true });
+          updateTotals();
+          highlightDealer();
+        }
+      })
+      .on("input.reScore", ".round-player-score", function () {
+        var $inp = $(this);
+        var rd = FC_ROUNDS[reCurrentIdx];
+        var pid = $inp.data("pid");
+        var cell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rd.num + '"]');
+        clearTimeout($inp.data("saveTimer"));
+        $inp.data("saveTimer", setTimeout(function () {
+          if (cell.length) {
+            saveCellScore(cell, $inp.val().trim(), { leaveEditing: false, syncDom: true });
+            updateTotals();
+            highlightDealer();
+          }
+        }, 800));
+      });
 
     let updateTimer;
 
-    function updateScore(cell, newValue, originalValue) {
-      const gameId = $(".game-board").data("game-id");
+    function scorePayload(cell, rawValue) {
+      var scoreVal = rawValue !== "" && !isNaN(rawValue) ? parseInt(rawValue, 10) : null;
+      return {
+        game_id: $(".game-board").data("game-id"),
+        player_id: cell.data("player") || cell.attr("data-player"),
+        round_number: parseInt(cell.data("round") || cell.attr("data-round"), 10),
+        score: scoreVal
+      };
+    }
 
-      if (newValue !== "" && !isNaN(newValue)) {
-        $.ajax({
-          url: "/api/scores",
-          method: "POST",
-          contentType: "application/json",
-          data: JSON.stringify({
-            game_id: gameId,
-            player_id: cell.data("player"),
-            round_number: cell.data("round"),
-            score: parseInt(newValue),
-          }),
-          success: function () {
-            cell.removeClass("editing");
-            cell.text(newValue);
-            updateTotals();
-            highlightDealer();
-          },
-          error: function (xhr) {
-            AppModal.error('Error', xhr.responseJSON?.error || 'Failed to save score');
-            cell.removeClass("editing");
-            cell.text(originalValue || "");
-          },
-        });
+    function applyScoreToCell(cell, scoreVal, leaveEditing) {
+      if (leaveEditing !== false) cell.removeClass("editing");
+      if (leaveEditing === false && cell.hasClass("editing")) {
+        // Keep the open input; only mirror into the hidden table text via data.
+        cell.data("saved-value", scoreVal === null ? "" : String(scoreVal));
       } else {
-        $.ajax({
-          url: "/api/scores",
-          method: "POST",
-          contentType: "application/json",
-          data: JSON.stringify({
-            game_id: gameId,
-            player_id: cell.data("player"),
-            round_number: cell.data("round"),
-            score: null,
-          }),
-          success: function () {
-            cell.removeClass("editing");
-            cell.text("");
-            updateTotals();
-            highlightDealer();
-          },
-          error: function (xhr) {
-            AppModal.error('Error', xhr.responseJSON?.error || 'Failed to delete score');
-            cell.removeClass("editing");
-            cell.text(originalValue || "");
-          },
-        });
+        cell.text(scoreVal === null || scoreVal === "" ? "" : scoreVal);
+      }
+      if (leaveEditing !== false || !cell.hasClass("editing")) {
+        updateTotals();
+        highlightDealer();
       }
     }
 
-    $(".score-cell").on("click", function () {
-      const cell = $(this);
-      if (!cell.hasClass("editing")) {
-        const currentValue = cell.text().trim();
-        cell.data("original-value", currentValue);
-        cell.addClass("editing");
-        cell.html(`<input type="number"
-                class="form-control form-control-sm border-0"
-                value="${currentValue}"
-                inputmode="numeric"
-                pattern="[0-9]*"
-                style="width: 100%; text-align: center; background: transparent; box-shadow: none;">`);
-        const input = cell.find("input");
-        input.focus();
-        input.select();
+    function saveCellScore(cell, rawValue, opts) {
+      opts = opts || {};
+      var leaveEditing = opts.leaveEditing !== false;
+      var payload = scorePayload(cell, rawValue);
+      var displayVal = payload.score;
+      var originalValue = opts.originalValue;
+      var lastKey = cell.data("last-saved-key");
+      var thisKey = payload.player_id + ":" + payload.round_number + ":" + String(payload.score);
+      if (lastKey === thisKey && !opts.force) return;
 
-        input.on("blur", function () {
-          updateScore(cell, input.val(), currentValue);
-        });
+      if (opts.syncDom !== false) {
+        applyScoreToCell(cell, displayVal, leaveEditing);
+      }
 
-        input.on("input", function () {
-          clearTimeout(updateTimer);
-          updateTimer = setTimeout(function () {
-            updateScore(cell, input.val(), currentValue);
-          }, 4000);
-        });
-
-        input.on("keypress", function (e) {
-          if (e.which === 13) {
-            updateScore(cell, input.val(), currentValue);
+      if (window.ScoreSave) {
+        ScoreSave.save(payload, {
+          showError: !!leaveEditing,
+          success: function () {
+            cell.data("last-saved-key", thisKey);
+          },
+          error: function (xhr) {
+            if (leaveEditing) {
+              cell.removeClass("editing");
+              cell.text(originalValue || "");
+              updateTotals();
+              highlightDealer();
+              if (xhr && xhr.status !== 401) {
+                AppModal.error("Error", (xhr.responseJSON && xhr.responseJSON.error) || "Failed to save score");
+              }
+            }
           }
         });
+        return;
       }
+
+      $.ajax({
+        url: "/api/scores",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify(payload),
+        success: function () { cell.data("last-saved-key", thisKey); },
+        error: function (xhr) {
+          if (leaveEditing) {
+            cell.removeClass("editing");
+            cell.text(originalValue || "");
+            updateTotals();
+            AppModal.error("Error", (xhr.responseJSON && xhr.responseJSON.error) || "Failed to save score");
+          }
+        }
+      });
+    }
+
+    function updateScore(cell, newValue, originalValue) {
+      if (!cell.hasClass("editing")) return;
+      clearTimeout(updateTimer);
+      saveCellScore(cell, newValue, { leaveEditing: true, originalValue: originalValue, syncDom: true });
+    }
+
+    $(document).off("click.fcScore", ".score-cell").on("click.fcScore", ".score-cell", function () {
+      const cell = $(this);
+      if (cell.hasClass("editing")) return;
+      const currentValue = cell.text().trim();
+      cell.data("original-value", currentValue);
+      cell.addClass("editing");
+      cell.html(
+        '<input type="number" class="form-control form-control-sm border-0" value="' +
+          currentValue +
+          '" inputmode="numeric" pattern="[0-9]*" style="width:100%;text-align:center;background:transparent;box-shadow:none;">'
+      );
+      const input = cell.find("input");
+      input.focus();
+      input.select();
+
+      input.on("blur", function () {
+        if (cell.hasClass("editing")) updateScore(cell, input.val(), currentValue);
+      });
+
+      input.on("input", function () {
+        clearTimeout(updateTimer);
+        var val = input.val();
+        updateTimer = setTimeout(function () {
+          if (!cell.hasClass("editing")) return;
+          // Autosave while typing; keep the field open so the round can finish.
+          saveCellScore(cell, val, { leaveEditing: false, originalValue: currentValue, syncDom: true });
+        }, 800);
+      });
+
+      input.on("keypress", function (e) {
+        if (e.which === 13) {
+          e.preventDefault();
+          updateScore(cell, input.val(), currentValue);
+        }
+      });
     });
 
     function updateTotals() {
@@ -1473,6 +1534,7 @@ content %}
 
           if (countdown <= 0) {
             clearInterval(countdownInterval);
+            // No game_id: stay paused on the landing page.
             redirectToFiveCrowns();
           }
         }, 1000);
@@ -1483,12 +1545,13 @@ content %}
       });
 
       function showOtherUserResumedModal() {
+        var boardId = $(".game-board").data("game-id");
         const modalHtml = `
           <div class="modal fade" id="otherUserResumedModal" data-bs-backdrop="static" data-bs-keyboard="false">
             <div class="modal-dialog modal-dialog-centered">
               <div class="modal-content">
                 <div class="modal-header bg-success text-white">
-                  <h5 class="modal-title">▶️ Game Resumed by Another Player</h5>
+                  <h5 class="modal-title">Game Resumed by Another Player</h5>
                 </div>
                 <div class="modal-body text-center">
                   <p class="mb-3">Another player has resumed this game.</p>
@@ -1498,7 +1561,7 @@ content %}
                   </div>
                 </div>
                 <div class="modal-footer">
-                  <button type="button" class="btn btn-primary" onclick="redirectToFiveCrowns()">
+                  <button type="button" class="btn btn-primary" onclick="redirectToFiveCrowns(` + boardId + `)">
                     OK, Go Now
                   </button>
                 </div>
@@ -1524,7 +1587,7 @@ content %}
 
           if (countdown <= 0) {
             clearInterval(countdownInterval);
-            redirectToFiveCrowns();
+            redirectToFiveCrowns(boardId);
           }
         }, 1000);
       }
@@ -1702,6 +1765,7 @@ content %}
 
     $("#pauseGame").click(function () {
       var gameId = $(".game-board").data("game-id");
+      if (window.ScoreSave) ScoreSave.flush();
       $.ajax({
         url: "/api/games/five-crowns/pause",
         method: "POST",
@@ -1709,6 +1773,9 @@ content %}
         data: JSON.stringify({ game_id: gameId }),
         success: function () {
           showGamePausedModal();
+        },
+        error: function (xhr) {
+          AppModal.error("Error", (xhr.responseJSON && xhr.responseJSON.error) || "Failed to pause game");
         },
       });
     });
@@ -1723,7 +1790,7 @@ content %}
               </div>
               <div class="modal-body text-center">
                 <p class="mb-3">The game has been paused successfully.</p>
-                <p>Returning to main page in <span id="countdown">3</span> seconds...</p>
+                <p>Returning to Five Crowns in <span id="countdown">3</span> seconds...</p>
                 <div class="progress">
                   <div class="progress-bar bg-warning" role="progressbar" style="width: 100%" id="progressBar"></div>
                 </div>
@@ -1755,21 +1822,23 @@ content %}
 
         if (countdown <= 0) {
           clearInterval(countdownInterval);
+          // Landing page with no game_id so pause stays paused.
           redirectToFiveCrowns();
         }
       }, 1000);
     }
 
     var pendingFiveCrownsGameId = null;
-    function redirectToFiveCrowns(gameId) {
-      gameId = gameId || pendingFiveCrownsGameId || $(".game-board").data("game-id");
+    // Only pass gameId after a successful Resume. Pause must omit it.
+    window.redirectToFiveCrowns = function (gameId) {
+      gameId = gameId || pendingFiveCrownsGameId;
       pendingFiveCrownsGameId = null;
       if (gameId) {
         window.location.href = "{{ url_for('main.five_crowns') }}?game_id=" + gameId;
       } else {
         window.location.href = "/game/five-crowns";
       }
-    }
+    };
 
     $(".resume-game").click(function () {
       const gameId = $(this).data("game-id");
@@ -1778,7 +1847,11 @@ content %}
         url: `/api/games/five-crowns/resume/${gameId}`,
         method: "POST",
         success: function () {
-          showGameResumedModal();
+          showGameResumedModal(gameId);
+        },
+        error: function (xhr) {
+          pendingFiveCrownsGameId = null;
+          AppModal.error("Error", (xhr.responseJSON && xhr.responseJSON.error) || "Failed to resume game");
         },
       });
     });
@@ -1795,13 +1868,14 @@ content %}
       });
     });
 
-    function showGameResumedModal() {
+    function showGameResumedModal(gameId) {
+      pendingFiveCrownsGameId = gameId;
       const modalHtml = `
         <div class="modal fade" id="gameResumedModal" data-bs-backdrop="static" data-bs-keyboard="false">
           <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
               <div class="modal-header bg-success text-white">
-                <h5 class="modal-title">▶️ Game Resumed</h5>
+                <h5 class="modal-title">Game Resumed</h5>
               </div>
               <div class="modal-body text-center">
                 <p class="mb-3">The game has been resumed successfully.</p>
@@ -1811,7 +1885,7 @@ content %}
                 </div>
               </div>
               <div class="modal-footer">
-                <button type="button" class="btn btn-primary" onclick="redirectToFiveCrowns()">
+                <button type="button" class="btn btn-primary" onclick="redirectToFiveCrowns(` + gameId + `)">
                   OK, Go Now
                 </button>
               </div>
@@ -1837,7 +1911,7 @@ content %}
 
         if (countdown <= 0) {
           clearInterval(countdownInterval);
-          redirectToFiveCrowns();
+          redirectToFiveCrowns(gameId);
         }
       }, 1000);
     }

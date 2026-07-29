@@ -3,11 +3,26 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import session, request, redirect, url_for, flash, g
+from flask import session, request, redirect, url_for, flash, g, jsonify
 from email_validator import validate_email as validate_email_format, EmailNotValidError
 import psycopg2.extras
 from .database import get_db_connection
 from config import Config
+
+
+def _wants_json_auth_error():
+    """API / XHR callers need 401 JSON, not an HTML login redirect."""
+    if request.path.startswith('/api/'):
+        return True
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return True
+    ctype = (request.content_type or '').lower()
+    if request.method in ('POST', 'PUT', 'PATCH', 'DELETE') and 'application/json' in ctype:
+        return True
+    accept = (request.headers.get('Accept') or '').lower()
+    if 'application/json' in accept and 'text/html' not in accept:
+        return True
+    return False
 
 class AuthenticationError(Exception):
     """Custom exception for authentication errors"""
@@ -500,6 +515,11 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
+            if _wants_json_auth_error():
+                return jsonify({
+                    'error': 'Please log in again.',
+                    'login_required': True,
+                }), 401
             flash('Please log in to access this page.', 'error')
             return redirect(url_for('auth.login'))
         
@@ -507,6 +527,11 @@ def login_required(f):
         user = load_current_user()
         if not user:
             session.clear()
+            if _wants_json_auth_error():
+                return jsonify({
+                    'error': 'Your session has expired. Please log in again.',
+                    'login_required': True,
+                }), 401
             flash('Your session has expired. Please log in again.', 'error')
             return redirect(url_for('auth.login'))
         
@@ -518,11 +543,18 @@ def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
+            if _wants_json_auth_error():
+                return jsonify({
+                    'error': 'Please log in again.',
+                    'login_required': True,
+                }), 401
             flash('Please log in to access this page.', 'error')
             return redirect(url_for('auth.login'))
         
         user = load_current_user()
         if not user or user['role'] != 'super_admin':
+            if _wants_json_auth_error():
+                return jsonify({'error': 'Admin privileges required.'}), 403
             flash('Admin privileges required.', 'error')
             return redirect(url_for('main.dashboard'))
         

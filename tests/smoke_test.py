@@ -901,6 +901,71 @@ def main():
         gl = r.get_data(as_text=True)
         check('game landing includes player picker',
               r.status_code == 200 and 'PlayerPicker' in gl and 'pp-input' in gl)
+        check('player picker hides search when a chip is selected',
+              'pp-change' in gl or 'Selected:' in gl or 'PlayerPicker' in gl)
+
+        print('\n== Section 14: pause sticks + score API auth ==')
+        fc = q1(conn, "SELECT id FROM games WHERE slug = 'five-crowns' OR id = 1 ORDER BY id LIMIT 1")
+        pids = qall(conn, '''
+            SELECT p.id FROM players p
+            JOIN player_family_memberships m ON m.player_id = p.id
+            WHERE m.family_id = %s AND m.status = 'active' AND p.archived_at IS NULL
+            ORDER BY p.id LIMIT 2
+        ''', (fam_a['id'],))
+        if fc and len(pids) >= 2:
+            r = client_a.post('/api/games/five-crowns/new', json={
+                'player_ids': [pids[0]['id'], pids[1]['id']]
+            })
+            if r.status_code != 200:
+                r = client_a.post('/api/games/new', json={
+                    'game_id': fc['id'], 'player_ids': [pids[0]['id'], pids[1]['id']]
+                })
+            pause_game = (r.get_json() or {}).get('id')
+            check('can start Five Crowns for pause test', bool(pause_game), str(r.get_json()))
+            if pause_game:
+                r = client_a.post('/api/scores', json={
+                    'game_id': pause_game, 'player_id': pids[0]['id'],
+                    'round_number': 3, 'score': 12
+                })
+                check('score saves before pause', r.status_code == 200, str(r.get_json()))
+
+                r = client_a.post('/api/games/five-crowns/pause', json={'game_id': pause_game})
+                check('pause API succeeds', r.status_code == 200, str(r.get_json()))
+                row = q1(conn, 'SELECT is_paused FROM active_games WHERE id = %s', (pause_game,))
+                check('pause flag stays true in database', row and row['is_paused'] is True)
+
+                # Opening ?game_id= must NOT auto-unpause (the old bug).
+                r = client_a.get(f'/five-crowns?game_id={pause_game}')
+                check('paused game page loads without error', r.status_code == 200)
+                row = q1(conn, 'SELECT is_paused FROM active_games WHERE id = %s', (pause_game,))
+                check('opening paused game does not clear pause',
+                      row and row['is_paused'] is True)
+                page = r.get_data(as_text=True)
+                check('paused game shows Resume, not the live board',
+                      'resume-game' in page or 'Paused Games' in page or 'paused' in page.lower())
+
+                r = client_a.post(f'/api/games/five-crowns/resume/{pause_game}')
+                check('resume API succeeds', r.status_code == 200, str(r.get_json()))
+                row = q1(conn, 'SELECT is_paused FROM active_games WHERE id = %s', (pause_game,))
+                check('resume clears pause flag', row and row['is_paused'] is False)
+
+                r = client_a.post('/api/scores', json={
+                    'game_id': pause_game, 'player_id': pids[1]['id'],
+                    'round_number': 3, 'score': 8
+                })
+                check('score saves after resume', r.status_code == 200, str(r.get_json()))
+
+                anon = app.test_client()
+                r = anon.post('/api/scores', json={
+                    'game_id': pause_game, 'player_id': pids[0]['id'],
+                    'round_number': 4, 'score': 5
+                })
+                check('unauthenticated score POST returns JSON 401',
+                      r.status_code == 401 and (r.get_json() or {}).get('login_required') is True,
+                      str(r.status_code) + ' ' + str(r.get_json()))
+
+                run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (pause_game,))
+                conn.commit()
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')

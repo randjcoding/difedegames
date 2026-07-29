@@ -246,10 +246,12 @@ def game_page(slug, game_id):
             conn, specific_game_id, user,
             extra_where='ag.is_complete = FALSE AND ag.game_id = %s',
             extra_params=[game_id])
+        # Do not auto-unpause on GET. Pause must stick until Resume is used
+        # (/api/games/.../resume). Opening ?game_id= for a paused session used
+        # to silently clear is_paused and made Pause look broken. Keep the
+        # board closed so the paused list / Resume button is what people use.
         if active_game and active_game.get('is_paused'):
-            execute_modify(conn, 'UPDATE active_games SET is_paused = FALSE WHERE id = %s', (active_game['id'],))
-            conn.commit()
-            active_game = execute_query_one(conn, 'SELECT * FROM active_games WHERE id = %s', (active_game['id'],))
+            active_game = None
     
     paused_games = execute_query(conn, f'''
         SELECT ag.id, ag.start_time, ag.custom_game_name,
@@ -4449,16 +4451,16 @@ def pause_five_crowns_game():
                 ORDER BY ag.start_time DESC LIMIT 1
             ''', tuple(access_params))
         
-        if game:
-            execute_modify(conn, '''
-                UPDATE active_games 
-                SET is_paused = TRUE 
-                WHERE id = %s
-            ''', (game['id'],))
-            conn.commit()
-            
-            broadcast_game_paused(game['id'])
-        
+        if not game:
+            return jsonify({'error': 'Game not found'}), 404
+
+        execute_modify(conn, '''
+            UPDATE active_games
+            SET is_paused = TRUE
+            WHERE id = %s
+        ''', (game['id'],))
+        conn.commit()
+        broadcast_game_paused(game['id'])
         return jsonify({'success': True})
     except Exception as e:
         conn.rollback()

@@ -850,6 +850,109 @@
         error: function(title, body) { this.alert(title, body, 'danger'); },
         warning: function(title, body) { this.alert(title, body, 'warning'); }
     };
+
+    // Shared score POST with idle/reconnect retry. Used by game boards so a phone
+    // sleep or brief network drop does not lose the last typed score.
+    window.ScoreSave = (function() {
+      var queue = [];
+      var flushing = false;
+      var authWarned = false;
+
+      function keyOf(p) {
+        return String(p.game_id) + ':' + String(p.player_id) + ':' + String(p.round_number);
+      }
+
+      function enqueue(payload) {
+        var k = keyOf(payload);
+        queue = queue.filter(function(item) { return keyOf(item) !== k; });
+        queue.push(payload);
+      }
+
+      function postOne(payload) {
+        return $.ajax({
+          url: '/api/scores',
+          method: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify(payload)
+        });
+      }
+
+      function flush() {
+        if (flushing || !queue.length) return;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+        flushing = true;
+        var batch = queue.slice();
+        var i = 0;
+        function next() {
+          if (i >= batch.length) {
+            flushing = false;
+            if (queue.length) flush();
+            return;
+          }
+          var payload = batch[i++];
+          postOne(payload)
+            .done(function() {
+              queue = queue.filter(function(item) { return keyOf(item) !== keyOf(payload); });
+              next();
+            })
+            .fail(function(xhr) {
+              if (xhr && xhr.status === 401) {
+                if (!authWarned && window.AppModal) {
+                  authWarned = true;
+                  AppModal.error('Session expired', 'Please log in again, then reopen the game. Pending scores will retry after you are online.');
+                }
+                flushing = false;
+                return;
+              }
+              // Keep in queue for later retry (network blip / idle wake).
+              next();
+            });
+        }
+        next();
+      }
+
+      function save(payload, opts) {
+        opts = opts || {};
+        enqueue(payload);
+        return postOne(payload)
+          .done(function() {
+            queue = queue.filter(function(item) { return keyOf(item) !== keyOf(payload); });
+            if (typeof opts.success === 'function') opts.success();
+          })
+          .fail(function(xhr) {
+            if (xhr && xhr.status === 401) {
+              if (!authWarned && window.AppModal) {
+                authWarned = true;
+                AppModal.error('Session expired', 'Please log in again, then reopen the game to keep scoring.');
+              }
+              if (typeof opts.error === 'function') {
+                opts.error(xhr);
+              }
+              return;
+            }
+            // Stay queued; retry on online/visibility. Only surface hard errors
+            // when the caller asked (e.g. leaving edit mode).
+            if (typeof opts.error === 'function' && opts.showError) {
+              opts.error(xhr);
+            }
+          });
+      }
+
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible') flush();
+      });
+      window.addEventListener('online', flush);
+      setInterval(flush, 15000);
+
+      return { save: save, flush: flush, pendingCount: function() { return queue.length; } };
+    })();
+
+    $(document).ajaxError(function(_event, xhr) {
+      if (xhr && xhr.status === 401 && xhr.responseJSON && xhr.responseJSON.login_required) {
+        // ScoreSave / individual handlers show a clearer message for scores.
+        return;
+      }
+    });
     </script>
 
     {% if current_user %}

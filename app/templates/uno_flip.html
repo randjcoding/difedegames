@@ -1759,7 +1759,7 @@ content %}
     let gameCompletedByCurrentUser = false;
 
     window.redirectToUnoFlip = function (gameId) {
-      gameId = gameId || $(".game-board").data("game-id");
+      // Only pass gameId after Resume. Pause must omit it so the game stays paused.
       if (gameId) {
         window.location.href = "{{ url_for('main.uno_flip') }}?game_id=" + gameId;
       } else {
