@@ -220,8 +220,8 @@ content %}
                   <td class="details-control"></td>
                   <td data-order="{{ game.game_number }}" title="ID: {{ game.game_id }}">{{ game.game_name }} #{{ game.game_number }}</td>
                   <td>{{ game.game_name }}</td>
-                  <td data-order="{{ game.start_time.strftime('%Y%m%d%H%M') }}">
-                    {{ game.start_time.strftime('%Y-%m-%d %H:%M') }}
+                  <td data-order="{{ game.start_time.strftime('%Y%m%d%H%M') if game.start_time else '' }}">
+                    {% if game.start_time %}<span data-utc="{{ game.start_time|utc_iso }}">{{ game.start_time.strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
                   </td>
                   <td>{{ game.player_names }}</td>
                   <td>{{ game.winner_display }}</td>

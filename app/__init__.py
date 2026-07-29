@@ -77,6 +77,17 @@ def create_app():
     def inject_auth():
         from app.auth import get_current_user
         return dict(current_user=get_current_user())
+
+    @app.template_filter('utc_iso')
+    def utc_iso_filter(dt):
+        """Emit a UTC ISO string so the browser can show the user's local time.
+        DB timestamps are stored/naive as UTC (Postgres TimeZone = Etc/UTC)."""
+        if not dt:
+            return ''
+        try:
+            return dt.strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+        except Exception:
+            return str(dt)
     
     # Add before_request handler for session management
     @app.before_request
@@ -90,4 +101,4 @@ def create_app():
         if random.randint(1, 100) == 1:  # 1% chance to run cleanup
             SessionManager.cleanup_expired_sessions()
     
-    return app 
+    return app

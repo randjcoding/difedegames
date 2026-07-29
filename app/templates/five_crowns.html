@@ -16,7 +16,7 @@ content %}
           <div class="small">
             <h6 class="mb-1">Game #{{ game.id }}</h6>
             <p class="mb-1 text-muted">Players: {{ game.player_names }}</p>
-            <small>Started: {{ game.start_time }}</small>
+            <small>Started: <span data-utc="{{ game.start_time|utc_iso }}">{{ game.start_time }}</span></small>
           </div>
           <div>
             <button
@@ -24,6 +24,12 @@ content %}
               data-game-id="{{ game.id }}"
             >
               Resume
+            </button>
+            <button
+              class="btn btn-sm btn-outline-danger delete-paused-game me-2"
+              data-game-id="{{ game.id }}"
+            >
+              Delete
             </button>
             <button
               class="btn btn-sm btn-danger complete-paused-game"
@@ -63,8 +69,7 @@ content %}
             </p>
             {% endif %}
             <small class="text-muted"
-              >Completed: {{ game.start_time.strftime('%Y-%m-%d %H:%M') if
-              game.start_time else 'Unknown' }}</small
+              >Completed: {% if game.start_time %}<span data-utc="{{ game.start_time|utc_iso }}">{{ game.start_time.strftime('%Y-%m-%d %H:%M') }}</span>{% else %}Unknown{% endif %}</small
             >
           </div>
         </div>
@@ -214,6 +219,9 @@ content %}
       </button>
       <button id="completeGame" class="btn btn-warning btn-sm">
         <strong>Complete</strong>
+      </button>
+      <button id="deleteGame" class="btn btn-outline-danger btn-sm" data-game-id="{{ active_game.id }}">
+        <strong>Delete</strong>
       </button>
     </div>
   </div>
@@ -1866,6 +1874,18 @@ content %}
           error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to delete game"); }
         });
       });
+    });
+
+    $(".delete-paused-game").click(function () {
+      var gid = $(this).data("game-id");
+      AppModal.confirm("Delete Game", "Permanently delete this paused game and its scores? This cannot be undone.", function () {
+        $.ajax({
+          url: "/api/games/delete/" + gid,
+          method: "POST",
+          success: function () { window.location.reload(); },
+          error: function (xhr) { AppModal.error("Error", xhr.responseJSON?.error || "Failed to delete game"); }
+        });
+      }, { confirmText: "Delete" });
     });
 
     function showGameResumedModal(gameId) {

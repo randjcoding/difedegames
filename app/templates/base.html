@@ -747,6 +747,40 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 
     <script>
+    /* ── Local times (DB stores UTC; show each user's browser timezone) ── */
+    window.parseUtcDate = function(raw) {
+      if (!raw) return null;
+      var s = String(raw).trim();
+      if (!s) return null;
+      if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+        s = s.replace(' ', 'T');
+        if (s.indexOf('T') === -1) s = s.replace(/^(\d{4}-\d{2}-\d{2})/, '$1T00:00:00');
+        s += 'Z';
+      }
+      var d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    window.formatLocalTimes = function(root) {
+      var scope = root || document;
+      scope.querySelectorAll('[data-utc]').forEach(function(el) {
+        var d = window.parseUtcDate(el.getAttribute('data-utc'));
+        if (!d) return;
+        var mode = el.getAttribute('data-utc-format') || 'datetime';
+        var opts = mode === 'date'
+          ? { dateStyle: 'medium' }
+          : mode === 'time'
+            ? { timeStyle: 'short' }
+            : { dateStyle: 'medium', timeStyle: 'short' };
+        el.textContent = d.toLocaleString(undefined, opts);
+        try {
+          el.title = d.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' });
+        } catch (e) { /* older browsers */ }
+      });
+    };
+    document.addEventListener('DOMContentLoaded', function() {
+      window.formatLocalTimes();
+    });
+
     /* ── Theme Manager ── */
     (function() {
       var saved = localStorage.getItem('df_theme') || 'difede-dark';

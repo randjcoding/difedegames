@@ -285,13 +285,27 @@
           {{ ag.player_names }}
         </div>
         <div class="started-label">
-          <i class="fas fa-clock me-1"></i>Started {{ ag.start_time.strftime('%b %d, %Y at %I:%M %p') if ag.start_time else 'Unknown' }}
+          <i class="fas fa-clock me-1"></i>Started
+          {% if ag.start_time %}
+          <span data-utc="{{ ag.start_time|utc_iso }}">{{ ag.start_time.strftime('%b %d, %Y at %I:%M %p') }}</span>
+          {% else %}Unknown{% endif %}
           &middot; {{ ag.player_count }} player{{ 's' if ag.player_count != 1 else '' }}
         </div>
       </div>
-      <a href="{{ game_url }}?game_id={{ ag.id }}" class="btn btn-resume">
-        <i class="fas fa-play me-1"></i> Resume
-      </a>
+      <div class="d-flex gap-2 flex-wrap">
+        {% if ag.is_paused %}
+        <button type="button" class="btn btn-resume gl-resume-btn" data-game-id="{{ ag.id }}" data-paused="1">
+          <i class="fas fa-play me-1"></i> Resume
+        </button>
+        {% else %}
+        <a href="{{ game_url }}?game_id={{ ag.id }}" class="btn btn-resume">
+          <i class="fas fa-play me-1"></i> Continue
+        </a>
+        {% endif %}
+        <button type="button" class="btn btn-sm btn-outline-danger gl-delete-btn" data-game-id="{{ ag.id }}">
+          Delete
+        </button>
+      </div>
     </div>
     {% endfor %}
   </div>
@@ -580,6 +594,50 @@
   });
   $("#glCustomTarget").on("input", function() {
     $("#glTargetScore").val($(this).val());
+  });
+
+  $(".gl-resume-btn").click(function() {
+    var gid = $(this).data("game-id");
+    var $btn = $(this);
+    $btn.prop("disabled", true);
+    $.ajax({
+      url: "/api/games/resume/" + gid,
+      method: "POST",
+      success: function() {
+        window.location.href = GAME_URL + "?game_id=" + gid;
+      },
+      error: function(xhr) {
+        $btn.prop("disabled", false);
+        if (typeof AppModal !== "undefined") {
+          AppModal.error("Error", (xhr.responseJSON && xhr.responseJSON.error) || "Failed to resume game");
+        } else {
+          alert((xhr.responseJSON && xhr.responseJSON.error) || "Failed to resume game");
+        }
+      }
+    });
+  });
+
+  $(".gl-delete-btn").click(function() {
+    var gid = $(this).data("game-id");
+    var doDelete = function() {
+      $.ajax({
+        url: "/api/games/delete/" + gid,
+        method: "POST",
+        success: function() { window.location.reload(); },
+        error: function(xhr) {
+          if (typeof AppModal !== "undefined") {
+            AppModal.error("Error", (xhr.responseJSON && xhr.responseJSON.error) || "Failed to delete game");
+          } else {
+            alert((xhr.responseJSON && xhr.responseJSON.error) || "Failed to delete game");
+          }
+        }
+      });
+    };
+    if (typeof AppModal !== "undefined") {
+      AppModal.confirm("Delete Game", "Permanently delete this game and its scores? This cannot be undone.", doDelete, { confirmText: "Delete" });
+    } else if (confirm("Delete this game?")) {
+      doDelete();
+    }
   });
 })();
 </script>

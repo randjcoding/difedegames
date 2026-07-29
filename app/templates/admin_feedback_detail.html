@@ -57,7 +57,7 @@
         &middot; From {{ item.first_name }} {{ item.last_name }}
         {% if item.email %}({{ item.email }}){% endif %}
         {% if item.family_name %}&middot; {{ item.family_name }}{% endif %}
-        &middot; {{ item.created_at.strftime('%b %d, %Y %I:%M %p') if item.created_at else '' }}
+        &middot; {% if item.created_at %}<span data-utc="{{ item.created_at|utc_iso }}">{{ item.created_at.strftime('%b %d, %Y %I:%M %p') }}</span>{% endif %}
       </div>
       <div class="afd-body mb-3">{{ item.body }}</div>
 
@@ -79,7 +79,7 @@
         <div style="font-size:0.8rem;color:#6c757d;margin-bottom:0.25rem;">
           <strong>{{ r.first_name }} {{ r.last_name }}</strong>
           {% if r.role == 'super_admin' %}(Admin){% endif %}
-          &middot; {{ r.created_at.strftime('%b %d, %Y %I:%M %p') if r.created_at else '' }}
+          &middot; {% if r.created_at %}<span data-utc="{{ r.created_at|utc_iso }}">{{ r.created_at.strftime('%b %d, %Y %I:%M %p') }}</span>{% endif %}
         </div>
         {{ r.body }}
       </div>
@@ -105,8 +105,8 @@
           <div style="font-size:0.8rem;color:#6c757d;">{{ v.email }}</div>
         </div>
         <div style="font-size:0.8rem;color:#6c757d;text-align:right;">
-          First seen {{ v.first_seen_at.strftime('%b %d, %Y %I:%M %p') if v.first_seen_at else '' }}<br>
-          Last seen {{ v.last_seen_at.strftime('%b %d, %Y %I:%M %p') if v.last_seen_at else '' }}
+          First seen {% if v.first_seen_at %}<span data-utc="{{ v.first_seen_at|utc_iso }}">{{ v.first_seen_at.strftime('%b %d, %Y %I:%M %p') }}</span>{% endif %}<br>
+          Last seen {% if v.last_seen_at %}<span data-utc="{{ v.last_seen_at|utc_iso }}">{{ v.last_seen_at.strftime('%b %d, %Y %I:%M %p') }}</span>{% endif %}
         </div>
       </div>
       {% endfor %}

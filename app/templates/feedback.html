@@ -97,7 +97,7 @@
           <div style="font-weight:600;">{{ item.subject }}</div>
           <div style="font-size:0.8rem;color:var(--df-muted);">
             {{ categories.get(item.category, item.category) }}
-            &middot; {{ item.created_at.strftime('%b %d, %Y') if item.created_at else '' }}
+            &middot; {% if item.created_at %}<span data-utc="{{ item.created_at|utc_iso }}" data-utc-format="date">{{ item.created_at.strftime('%b %d, %Y') }}</span>{% endif %}
             {% if item.reply_count %}&middot; {{ item.reply_count }} repl{{ 'y' if item.reply_count == 1 else 'ies' }}{% endif %}
           </div>
         </div>

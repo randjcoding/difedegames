@@ -416,7 +416,9 @@ endblock %} {% block content %}
     document.querySelectorAll('.game-time').forEach(function(el) {
       var startStr = el.getAttribute('data-start');
       if (!startStr) return;
-      var start = new Date(startStr);
+      // DB times are UTC; parse as UTC so "mins ago" matches the user's clock.
+      var start = window.parseUtcDate ? window.parseUtcDate(startStr) : new Date(startStr);
+      if (!start) return;
       var now = new Date();
       var diffMs = now - start;
       var diffMins = Math.floor(diffMs / 60000);
@@ -432,6 +434,7 @@ endblock %} {% block content %}
       } else {
         el.textContent = diffDays + ' day' + (diffDays !== 1 ? 's' : '') + ' ago';
       }
+      try { el.title = start.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' }); } catch (e) {}
     });
   }
 

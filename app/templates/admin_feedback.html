@@ -75,7 +75,7 @@
           <div style="font-size:0.8rem;color:#6c757d;">
             {{ categories.get(item.category, item.category) }}
             &middot; {{ item.first_name }} {{ item.last_name }}
-            &middot; {{ item.created_at.strftime('%b %d, %Y %I:%M %p') if item.created_at else '' }}
+            &middot; {% if item.created_at %}<span data-utc="{{ item.created_at|utc_iso }}">{{ item.created_at.strftime('%b %d, %Y %I:%M %p') }}</span>{% endif %}
             &middot; Seen by {{ item.seen_count }}
             {% if item.reply_count %}&middot; {{ item.reply_count }} repl{{ 'y' if item.reply_count == 1 else 'ies' }}{% endif %}
           </div>

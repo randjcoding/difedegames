@@ -27,7 +27,7 @@
       <span class="fd-status {{ item.status }}">{{ statuses.get(item.status, item.status) }}</span>
     </div>
     <div class="card-body">
-      <div class="fd-meta">{{ categories.get(item.category, item.category) }} &middot; {{ item.created_at.strftime('%b %d, %Y %I:%M %p') if item.created_at else '' }}</div>
+      <div class="fd-meta">{{ categories.get(item.category, item.category) }} &middot; {% if item.created_at %}<span data-utc="{{ item.created_at|utc_iso }}">{{ item.created_at.strftime('%b %d, %Y %I:%M %p') }}</span>{% endif %}</div>
       <div class="fd-body">{{ item.body }}</div>
     </div>
   </div>
@@ -43,7 +43,7 @@
         <div class="fd-meta">
           <strong>{{ r.first_name }} {{ r.last_name }}</strong>
           {% if r.role == 'super_admin' %}(Admin){% endif %}
-          &middot; {{ r.created_at.strftime('%b %d, %Y %I:%M %p') if r.created_at else '' }}
+          &middot; {% if r.created_at %}<span data-utc="{{ r.created_at|utc_iso }}">{{ r.created_at.strftime('%b %d, %Y %I:%M %p') }}</span>{% endif %}
         </div>
         {{ r.body }}
       </div>

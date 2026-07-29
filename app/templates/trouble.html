@@ -16,7 +16,7 @@ content %}
           <div class="small">
             <h6 class="mb-1">Game #{{ game.id }}</h6>
             <p class="mb-1 text-muted">Players: {{ game.player_names }}</p>
-            <small>Started: {{ game.start_time }}</small>
+            <small>Started: <span data-utc="{{ game.start_time|utc_iso }}">{{ game.start_time }}</span></small>
           </div>
           <div>
             <button
@@ -65,8 +65,7 @@ content %}
             </p>
             {% endif %}
             <small class="text-muted"
-              >Completed: {{ game.start_time.strftime('%Y-%m-%d %H:%M') if
-              game.start_time else 'Unknown' }}</small
+              >Completed: {% if game.start_time %}<span data-utc="{{ game.start_time|utc_iso }}">{{ game.start_time.strftime('%Y-%m-%d %H:%M') }}</span>{% else %}Unknown{% endif %}</small
             >
           </div>
         </div>
