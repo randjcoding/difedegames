@@ -4349,12 +4349,14 @@ def complete_five_crowns_game():
                         p.last_name,
                         COALESCE(p.display_name, p.first_name) as display_name,
                         dc.name_count IS NOT NULL as has_duplicate,
-                        SUM(gs.score) as total_score,
-                        RANK() OVER (ORDER BY SUM(gs.score) ASC) as rank
-                    FROM players p
-                    JOIN game_scores gs ON p.id = gs.player_id
+                        COALESCE(SUM(gs.score), 0) as total_score,
+                        RANK() OVER (ORDER BY COALESCE(SUM(gs.score), 0) ASC) as rank
+                    FROM active_game_players agp
+                    JOIN players p ON p.id = agp.player_id
+                    LEFT JOIN game_scores gs
+                      ON gs.player_id = p.id AND gs.active_game_id = agp.active_game_id
                     LEFT JOIN DisplayNameCounts dc ON COALESCE(p.display_name, p.first_name) = dc.display_name
-                    WHERE gs.active_game_id = %s
+                    WHERE agp.active_game_id = %s
                     GROUP BY p.id, p.first_name, p.last_name, p.display_name, dc.name_count
                 )
                 SELECT *

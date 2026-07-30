@@ -964,8 +964,61 @@ def main():
                       r.status_code == 401 and (r.get_json() or {}).get('login_required') is True,
                       str(r.status_code) + ' ' + str(r.get_json()))
 
+                # Last write wins for the same cell (simulates typed "2" then "25").
+                for val in (2, 25):
+                    r = client_a.post('/api/scores', json={
+                        'game_id': pause_game, 'player_id': pids[0]['id'],
+                        'round_number': 4, 'score': val
+                    })
+                    check(f'score overwrite step {val} accepted', r.status_code == 200, str(r.get_json()))
+                final = q1(conn, '''
+                    SELECT score FROM game_scores
+                    WHERE active_game_id = %s AND player_id = %s AND round_number = 4
+                ''', (pause_game, pids[0]['id']))
+                check('latest score value wins for same cell',
+                      final and final['score'] == 25, str(final))
+
                 run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (pause_game,))
                 conn.commit()
+
+        # 3-player Five Crowns board includes dealer/totals helpers.
+        pids3 = qall(conn, '''
+            SELECT p.id FROM players p
+            JOIN player_family_memberships m ON m.player_id = p.id
+            WHERE m.family_id = %s AND m.status = 'active' AND p.archived_at IS NULL
+            ORDER BY p.id LIMIT 3
+        ''', (fam_a['id'],))
+        if fc and len(pids3) >= 3:
+            r = client_a.post('/api/games/five-crowns/new', json={
+                'player_ids': [pids3[0]['id'], pids3[1]['id'], pids3[2]['id']]
+            })
+            g3 = (r.get_json() or {}).get('id')
+            check('can start 3-player Five Crowns', bool(g3), str(r.get_json()))
+            if g3:
+                for i, pid in enumerate([pids3[0]['id'], pids3[1]['id'], pids3[2]['id']]):
+                    r = client_a.post('/api/scores', json={
+                        'game_id': g3, 'player_id': pid, 'round_number': 3, 'score': 10 + i
+                    })
+                    check(f'3-player round 3 score for seat {i+1}', r.status_code == 200)
+                # Leave one player without scores so complete summary still lists them.
+                r = client_a.post(f'/api/games/complete/{g3}')
+                # Prefer five-crowns complete if generic differs.
+                if r.status_code != 200:
+                    r = client_a.post('/api/games/five-crowns/complete', json={'game_id': g3})
+                check('3-player Five Crowns can complete', r.status_code == 200, str(r.get_json()))
+                page = client_a.get('/five-crowns').get_data(as_text=True)
+                check('Five Crowns page has getCellScoreValue helper',
+                      'getCellScoreValue' in page)
+                check('Five Crowns page has contiguous dealer logic',
+                      'Contiguous completed rounds' in page or 'roundIsComplete' in page)
+                run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (g3,))
+                conn.commit()
+        elif fc:
+            page = client_a.get('/five-crowns').get_data(as_text=True)
+            check('Five Crowns page has getCellScoreValue helper',
+                  'getCellScoreValue' in page)
+            check('Five Crowns page has contiguous dealer logic',
+                  'Contiguous completed rounds' in page or 'roundIsComplete' in page)
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')

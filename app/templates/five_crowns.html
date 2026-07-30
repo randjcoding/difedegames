@@ -1103,7 +1103,7 @@ content %}
         tbl += '<td style="background:#6b35a8;color:#fff;font-weight:700;text-align:center;padding:' + pad + ';font-size:' + fontSize + ';position:sticky;left:0;z-index:1;">' + rd.label + '</td>';
         rePlayers.forEach(function(p) {
           var origCell = $('#scoreTable .score-cell[data-player="' + p.id + '"][data-round="' + rd.num + '"]');
-          var val = origCell.length ? origCell.text().trim() : '';
+          var val = origCell.length ? getCellScoreValue(origCell) : '';
           tbl += '<td style="padding:0;text-align:center;background:#1a1a2e;">';
           tbl += '<input type="number" inputmode="numeric" class="fs-score-input" data-pid="' + p.id + '" data-rnd="' + rd.num + '" value="' + val + '" style="width:100%;border:none;text-align:center;font-size:' + fontSize + ';padding:' + inputPad + ';background:transparent;color:#e0e0e0;font-weight:600;outline:none;caret-color:#e0e0e0;">';
           tbl += '</td>';
@@ -1172,7 +1172,7 @@ content %}
         var existingScore = "";
         var totalScore = 0;
         var cell = $('#scoreTable .score-cell[data-player="' + p.id + '"][data-round="' + rd.num + '"]');
-        if (cell.length) existingScore = cell.text().trim();
+        if (cell.length) existingScore = getCellScoreValue(cell);
         var totalCell = $('#scoreTable .total-cell[data-player="' + p.id + '"]');
         if (totalCell.length) totalScore = totalCell.text().trim();
 
@@ -1234,6 +1234,17 @@ content %}
 
     let updateTimer;
 
+    function getCellScoreValue(cell) {
+      cell = $(cell);
+      if (cell.hasClass("editing")) {
+        var inp = cell.find("input");
+        if (inp.length) return String(inp.val() == null ? "" : inp.val()).trim();
+        var saved = cell.data("saved-value");
+        if (saved != null) return String(saved).trim();
+      }
+      return cell.text().trim();
+    }
+
     function scorePayload(cell, rawValue) {
       var scoreVal = rawValue !== "" && !isNaN(rawValue) ? parseInt(rawValue, 10) : null;
       return {
@@ -1247,15 +1258,14 @@ content %}
     function applyScoreToCell(cell, scoreVal, leaveEditing) {
       if (leaveEditing !== false) cell.removeClass("editing");
       if (leaveEditing === false && cell.hasClass("editing")) {
-        // Keep the open input; only mirror into the hidden table text via data.
+        // Keep the open input; mirror for totals/dealer while typing.
         cell.data("saved-value", scoreVal === null ? "" : String(scoreVal));
       } else {
         cell.text(scoreVal === null || scoreVal === "" ? "" : scoreVal);
+        cell.removeData("saved-value");
       }
-      if (leaveEditing !== false || !cell.hasClass("editing")) {
-        updateTotals();
-        highlightDealer();
-      }
+      updateTotals();
+      highlightDealer();
     }
 
     function saveCellScore(cell, rawValue, opts) {
@@ -1282,6 +1292,7 @@ content %}
             if (leaveEditing) {
               cell.removeClass("editing");
               cell.text(originalValue || "");
+              cell.removeData("saved-value");
               updateTotals();
               highlightDealer();
               if (xhr && xhr.status !== 401) {
@@ -1316,10 +1327,21 @@ content %}
       saveCellScore(cell, newValue, { leaveEditing: true, originalValue: originalValue, syncDom: true });
     }
 
+    function flushOpenScoreEdits() {
+      $(".score-cell.editing input").each(function () {
+        var cell = $(this).closest(".score-cell");
+        var ov = cell.data("original-value");
+        saveCellScore(cell, $(this).val(), { leaveEditing: true, originalValue: ov, syncDom: true, force: true });
+      });
+      if (typeof reSaveCurrentRound === "function") {
+        try { reSaveCurrentRound(); } catch (e) { /* round view may be closed */ }
+      }
+    }
+
     $(document).off("click.fcScore", ".score-cell").on("click.fcScore", ".score-cell", function () {
       const cell = $(this);
       if (cell.hasClass("editing")) return;
-      const currentValue = cell.text().trim();
+      const currentValue = getCellScoreValue(cell);
       cell.data("original-value", currentValue);
       cell.addClass("editing");
       cell.html(
@@ -1338,9 +1360,12 @@ content %}
       input.on("input", function () {
         clearTimeout(updateTimer);
         var val = input.val();
+        // Keep totals/dealer in sync while typing.
+        cell.data("saved-value", String(val == null ? "" : val).trim());
+        updateTotals();
+        highlightDealer();
         updateTimer = setTimeout(function () {
           if (!cell.hasClass("editing")) return;
-          // Autosave while typing; keep the field open so the round can finish.
           saveCellScore(cell, val, { leaveEditing: false, originalValue: currentValue, syncDom: true });
         }, 800);
       });
@@ -1358,13 +1383,28 @@ content %}
         const playerId = $(this).data("player");
         let total = 0;
         $(`.score-cell[data-player="${playerId}"]`).each(function () {
-          const scoreText = $(this).text().trim();
-          if (scoreText !== "" && !isNaN(parseInt(scoreText))) {
-            total += parseInt(scoreText);
+          const scoreText = getCellScoreValue(this);
+          if (scoreText !== "" && !isNaN(parseInt(scoreText, 10))) {
+            total += parseInt(scoreText, 10);
           }
         });
         $(this).text(total);
       });
+    }
+
+    function roundIsComplete(round) {
+      var expected = $("#scoreTable th:not(:first-child)").length;
+      var cells = $(`.score-cell[data-round="${round}"]`);
+      if (!cells.length || cells.length !== expected) return false;
+      var ok = true;
+      cells.each(function () {
+        var score = getCellScoreValue(this);
+        if (score === "" || isNaN(parseInt(score, 10))) {
+          ok = false;
+          return false;
+        }
+      });
+      return ok;
     }
 
     function highlightDealer() {
@@ -1374,22 +1414,14 @@ content %}
         return;
       }
 
+      // Contiguous completed rounds from 3 upward. First incomplete round is
+      // the current deal — dealer advances only after a full round is filled.
       const rounds = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
       let completedRounds = 0;
-
-      rounds.forEach((round) => {
-        let allPlayersHaveScores = true;
-        $(`.score-cell[data-round="${round}"]`).each(function () {
-          const score = $(this).text().trim();
-          if (score === "" || isNaN(parseInt(score))) {
-            allPlayersHaveScores = false;
-            return false;
-          }
-        });
-        if (allPlayersHaveScores) {
-          completedRounds++;
-        }
-      });
+      for (var i = 0; i < rounds.length; i++) {
+        if (!roundIsComplete(rounds[i])) break;
+        completedRounds++;
+      }
 
       const playerCount = $("#scoreTable th:not(:first-child)").length;
       if (playerCount > 0) {
@@ -1773,19 +1805,30 @@ content %}
 
     $("#pauseGame").click(function () {
       var gameId = $(".game-board").data("game-id");
-      if (window.ScoreSave) ScoreSave.flush();
-      $.ajax({
-        url: "/api/games/five-crowns/pause",
-        method: "POST",
-        contentType: "application/json",
-        data: JSON.stringify({ game_id: gameId }),
-        success: function () {
-          showGamePausedModal();
-        },
-        error: function (xhr) {
-          AppModal.error("Error", (xhr.responseJSON && xhr.responseJSON.error) || "Failed to pause game");
-        },
-      });
+      var $btn = $(this);
+      $btn.prop("disabled", true);
+      flushOpenScoreEdits();
+      var afterFlush = function () {
+        $.ajax({
+          url: "/api/games/five-crowns/pause",
+          method: "POST",
+          contentType: "application/json",
+          data: JSON.stringify({ game_id: gameId }),
+          success: function () {
+            showGamePausedModal();
+          },
+          error: function (xhr) {
+            $btn.prop("disabled", false);
+            AppModal.error("Error", (xhr.responseJSON && xhr.responseJSON.error) || "Failed to pause game");
+          },
+        });
+      };
+      if (window.ScoreSave && typeof ScoreSave.flushAsync === "function") {
+        ScoreSave.flushAsync(4000).always(afterFlush);
+      } else {
+        if (window.ScoreSave) ScoreSave.flush();
+        afterFlush();
+      }
     });
 
     function showGamePausedModal() {

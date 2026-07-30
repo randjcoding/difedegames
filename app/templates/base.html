@@ -887,19 +887,16 @@
 
     // Shared score POST with idle/reconnect retry. Used by game boards so a phone
     // sleep or brief network drop does not lose the last typed score.
+    // Per cell (game/player/round): only one request in flight; newer values
+    // replace pending ones so a partial "2" cannot overwrite a later "25".
     window.ScoreSave = (function() {
-      var queue = [];
-      var flushing = false;
+      var latest = {};   // key -> { payload, opts, gen }
+      var inFlight = {}; // key -> gen currently posting
+      var genCounter = 0;
       var authWarned = false;
 
       function keyOf(p) {
         return String(p.game_id) + ':' + String(p.player_id) + ':' + String(p.round_number);
-      }
-
-      function enqueue(payload) {
-        var k = keyOf(payload);
-        queue = queue.filter(function(item) { return keyOf(item) !== k; });
-        queue.push(payload);
       }
 
       function postOne(payload) {
@@ -911,65 +908,76 @@
         });
       }
 
-      function flush() {
-        if (flushing || !queue.length) return;
+      function pump(k) {
+        if (inFlight[k]) return;
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-        flushing = true;
-        var batch = queue.slice();
-        var i = 0;
-        function next() {
-          if (i >= batch.length) {
-            flushing = false;
-            if (queue.length) flush();
-            return;
-          }
-          var payload = batch[i++];
-          postOne(payload)
-            .done(function() {
-              queue = queue.filter(function(item) { return keyOf(item) !== keyOf(payload); });
-              next();
-            })
-            .fail(function(xhr) {
-              if (xhr && xhr.status === 401) {
-                if (!authWarned && window.AppModal) {
-                  authWarned = true;
-                  AppModal.error('Session expired', 'Please log in again, then reopen the game. Pending scores will retry after you are online.');
-                }
-                flushing = false;
-                return;
-              }
-              // Keep in queue for later retry (network blip / idle wake).
-              next();
-            });
-        }
-        next();
-      }
-
-      function save(payload, opts) {
-        opts = opts || {};
-        enqueue(payload);
-        return postOne(payload)
+        var item = latest[k];
+        if (!item) return;
+        inFlight[k] = item.gen;
+        var sentGen = item.gen;
+        var sentPayload = item.payload;
+        var sentOpts = item.opts || {};
+        postOne(sentPayload)
           .done(function() {
-            queue = queue.filter(function(item) { return keyOf(item) !== keyOf(payload); });
-            if (typeof opts.success === 'function') opts.success();
+            var cur = latest[k];
+            if (cur && cur.gen === sentGen) {
+              delete latest[k];
+              if (typeof sentOpts.success === 'function') sentOpts.success();
+            }
+            delete inFlight[k];
+            pump(k);
           })
           .fail(function(xhr) {
+            delete inFlight[k];
             if (xhr && xhr.status === 401) {
               if (!authWarned && window.AppModal) {
                 authWarned = true;
                 AppModal.error('Session expired', 'Please log in again, then reopen the game to keep scoring.');
               }
-              if (typeof opts.error === 'function') {
-                opts.error(xhr);
-              }
+              if (typeof sentOpts.error === 'function') sentOpts.error(xhr);
               return;
             }
-            // Stay queued; retry on online/visibility. Only surface hard errors
-            // when the caller asked (e.g. leaving edit mode).
-            if (typeof opts.error === 'function' && opts.showError) {
-              opts.error(xhr);
+            // Keep latest for retry. Surface error only when asked.
+            if (typeof sentOpts.error === 'function' && sentOpts.showError) {
+              sentOpts.error(xhr);
             }
+            // Retry later via visibility/online/interval; do not tight-loop.
           });
+      }
+
+      function save(payload, opts) {
+        opts = opts || {};
+        var k = keyOf(payload);
+        var gen = ++genCounter;
+        latest[k] = { payload: payload, opts: opts, gen: gen };
+        pump(k);
+        return $.Deferred().resolve().promise();
+      }
+
+      function flush() {
+        Object.keys(latest).forEach(function(k) { pump(k); });
+      }
+
+      function flushAsync(timeoutMs) {
+        timeoutMs = timeoutMs || 4000;
+        flush();
+        var deferred = $.Deferred();
+        var started = Date.now();
+        function check() {
+          var pending = Object.keys(latest).length + Object.keys(inFlight).length;
+          if (pending === 0) {
+            deferred.resolve();
+            return;
+          }
+          if (Date.now() - started > timeoutMs) {
+            deferred.resolve();
+            return;
+          }
+          flush();
+          setTimeout(check, 100);
+        }
+        check();
+        return deferred.promise();
       }
 
       document.addEventListener('visibilitychange', function() {
@@ -978,7 +986,14 @@
       window.addEventListener('online', flush);
       setInterval(flush, 15000);
 
-      return { save: save, flush: flush, pendingCount: function() { return queue.length; } };
+      return {
+        save: save,
+        flush: flush,
+        flushAsync: flushAsync,
+        pendingCount: function() {
+          return Object.keys(latest).length + Object.keys(inFlight).length;
+        }
+      };
     })();
 
     $(document).ajaxError(function(_event, xhr) {
