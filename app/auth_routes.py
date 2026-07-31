@@ -856,7 +856,6 @@ def admin_users():
     
     is_owner = (current_user.get('email') or '').lower() == \
         (current_app.config.get('OWNER_EMAIL') or '').lower()
-    import json as _json
     users_payload = []
     for u in users:
         users_payload.append({
@@ -875,7 +874,7 @@ def admin_users():
             'last_login': u['last_login'].isoformat() if u.get('last_login') else None,
         })
     return render_template('auth/admin_users.html', users=users,
-                           users_json=_json.dumps(users_payload),
+                           users_payload=users_payload,
                            is_owner=is_owner,
                            owner_email=current_app.config.get('OWNER_EMAIL'))
 
@@ -982,8 +981,8 @@ def admin_delete_user(user_id):
         })
     except Exception as e:
         conn.rollback()
-        logger.error(f"Error deleting user: {e}")
-        return jsonify({'error': 'Failed to delete user'}), 500
+        logger.error(f"Error deleting user: {e}", exc_info=True)
+        return jsonify({'error': f'Failed to delete user: {e}'}), 500
     finally:
         conn.close()
 

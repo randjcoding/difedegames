@@ -1027,14 +1027,24 @@ def main():
         check('admin users page loads for super admin',
               'User Management' in page or 'Deactivate' in page)
         check('admin users page wires real deactivate/activate APIs',
-              "/api/users/' + userId + '/archive'" in page
-              or '/api/users/' in page and 'archive' in page and 'reinstate' in page)
+              '/api/users/' in page and 'archive' in page and 'reinstate' in page)
         check('admin users page wires real delete API',
               "/auth/admin/users/' + userId + '/delete'" in page
               or 'admin/users/' in page and '/delete' in page)
         check('admin delete is a single confirm that POSTs delete',
               'Delete Login' in page and 'Final Warning' not in page
-              and "/auth/admin/users/' + userId + '/delete'" in page)
+              and 'data-aum-action="delete"' in page)
+        check('admin users actions use data attributes (no tojson-in-onclick)',
+              'data-aum-action="delete"' in page
+              and 'onclick="deleteUser(' not in page
+              and 'onclick="approveUser(' not in page
+              and 'onclick="setRole(' not in page
+              and 'onclick="toggleUserStatus(' not in page)
+        import re as _re
+        check('admin users HTML has no broken onclick name quoting',
+              not _re.search(
+                  r'onclick="(?:deleteUser|approveUser|setRole|toggleUserStatus)\([^"]*"[^"]+"',
+                  page))
         base = client_a.get('/dashboard').get_data(as_text=True)
         check('AppModal queues nested dialogs after hide',
               '_queue' in base and 'hidden.bs.modal' in base)
