@@ -1032,6 +1032,12 @@ def main():
         check('admin users page wires real delete API',
               "/auth/admin/users/' + userId + '/delete'" in page
               or 'admin/users/' in page and '/delete' in page)
+        check('admin delete is a single confirm that POSTs delete',
+              'Delete Login' in page and 'Final Warning' not in page
+              and "/auth/admin/users/' + userId + '/delete'" in page)
+        base = client_a.get('/dashboard').get_data(as_text=True)
+        check('AppModal queues nested dialogs after hide',
+              '_queue' in base and 'hidden.bs.modal' in base)
         check('admin deactivate is not a Coming Soon stub',
               'User deactivate functionality not yet implemented' not in page
               and 'User deletion functionality not yet implemented' not in page)

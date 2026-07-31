@@ -811,14 +811,33 @@
       }
     });
 
-    /* ── App Modal ── */
+    /* ── App Modal ──
+       Single Bootstrap modal instance. Nested confirm()/alert() calls must wait
+       for hidden.bs.modal or the second dialog never appears (hide cancels show). */
     window.AppModal = {
         _modal: null,
+        _queue: [],
+        _busy: false,
+        _bound: false,
         _getModal: function() {
-            if (!this._modal) this._modal = new bootstrap.Modal(document.getElementById('appModal'));
+            if (!this._modal) {
+                var el = document.getElementById('appModal');
+                this._modal = new bootstrap.Modal(el);
+                if (!this._bound) {
+                    this._bound = true;
+                    var self = this;
+                    el.addEventListener('hidden.bs.modal', function() {
+                        self._busy = false;
+                        if (self._queue.length) {
+                            var next = self._queue.shift();
+                            self._render(next);
+                        }
+                    });
+                }
+            }
             return this._modal;
         },
-        show: function(opts) {
+        _render: function(opts) {
             var title = opts.title || 'Notice';
             var body = opts.body || '';
             var type = opts.type || 'info';
@@ -856,7 +875,8 @@
                 confirmBtn.textContent = confirmText;
                 confirmBtn.onclick = function() {
                     AppModal._getModal().hide();
-                    onConfirm();
+                    // Run after Bootstrap finishes hiding so a nested confirm can open.
+                    setTimeout(function() { onConfirm(); }, 0);
                 };
                 footer.appendChild(confirmBtn);
             } else {
@@ -866,7 +886,16 @@
                 okBtn.textContent = 'OK';
                 footer.appendChild(okBtn);
             }
+            this._busy = true;
             this._getModal().show();
+        },
+        show: function(opts) {
+            this._getModal();
+            if (this._busy || document.getElementById('appModal').classList.contains('show')) {
+                this._queue.push(opts);
+                return;
+            }
+            this._render(opts);
         },
         alert: function(title, body, type) {
             this.show({title: title, body: '<p>' + body + '</p>', type: type || 'info'});

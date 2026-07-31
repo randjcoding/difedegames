@@ -549,26 +549,24 @@
   }
 
   function deleteUser(userId, userName) {
-    AppModal.confirm('Delete User', 'Remove the login for ' + userName + '?', function() {
-      AppModal.confirm(
-        'Final Warning',
-        'This permanently deletes their login account. Their player profile and game scores are kept. This cannot be undone.',
-        function() {
-          fetch('/auth/admin/users/' + userId + '/delete', { method: 'POST' })
-            .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
-            .then(function(res) {
-              if (res.ok) {
-                AppModal.success('User Deleted', res.j.message || 'Login removed.');
-                setTimeout(function() { location.reload(); }, 1200);
-              } else {
-                AppModal.error('Error', res.j.error || 'Failed to delete user');
-              }
-            })
-            .catch(function() { AppModal.error('Error', 'Failed to delete user'); });
-        },
-        { confirmText: 'Delete Login', cancelText: 'Cancel' }
-      );
-    });
+    AppModal.confirm(
+      'Delete Login',
+      'Permanently remove the login for ' + userName + '? Their player profile and game scores are kept. This cannot be undone.',
+      function() {
+        fetch('/auth/admin/users/' + userId + '/delete', { method: 'POST' })
+          .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+          .then(function(res) {
+            if (res.ok) {
+              AppModal.success('User Deleted', res.j.message || 'Login removed.');
+              setTimeout(function() { location.reload(); }, 1200);
+            } else {
+              AppModal.error('Error', res.j.error || 'Failed to delete user');
+            }
+          })
+          .catch(function() { AppModal.error('Error', 'Failed to delete user'); });
+      },
+      { confirmText: 'Delete Login', cancelText: 'Cancel' }
+    );
   }
 
   var pendingUsers = {{ users|rejectattr('is_verified')|list|length }};
