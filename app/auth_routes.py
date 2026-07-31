@@ -29,9 +29,9 @@ def login():
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # Get user information (simplified for existing schema)
             cursor.execute('''
-                SELECT id, first_name, last_name, family_name, password_hash, is_verified, is_approved
+                SELECT id, first_name, last_name, family_name, password_hash,
+                       is_verified, is_approved, is_active, archived_at
                 FROM users WHERE email = %s
             ''', (email,))
             
@@ -44,7 +44,6 @@ def login():
                 conn.close()
                 return render_template('auth/login.html')
 
-            # Handle RealDictCursor result (returns dict, not tuple)
             if isinstance(user, dict):
                 user_id = user['id']
                 first_name = user['first_name']
@@ -52,22 +51,23 @@ def login():
                 family_name = user['family_name']
                 password_hash = user['password_hash']
                 is_verified = user['is_verified']
+                is_active = user.get('is_active', True)
+                archived_at = user.get('archived_at')
+                is_approved = user.get('is_approved', False)
             else:
-                user_id, first_name, last_name, family_name, password_hash, is_verified = user
+                (user_id, first_name, last_name, family_name, password_hash,
+                 is_verified, is_approved, is_active, archived_at) = user
                 
             logger.info(f"User found: {first_name} {last_name}, Verified: {is_verified}, Hash type: {type(password_hash)}, Hash length: {len(password_hash) if password_hash else 'None'}")
 
-            # Verify password - try both new and old hash methods
             password_valid = False
             
-            # Try new Werkzeug method first
             try:
                 password_valid = check_password_hash(password_hash, password)
                 logger.info(f"Werkzeug password check result: {password_valid}")
             except Exception as e:
                 logger.error(f"Werkzeug password check failed: {e}")
             
-            # If that fails, try bcrypt (old method)
             if not password_valid and password_hash:
                 try:
                     import bcrypt
@@ -83,18 +83,18 @@ def login():
                 conn.close()
                 return render_template('auth/login.html')
 
-            # Check if email is verified
+            if not is_active or archived_at:
+                cursor.close()
+                conn.close()
+                flash('This account has been deactivated. Contact a site admin if you need access restored.', 'error')
+                return render_template('auth/login.html')
+
             if not is_verified:
                 cursor.close()
                 conn.close()
                 flash('Please verify your email address before logging in. Check your email for the verification link, or request a new one below.', 'warning')
                 return render_template('auth/login.html', show_resend=True, user_email=email)
 
-            # Check if account is approved by admin
-            if isinstance(user, dict):
-                is_approved = user.get('is_approved', False)
-            else:
-                is_approved = False
             if not is_approved:
                 cursor.close()
                 conn.close()
@@ -841,7 +841,7 @@ def admin_users():
             cursor.execute('''
                 SELECT u.id, u.email, u.first_name, u.last_name, u.family_name,
                        u.role, u.is_verified, u.is_active, u.is_approved, u.created_at, u.last_login,
-                       u.family_id,
+                       u.family_id, u.archived_at,
                        (SELECT COUNT(*) FROM players p WHERE p.family_id = u.family_id) as family_member_count
                 FROM users u
                 ORDER BY u.created_at DESC
@@ -902,6 +902,69 @@ def admin_set_role(user_id):
         conn.rollback()
         logger.error(f"Error changing role: {e}")
         return jsonify({'error': 'Failed to change role'}), 500
+    finally:
+        conn.close()
+
+
+@auth_bp.route('/admin/users/<int:user_id>/delete', methods=['POST'])
+@login_required
+def admin_delete_user(user_id):
+    """Remove a login account. Player rows, scores, and game history stay.
+    Family lead pointers are cleared so the FK does not block the delete."""
+    current_user = load_current_user()
+    if not current_user or current_user.get('role') != 'super_admin':
+        return jsonify({'error': 'Admin privileges required'}), 403
+
+    owner_email = (current_app.config.get('OWNER_EMAIL') or '').lower()
+    if user_id == current_user['id']:
+        return jsonify({'error': 'You cannot delete your own account'}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed'}), 500
+    try:
+        import psycopg2.extras
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            'SELECT id, email, role, first_name, last_name FROM users WHERE id = %s',
+            (user_id,))
+        target = cursor.fetchone()
+        if not target:
+            return jsonify({'error': 'User not found'}), 404
+        if (target['email'] or '').lower() == owner_email:
+            return jsonify({'error': 'The site owner account cannot be deleted'}), 400
+
+        cursor.execute(
+            'UPDATE families SET lead_user_id = NULL WHERE lead_user_id = %s',
+            (user_id,))
+        cursor.execute(
+            'UPDATE families SET archived_by_user_id = NULL WHERE archived_by_user_id = %s',
+            (user_id,))
+        cursor.execute(
+            'UPDATE players SET archived_by_user_id = NULL WHERE archived_by_user_id = %s',
+            (user_id,))
+        cursor.execute(
+            'UPDATE users SET archived_by_user_id = NULL WHERE archived_by_user_id = %s',
+            (user_id,))
+        cursor.execute(
+            'UPDATE player_release_requests SET decided_by_user_id = NULL WHERE decided_by_user_id = %s',
+            (user_id,))
+        cursor.execute('DELETE FROM user_sessions WHERE user_id = %s', (user_id,))
+        cursor.execute('DELETE FROM users WHERE id = %s', (user_id,))
+        audit(conn, current_user['id'], 'account_deleted', 'users', user_id,
+              old={'email': target['email'], 'role': target['role']})
+        conn.commit()
+        cursor.close()
+        name = f"{target['first_name']} {target['last_name']}".strip()
+        return jsonify({
+            'success': True,
+            'message': f'{name or target["email"]} login removed. '
+                       'Their player profile and game history were kept.',
+        })
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error deleting user: {e}")
+        return jsonify({'error': 'Failed to delete user'}), 500
     finally:
         conn.close()
 

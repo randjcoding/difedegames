@@ -1020,6 +1020,76 @@ def main():
             check('Five Crowns page has contiguous dealer logic',
                   'Contiguous completed rounds' in page or 'roundIsComplete' in page)
 
+        print('\n== Section 15: admin user deactivate / activate / delete ==')
+        run(conn, "UPDATE users SET role = 'super_admin' WHERE id = %s", (user_a['id'],))
+        conn.commit()
+        page = client_a.get('/auth/admin/users').get_data(as_text=True)
+        check('admin users page loads for super admin',
+              'Manage Users' in page or 'admin/users' in page or 'Deactivate' in page)
+        check('admin users page wires real deactivate/activate APIs',
+              "/api/users/' + userId + '/archive'" in page
+              or '/api/users/' in page and 'archive' in page and 'reinstate' in page)
+        check('admin users page wires real delete API',
+              "/auth/admin/users/' + userId + '/delete'" in page
+              or 'admin/users/' in page and '/delete' in page)
+        check('admin deactivate is not a Coming Soon stub',
+              'User deactivate functionality not yet implemented' not in page
+              and 'User deletion functionality not yet implemented' not in page)
+
+        client_z = app.test_client()
+        register(client_z, 'zztest.doomed@example.com', 'Zztestdoomed', 'Target', 'Zztest Doomed')
+        doomed = q1(conn, "SELECT id, player_id FROM users WHERE email = 'zztest.doomed@example.com'")
+        check('doomed test user created', bool(doomed))
+        if doomed:
+            ids['users'].add(doomed['id'])
+            if doomed.get('player_id'):
+                ids['players'].add(doomed['player_id'])
+            doomed_fam = q1(conn, """
+                SELECT id FROM families WHERE lead_user_id = %s OR id = (
+                    SELECT family_id FROM users WHERE id = %s
+                ) LIMIT 1
+            """, (doomed['id'], doomed['id']))
+            if doomed_fam:
+                ids['families'].add(doomed_fam['id'])
+            activate_and_login(conn, client_z, 'zztest.doomed@example.com')
+
+            r = client_a.post(f"/api/users/{doomed['id']}/archive")
+            check('super admin can deactivate (archive) a user',
+                  r.status_code == 200, str(r.get_json()))
+            row = q1(conn, 'SELECT is_active, archived_at FROM users WHERE id = %s', (doomed['id'],))
+            check('deactivated user is inactive and archived',
+                  row and row['is_active'] is False and row['archived_at'] is not None, str(row))
+            r = client_z.post('/auth/login', data={
+                'email': 'zztest.doomed@example.com', 'password': PASSWORD
+            }, follow_redirects=True)
+            body = r.get_data(as_text=True)
+            check('deactivated user cannot log in',
+                  'deactivated' in body.lower() or 'invalid' in body.lower())
+
+            r = client_a.post(f"/api/users/{doomed['id']}/reinstate")
+            check('super admin can activate (reinstate) a user',
+                  r.status_code == 200, str(r.get_json()))
+            row = q1(conn, 'SELECT is_active, archived_at FROM users WHERE id = %s', (doomed['id'],))
+            check('activated user is active again',
+                  row and row['is_active'] is True and row['archived_at'] is None, str(row))
+            check('activated user can log in again',
+                  activate_and_login(conn, client_z, 'zztest.doomed@example.com'))
+
+            player_id = doomed.get('player_id')
+            r = client_a.post(f"/auth/admin/users/{doomed['id']}/delete")
+            check('super admin can delete a login account',
+                  r.status_code == 200 and (r.get_json() or {}).get('success') is True,
+                  str(r.get_json()))
+            gone = q1(conn, 'SELECT id FROM users WHERE id = %s', (doomed['id'],))
+            check('deleted login row is gone', gone is None)
+            if player_id:
+                kept = q1(conn, 'SELECT id FROM players WHERE id = %s', (player_id,))
+                check('player profile survives login delete', kept is not None)
+            ids['users'].discard(doomed['id'])
+
+            r = client_a.post(f"/auth/admin/users/{user_a['id']}/delete")
+            check('cannot delete own account', r.status_code == 400, str(r.get_json()))
+
     finally:
         print('\n== Cleanup: removing all Zztest data ==')
         try:
