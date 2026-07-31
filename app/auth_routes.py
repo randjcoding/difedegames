@@ -856,7 +856,26 @@ def admin_users():
     
     is_owner = (current_user.get('email') or '').lower() == \
         (current_app.config.get('OWNER_EMAIL') or '').lower()
+    import json as _json
+    users_payload = []
+    for u in users:
+        users_payload.append({
+            'id': u['id'],
+            'email': u.get('email'),
+            'first_name': u.get('first_name'),
+            'last_name': u.get('last_name'),
+            'family_name': u.get('family_name'),
+            'family_member_count': int(u.get('family_member_count') or 0),
+            'role': u.get('role'),
+            'is_verified': bool(u.get('is_verified')),
+            'is_active': bool(u.get('is_active')),
+            'is_approved': bool(u.get('is_approved')),
+            'archived_at': u['archived_at'].isoformat() if u.get('archived_at') else None,
+            'created_at': u['created_at'].isoformat() if u.get('created_at') else None,
+            'last_login': u['last_login'].isoformat() if u.get('last_login') else None,
+        })
     return render_template('auth/admin_users.html', users=users,
+                           users_json=_json.dumps(users_payload),
                            is_owner=is_owner,
                            owner_email=current_app.config.get('OWNER_EMAIL'))
 

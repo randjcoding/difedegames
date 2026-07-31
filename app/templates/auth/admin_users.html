@@ -1,30 +1,285 @@
-{% extends "base.html" %} {% block title %}User Management - {{ config.APP_NAME
-}}{% endblock %} {% block content %}
-<div class="container mt-4">
-  <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="fas fa-users-cog"></i> User Management</h2>
-    <div>
-      <button class="btn btn-success" onclick="refreshUsers()">
-        <i class="fas fa-sync"></i> Refresh
-      </button>
+{% extends "base.html" %}
+{% block title %}User Management - {{ config.APP_NAME }}{% endblock %}
+
+{% block styles %}
+<style>
+  .aum-page { max-width: 1200px; }
+  .aum-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+  .aum-header h2 {
+    font-size: 1.35rem;
+    margin: 0;
+    color: var(--df-text);
+  }
+  .aum-summary .card {
+    border: none;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    color: #fff;
+  }
+  .aum-summary .card-body { padding: 0.85rem 0.5rem; }
+  .aum-summary h3 { font-size: 1.5rem; margin: 0; }
+  .aum-summary p { font-size: 0.8rem; margin: 0; opacity: 0.95; }
+
+  .aum-card-list { display: none; }
+  .aum-user-card {
+    background: #fff;
+    color: #212529;
+    border: 1px solid var(--df-border, #dee2e6);
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+    margin-bottom: 0.75rem;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  }
+  .aum-user-card .aum-name {
+    font-weight: 700;
+    font-size: 1.05rem;
+    margin-bottom: 0.15rem;
+    word-break: break-word;
+  }
+  .aum-user-card .aum-email {
+    font-size: 0.85rem;
+    color: #495057;
+    word-break: break-all;
+    margin-bottom: 0.5rem;
+  }
+  .aum-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 0.55rem;
+  }
+  .aum-dates {
+    font-size: 0.75rem;
+    color: #6c757d;
+    margin-bottom: 0.65rem;
+  }
+  .aum-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .aum-actions .btn {
+    flex: 1 1 auto;
+    min-width: calc(50% - 0.4rem);
+    font-size: 0.8rem;
+  }
+
+  .aum-table-wrap { display: block; }
+  .aum-table-wrap .table { color: #212529; }
+  .aum-table-wrap .table th { font-weight: 600; font-size: 0.9rem; }
+  .aum-table-wrap .btn-group-vertical .btn { margin-bottom: 2px; }
+
+  .aum-panel {
+    background: var(--df-card, #fff);
+    color: var(--df-text-card, #212529);
+    border-radius: 12px;
+    border: 1px solid var(--df-border, #dee2e6);
+    overflow: hidden;
+  }
+  .aum-panel .aum-panel-header {
+    background: var(--df-card-header);
+    color: var(--df-dt-header-text);
+    padding: 0.75rem 1rem;
+    font-weight: 700;
+    border-bottom: 2px solid var(--df-accent);
+  }
+  .aum-panel .aum-panel-body { padding: 0.75rem; }
+
+  #userDetailsContent { color: #212529; }
+  #userDetailsContent .aum-detail-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 0.9rem;
+  }
+  #userDetailsContent .aum-detail-row:last-child { border-bottom: none; }
+  #userDetailsContent .aum-detail-label {
+    color: #6c757d;
+    flex: 0 0 38%;
+  }
+  #userDetailsContent .aum-detail-value {
+    text-align: right;
+    word-break: break-word;
+    font-weight: 600;
+  }
+
+  @media (max-width: 991.98px) {
+    .aum-table-wrap { display: none; }
+    .aum-card-list { display: block; }
+    .aum-panel .aum-panel-body { padding: 0.65rem; }
+  }
+
+  @media (max-width: 575.98px) {
+    .aum-header h2 { font-size: 1.2rem; }
+    .aum-actions .btn {
+      min-width: 100%;
+    }
+    .modal-dialog { margin: 0.5rem; max-width: calc(100% - 1rem); }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-3 mb-4 aum-page">
+  <div class="aum-header">
+    <h2><i class="fas fa-users-cog me-2"></i>User Management</h2>
+    <button class="btn btn-success btn-sm" onclick="refreshUsers()">
+      <i class="fas fa-sync"></i> Refresh
+    </button>
+  </div>
+
+  <div class="row g-2 aum-summary mb-3">
+    <div class="col-6 col-md-3">
+      <div class="card" style="background: var(--df-card-header); border-bottom: 3px solid var(--df-accent); color: var(--df-dt-header-text);">
+        <div class="card-body text-center">
+          <h3>{{ users|length }}</h3>
+          <p>Total Users</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card bg-success">
+        <div class="card-body text-center">
+          <h3>{{ users|selectattr('is_verified')|list|length }}</h3>
+          <p>Verified</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card bg-warning">
+        <div class="card-body text-center">
+          <h3>{{ users|rejectattr('is_verified')|list|length }}</h3>
+          <p>Pending</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card bg-info">
+        <div class="card-body text-center">
+          <h3>{{ users|map(attribute='family_name')|unique|list|length }}</h3>
+          <p>Families</p>
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- Users Table -->
-  <div class="card">
-    <div class="card-header">
-      <h5 class="mb-0">All Registered Users</h5>
-    </div>
-    <div class="card-body">
+  <div class="aum-panel">
+    <div class="aum-panel-header">All Registered Users</div>
+    <div class="aum-panel-body">
       {% if users %}
-      <div class="table-responsive">
-        <table class="table table-striped table-hover">
+      <div class="aum-card-list">
+        {% for user in users %}
+        {% set account_active = user.is_active and not user.archived_at %}
+        {% set display_name = user.first_name ~ ' ' ~ user.last_name %}
+        <div class="aum-user-card">
+          <div class="aum-name">{{ user.first_name }} {{ user.last_name }}</div>
+          <div class="aum-email">{{ user.email }}</div>
+          <div class="aum-meta">
+            <span class="badge bg-info">{{ user.family_name }}</span>
+            <span class="badge bg-secondary">{{ user.family_member_count or 0 }} members</span>
+            <span class="badge bg-{{ 'danger' if user.role == 'super_admin' else 'primary' }}">
+              {{ user.role.replace('_', ' ').title() }}
+            </span>
+            {% if user.email|lower == owner_email|lower %}
+            <span class="badge bg-dark">Owner</span>
+            {% endif %}
+            <span class="badge bg-{{ 'success' if user.is_verified else 'warning' }}">
+              {{ 'Verified' if user.is_verified else 'Unverified' }}
+            </span>
+            {% if user.is_verified %}
+            <span class="badge bg-{{ 'success' if user.is_approved else 'danger' }}">
+              {{ 'Approved' if user.is_approved else 'Needs Approval' }}
+            </span>
+            {% endif %}
+            {% if not account_active %}
+            <span class="badge bg-secondary">Inactive</span>
+            {% endif %}
+          </div>
+          <div class="aum-dates">
+            Joined {{ user.created_at.strftime('%m/%d/%Y') if user.created_at else 'Unknown' }}
+            &middot; Last login {{ user.last_login.strftime('%m/%d/%Y') if user.last_login else 'Never' }}
+          </div>
+          <div class="aum-actions">
+            {% if not user.is_verified %}
+            <a
+              href="{{ url_for('auth.admin_verify_user', user_id=user.id) }}"
+              class="btn btn-outline-success btn-sm"
+              onclick="event.preventDefault(); var href=this.href; AppModal.confirm('Verify User', 'Verify this user account?', function(){ window.location.href=href; }); return false;"
+            >
+              <i class="fas fa-check"></i> Verify
+            </a>
+            {% endif %}
+            {% if user.is_verified and not user.is_approved %}
+            <button
+              class="btn btn-success btn-sm"
+              onclick="approveUser({{ user.id }}, {{ display_name|tojson }})"
+            >
+              <i class="fas fa-user-check"></i> Approve
+            </button>
+            {% endif %}
+            {% if current_user.id == user.id %}
+            <span class="badge bg-info align-self-center">You</span>
+            {% else %}
+            {% if user.email|lower != owner_email|lower %}
+            <button
+              class="btn btn-outline-warning btn-sm"
+              onclick="toggleUserStatus({{ user.id }}, {{ account_active|tojson }}, {{ display_name|tojson }})"
+            >
+              <i class="fas fa-{{ 'pause' if account_active else 'play' }}"></i>
+              {{ 'Deactivate' if account_active else 'Activate' }}
+            </button>
+            <button
+              class="btn btn-outline-info btn-sm"
+              onclick="viewUserDetails({{ user.id }})"
+            >
+              <i class="fas fa-eye"></i> Details
+            </button>
+            <button
+              class="btn btn-outline-danger btn-sm"
+              onclick="deleteUser({{ user.id }}, {{ display_name|tojson }})"
+            >
+              <i class="fas fa-trash"></i> Delete
+            </button>
+            {% endif %}
+            {% if is_owner and user.email|lower != owner_email|lower %}
+              {% if user.role == 'super_admin' %}
+              <button
+                class="btn btn-outline-secondary btn-sm"
+                onclick="setRole({{ user.id }}, {{ display_name|tojson }}, 'family_admin')"
+              >
+                <i class="fas fa-user-shield"></i> Revoke Super Admin
+              </button>
+              {% else %}
+              <button
+                class="btn btn-outline-danger btn-sm"
+                onclick="setRole({{ user.id }}, {{ display_name|tojson }}, 'super_admin')"
+              >
+                <i class="fas fa-user-shield"></i> Make Super Admin
+              </button>
+              {% endif %}
+            {% endif %}
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="table-responsive aum-table-wrap">
+        <table class="table table-striped table-hover mb-0">
           <thead class="table-dark">
             <tr>
               <th>Name</th>
               <th>Email</th>
               <th>Family</th>
-              <th>Family Members</th>
+              <th>Members</th>
               <th>Role</th>
               <th>Status</th>
               <th>Joined</th>
@@ -34,33 +289,27 @@
           </thead>
           <tbody>
             {% for user in users %}
+            {% set account_active = user.is_active and not user.archived_at %}
+            {% set display_name = user.first_name ~ ' ' ~ user.last_name %}
             <tr>
-              <td>
-                <strong>{{ user.first_name }} {{ user.last_name }}</strong>
-              </td>
+              <td><strong>{{ user.first_name }} {{ user.last_name }}</strong></td>
               <td>{{ user.email }}</td>
-              <td>
-                <span class="badge bg-info">{{ user.family_name }}</span>
-              </td>
+              <td><span class="badge bg-info">{{ user.family_name }}</span></td>
               <td>
                 <span class="badge bg-secondary">
                   <i class="fas fa-users me-1"></i>{{ user.family_member_count or 0 }}
                 </span>
               </td>
               <td>
-                <span
-                  class="badge bg-{{ 'danger' if user.role == 'super_admin' else 'primary' }}"
-                >
+                <span class="badge bg-{{ 'danger' if user.role == 'super_admin' else 'primary' }}">
                   {{ user.role.replace('_', ' ').title() }}
                 </span>
                 {% if user.email|lower == owner_email|lower %}
-                <span class="badge bg-dark" title="Site owner: the only account that can grant or revoke Super Admin">Owner</span>
+                <span class="badge bg-dark">Owner</span>
                 {% endif %}
               </td>
               <td>
-                <span
-                  class="badge bg-{{ 'success' if user.is_verified else 'warning' }}"
-                >
+                <span class="badge bg-{{ 'success' if user.is_verified else 'warning' }}">
                   {{ 'Verified' if user.is_verified else 'Unverified' }}
                 </span>
                 {% if user.is_verified %}
@@ -68,21 +317,15 @@
                   {{ 'Approved' if user.is_approved else 'Needs Approval' }}
                 </span>
                 {% endif %}
-                {% if user.archived_at or not user.is_active %}
+                {% if not account_active %}
                 <span class="badge bg-secondary">Inactive</span>
                 {% endif %}
               </td>
               <td>
-                <small
-                  >{{ user.created_at.strftime('%m/%d/%Y') if user.created_at
-                  else 'Unknown' }}</small
-                >
+                <small>{{ user.created_at.strftime('%m/%d/%Y') if user.created_at else 'Unknown' }}</small>
               </td>
               <td>
-                <small
-                  >{{ user.last_login.strftime('%m/%d/%Y') if user.last_login
-                  else 'Never' }}</small
-                >
+                <small>{{ user.last_login.strftime('%m/%d/%Y') if user.last_login else 'Never' }}</small>
               </td>
               <td>
                 <div class="btn-group-vertical btn-group-sm" role="group">
@@ -98,7 +341,7 @@
                   {% if user.is_verified and not user.is_approved %}
                   <button
                     class="btn btn-success btn-sm"
-                    onclick="approveUser({{ user.id }}, '{{ user.first_name }} {{ user.last_name }}')"
+                    onclick="approveUser({{ user.id }}, {{ display_name|tojson }})"
                   >
                     <i class="fas fa-user-check"></i> Approve
                   </button>
@@ -107,46 +350,38 @@
                   <span class="badge bg-info">You</span>
                   {% else %}
                   {% if user.email|lower != owner_email|lower %}
-                  {% set account_active = user.is_active and not user.archived_at %}
                   <button
                     class="btn btn-outline-warning btn-sm"
-                    onclick="toggleUserStatus({{ user.id }}, {{ account_active|tojson }}, '{{ user.first_name }} {{ user.last_name }}')"
+                    onclick="toggleUserStatus({{ user.id }}, {{ account_active|tojson }}, {{ display_name|tojson }})"
                   >
-                    <i
-                      class="fas fa-{{ 'pause' if account_active else 'play' }}"
-                    ></i>
+                    <i class="fas fa-{{ 'pause' if account_active else 'play' }}"></i>
                     {{ 'Deactivate' if account_active else 'Activate' }}
                   </button>
-
                   <button
                     class="btn btn-outline-info btn-sm"
                     onclick="viewUserDetails({{ user.id }})"
                   >
                     <i class="fas fa-eye"></i> Details
                   </button>
-
                   <button
                     class="btn btn-outline-danger btn-sm"
-                    onclick="deleteUser({{ user.id }}, '{{ user.first_name }} {{ user.last_name }}')"
+                    onclick="deleteUser({{ user.id }}, {{ display_name|tojson }})"
                   >
                     <i class="fas fa-trash"></i> Delete
                   </button>
                   {% endif %}
-
                   {% if is_owner and user.email|lower != owner_email|lower %}
                     {% if user.role == 'super_admin' %}
                     <button
                       class="btn btn-outline-secondary btn-sm"
-                      title="Remove Super Admin access from this user"
-                      onclick="setRole({{ user.id }}, '{{ user.first_name }} {{ user.last_name }}', 'family_admin')"
+                      onclick="setRole({{ user.id }}, {{ display_name|tojson }}, 'family_admin')"
                     >
                       <i class="fas fa-user-shield"></i> Revoke Super Admin
                     </button>
                     {% else %}
                     <button
                       class="btn btn-outline-danger btn-sm"
-                      title="Give this user full Super Admin access to everything"
-                      onclick="setRole({{ user.id }}, '{{ user.first_name }} {{ user.last_name }}', 'super_admin')"
+                      onclick="setRole({{ user.id }}, {{ display_name|tojson }}, 'super_admin')"
                     >
                       <i class="fas fa-user-shield"></i> Make Super Admin
                     </button>
@@ -169,99 +404,50 @@
       {% endif %}
     </div>
   </div>
-
-  <!-- Summary Cards -->
-  <div class="row mt-4">
-    <div class="col-md-3">
-      <div class="card" style="background: var(--df-card-header); border-bottom: 3px solid var(--df-accent); color: var(--df-dt-header-text);">
-        <div class="card-body text-center">
-          <h3>{{ users|length }}</h3>
-          <p class="mb-0">Total Users</p>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card bg-success text-white">
-        <div class="card-body text-center">
-          <h3>{{ users|selectattr('is_verified')|list|length }}</h3>
-          <p class="mb-0">Verified</p>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card bg-warning text-white">
-        <div class="card-body text-center">
-          <h3>{{ users|rejectattr('is_verified')|list|length }}</h3>
-          <p class="mb-0">Pending</p>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card bg-info text-white">
-        <div class="card-body text-center">
-          <h3>{{ users|map(attribute='family_name')|unique|list|length }}</h3>
-          <p class="mb-0">Families</p>
-        </div>
-      </div>
-    </div>
-  </div>
 </div>
 
-<!-- User Details Modal -->
 <div class="modal fade" id="userDetailsModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content" style="color:#212529;">
       <div class="modal-header">
         <h5 class="modal-title">User Details</h5>
-        <button
-          type="button"
-          class="btn-close"
-          data-bs-dismiss="modal"
-        ></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <div id="userDetailsContent">
-          <p class="text-muted">Loading user details...</p>
+          <p class="text-muted mb-0">Loading user details...</p>
         </div>
       </div>
     </div>
   </div>
 </div>
-{% endblock %} {% block styles %}
-<style>
-  .table th {
-    font-weight: 600;
-    font-size: 0.9rem;
-  }
+{% endblock %}
 
-  .btn-group-vertical .btn {
-    margin-bottom: 2px;
-  }
-
-  .card {
-    border: none;
-    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-  }
-
-  .fa-3x {
-    font-size: 2.5rem;
-  }
-
-  @media (max-width: 768px) {
-    .table-responsive {
-      font-size: 0.875rem;
-    }
-
-    .btn-group-vertical .btn {
-      font-size: 0.75rem;
-      padding: 0.25rem 0.5rem;
-    }
-  }
-</style>
-{% endblock %} {% block scripts %}
+{% block scripts %}
 <script>
+  var ADMIN_USERS = {{ users_json|safe }};
+
   function refreshUsers() {
     location.reload();
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return 'Never';
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+    } catch (e) {
+      return String(iso);
+    }
   }
 
   function toggleUserStatus(userId, isActive, userName) {
@@ -289,23 +475,41 @@
   }
 
   function viewUserDetails(userId) {
-    // TODO: Implement user details API call
-    document.getElementById('userDetailsContent').innerHTML = `
-      <div class="text-center">
-        <i class="fas fa-info-circle fa-2x text-info mb-3"></i>
-        <h5>User Details</h5>
-        <p class="text-muted">Detailed user information view coming soon!</p>
-        <p><small>User ID: ${userId}</small></p>
-      </div>
-    `;
-
-    const modal = new bootstrap.Modal(document.getElementById('userDetailsModal'));
-    modal.show();
+    var u = null;
+    for (var i = 0; i < ADMIN_USERS.length; i++) {
+      if (ADMIN_USERS[i].id === userId) { u = ADMIN_USERS[i]; break; }
+    }
+    var el = document.getElementById('userDetailsContent');
+    if (!u) {
+      el.innerHTML = '<p class="text-danger mb-0">User not found.</p>';
+    } else {
+      var rows = [
+        ['Name', (u.first_name || '') + ' ' + (u.last_name || '')],
+        ['Email', u.email || ''],
+        ['Family', u.family_name || ''],
+        ['Family members', String(u.family_member_count || 0)],
+        ['Role', (u.role || '').replace(/_/g, ' ')],
+        ['Verified', u.is_verified ? 'Yes' : 'No'],
+        ['Approved', u.is_approved ? 'Yes' : 'No'],
+        ['Active', (u.is_active && !u.archived_at) ? 'Yes' : 'No'],
+        ['Joined', fmtDate(u.created_at)],
+        ['Last login', fmtDate(u.last_login)],
+        ['User ID', String(u.id)]
+      ];
+      var html = '';
+      for (var r = 0; r < rows.length; r++) {
+        html += '<div class="aum-detail-row"><span class="aum-detail-label">'
+          + esc(rows[r][0]) + '</span><span class="aum-detail-value">'
+          + esc(rows[r][1]) + '</span></div>';
+      }
+      el.innerHTML = html;
+    }
+    new bootstrap.Modal(document.getElementById('userDetailsModal')).show();
   }
 
   function approveUser(userId, userName) {
     AppModal.confirm('Approve User', 'Approve ' + userName + '? They will be able to log in and use the app.', function() {
-      fetch('/auth/admin/approve-user/' + userId, {method: 'POST'})
+      fetch('/auth/admin/approve-user/' + userId, { method: 'POST' })
         .then(function(r) { return r.json(); })
         .then(function(data) {
           if (data.success) {
@@ -315,8 +519,8 @@
             AppModal.error('Error', data.error || 'Failed to approve user');
           }
         })
-        .catch(function(e) { AppModal.error('Error', 'Failed to approve user'); });
-    }, {confirmText: 'Approve'});
+        .catch(function() { AppModal.error('Error', 'Failed to approve user'); });
+    }, { confirmText: 'Approve' });
   }
 
   function setRole(userId, userName, newRole) {
@@ -367,12 +571,9 @@
     });
   }
 
-  // Auto-refresh every 30 seconds if there are pending users
-  const pendingUsers = {{ users|rejectattr('is_verified')|list|length }};
+  var pendingUsers = {{ users|rejectattr('is_verified')|list|length }};
   if (pendingUsers > 0) {
-    setTimeout(() => {
-      refreshUsers();
-    }, 30000);
+    setTimeout(function() { refreshUsers(); }, 30000);
   }
 </script>
 {% endblock %}

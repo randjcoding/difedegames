@@ -1025,7 +1025,7 @@ def main():
         conn.commit()
         page = client_a.get('/auth/admin/users').get_data(as_text=True)
         check('admin users page loads for super admin',
-              'Manage Users' in page or 'admin/users' in page or 'Deactivate' in page)
+              'User Management' in page or 'Deactivate' in page)
         check('admin users page wires real deactivate/activate APIs',
               "/api/users/' + userId + '/archive'" in page
               or '/api/users/' in page and 'archive' in page and 'reinstate' in page)
@@ -1035,6 +1035,18 @@ def main():
         check('admin deactivate is not a Coming Soon stub',
               'User deactivate functionality not yet implemented' not in page
               and 'User deletion functionality not yet implemented' not in page)
+        check('admin users details is not a Coming Soon stub',
+              'Detailed user information view coming soon' not in page
+              and 'ADMIN_USERS' in page and 'aum-detail-row' in page)
+        check('admin users has mobile card layout',
+              'aum-card-list' in page and 'aum-user-card' in page
+              and 'aum-table-wrap' in page)
+        check('admin users hides table on phone widths',
+              'max-width: 991.98px' in page and 'aum-table-wrap' in page
+              and 'display: none' in page)
+        admin_dash = client_a.get('/admin').get_data(as_text=True)
+        check('admin dashboard management modals go fullscreen on phones',
+              'modal-fullscreen-sm-down' in admin_dash)
 
         client_z = app.test_client()
         register(client_z, 'zztest.doomed@example.com', 'Zztestdoomed', 'Target', 'Zztest Doomed')
