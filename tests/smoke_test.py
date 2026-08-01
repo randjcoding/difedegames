@@ -67,10 +67,15 @@ def run(conn, sql, params=None):
 
 
 def extract_link(kind):
-    """Pull the newest /claim/, /invite/, /action/, or /auth/set-password/ link."""
+    """Pull the newest /claim/, /invite/, /action/, set-password, or reset-password link."""
     for mail in reversed(SENT_EMAILS):
         if kind == 'set-password':
             m = re.search(r'/auth/set-password/([A-Za-z0-9_\-]+)', mail['body'])
+            if m:
+                return m.group(1)
+            continue
+        if kind == 'reset-password':
+            m = re.search(r'/auth/reset-password/([A-Za-z0-9_\-]+)', mail['body'])
             if m:
                 return m.group(1)
             continue
@@ -188,6 +193,7 @@ def cleanup(conn, ids):
     run(conn, """DELETE FROM action_tokens
         WHERE player_id = ANY(%s) OR user_id = ANY(%s) OR family_id = ANY(%s)""",
         (player_ids or [0], user_ids or [0], fam_ids or [0]))
+    run(conn, 'DELETE FROM password_reset_tokens WHERE user_id = ANY(%s)', (user_ids or [0],))
     run(conn, "DELETE FROM invitations WHERE invited_by_user_id = ANY(%s) OR email LIKE 'zztest%%'",
         (user_ids or [0],))
     run(conn, 'DELETE FROM notifications WHERE user_id = ANY(%s)', (user_ids or [0],))
@@ -1117,6 +1123,196 @@ def main():
 
             r = client_a.post(f"/auth/admin/users/{user_a['id']}/delete")
             check('cannot delete own account', r.status_code == 400, str(r.get_json()))
+
+        print('\n== Section 16: passwords, people hub, merge keep, scoped stats, summary ==')
+        run(conn, "UPDATE users SET role = 'super_admin' WHERE id = %s", (user_a['id'],))
+        conn.commit()
+
+        # Forgot / reset password (1 hour token, single-use).
+        SENT_EMAILS.clear()
+        client_pw = app.test_client()
+        r = client_pw.post('/auth/forgot-password', data={
+            'email': 'zztest.beta@example.com'}, follow_redirects=True)
+        check('forgot-password accepts request', r.status_code == 200)
+        reset_tok = extract_link('reset-password')
+        check('forgot-password email has reset link', reset_tok is not None)
+        if reset_tok:
+            row = q1(conn, '''
+                SELECT used, expires_at > NOW() AS fresh,
+                       expires_at < NOW() + INTERVAL '2 hours' AS within_window
+                FROM password_reset_tokens WHERE token = %s
+            ''', (reset_tok,))
+            check('reset token is fresh and ~1h TTL',
+                  row and row['used'] is False and row['fresh'] and row['within_window'],
+                  str(row))
+            r = client_pw.post(f'/auth/reset-password/{reset_tok}', data={
+                'password': 'Zztest!Pass2', 'confirm_password': 'Zztest!Pass2',
+            }, follow_redirects=True)
+            check('reset-password consumes token', r.status_code == 200)
+            row = q1(conn, 'SELECT used FROM password_reset_tokens WHERE token = %s', (reset_tok,))
+            check('reset token marked used', row and row['used'] is True)
+            r = client_pw.post(f'/auth/reset-password/{reset_tok}', data={
+                'password': 'Zztest!Pass3', 'confirm_password': 'Zztest!Pass3',
+            }, follow_redirects=True)
+            body = r.get_data(as_text=True).lower()
+            check('used reset token rejected',
+                  'invalid' in body or 'expired' in body or 'already' in body)
+            r = client_pw.post('/auth/login', data={
+                'email': 'zztest.beta@example.com', 'password': 'Zztest!Pass2',
+            }, follow_redirects=True)
+            check('login works with reset password', r.status_code == 200)
+            # Restore known password for later steps.
+            r = client_a.post(f"/auth/admin/users/{user_b['id']}/set-password",
+                              json={'mode': 'set', 'password': PASSWORD})
+            check('admin force-set password works',
+                  r.status_code == 200 and (r.get_json() or {}).get('success') is True,
+                  str(r.get_json()))
+            SENT_EMAILS.clear()
+            r = client_a.post(f"/auth/admin/users/{user_b['id']}/set-password",
+                              json={'mode': 'email'})
+            check('admin email-reset mode sends mail',
+                  r.status_code == 200 and extract_link('reset-password') is not None,
+                  str(r.get_json()))
+
+        # People Hub: My Team / Entire Site.
+        page = client_a.get('/admin/people').get_data(as_text=True)
+        check('people hub page loads', 'People & Accounts' in page or 'Entire Site' in page)
+        check('admin dashboard points to people hub',
+              '/admin/people' in client_a.get('/admin').get_data(as_text=True)
+              and 'Use when:' in client_a.get('/admin').get_data(as_text=True))
+        r = client_a.get('/api/admin/people', query_string={'scope': 'site'})
+        people = (r.get_json() or {}).get('people') or (r.get_json() or {}).get('players') or []
+        if isinstance(r.get_json(), list):
+            people = r.get_json()
+        check('people hub site API returns both families',
+              r.status_code == 200 and len(people) >= 2, str(r.status_code))
+        site_names = ' '.join(
+            str(p.get('display_name') or p.get('first_name') or '') for p in people)
+        check('people hub site list includes Alpha and Beta leads',
+              'Zztestalice' in site_names and 'Zztestbob' in site_names, site_names[:200])
+        r = client_a.get('/api/admin/people', query_string={'scope': 'mine'})
+        mine = (r.get_json() or {}).get('people') or (r.get_json() or {}).get('players') or []
+        if isinstance(r.get_json(), list):
+            mine = r.get_json()
+        mine_names = ' '.join(str(p.get('display_name') or p.get('first_name') or '') for p in mine)
+        check('people hub mine scope excludes other family lead',
+              'Zztestbob' not in mine_names, mine_names[:200])
+
+        # Super-admin dual-login merge: keep more-games identity, retire other login.
+        r = client_a.post('/api/team/players', json={
+            'first_name': 'Zztestdual', 'last_name': 'Keepme', 'display_name': 'Zztestdual Keep'})
+        keep_pid = (r.get_json() or {}).get('id')
+        r = client_a.post('/api/team/players', json={
+            'first_name': 'Zztestdual', 'last_name': 'Dropme', 'display_name': 'Zztestdual Drop'})
+        drop_pid = (r.get_json() or {}).get('id')
+        ids['players'].update({p for p in (keep_pid, drop_pid) if p})
+        game_def = q1(conn, 'SELECT id FROM games ORDER BY id LIMIT 1')
+        if keep_pid and drop_pid and game_def:
+            r = client_a.post('/api/games/new', json={
+                'game_id': game_def['id'],
+                'player_ids': [keep_pid, user_a['player_id']]})
+            ag_k = (r.get_json() or {}).get('id')
+            client_a.post('/api/scores', json={
+                'game_id': ag_k, 'player_id': keep_pid, 'round_number': 1, 'score': 5})
+            client_a.post('/api/scores', json={
+                'game_id': ag_k, 'player_id': keep_pid, 'round_number': 2, 'score': 7})
+            run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (ag_k,))
+            r = client_a.post('/api/games/new', json={
+                'game_id': game_def['id'],
+                'player_ids': [drop_pid, user_a['player_id']]})
+            ag_d = (r.get_json() or {}).get('id')
+            client_a.post('/api/scores', json={
+                'game_id': ag_d, 'player_id': drop_pid, 'round_number': 1, 'score': 3})
+            run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (ag_d,))
+            from werkzeug.security import generate_password_hash
+            run(conn, """
+                INSERT INTO users (email, password_hash, first_name, last_name, family_name,
+                                   role, is_verified, is_approved, is_active, family_id, player_id)
+                VALUES ('zztest.dualkeep@example.com', %s, 'Zztestdual', 'Keepme', 'Zztest Alpha',
+                        'family_member', TRUE, TRUE, TRUE, %s, %s),
+                       ('zztest.dualdrop@example.com', %s, 'Zztestdual', 'Dropme', 'Zztest Alpha',
+                        'family_member', TRUE, TRUE, TRUE, %s, %s)
+            """, (generate_password_hash(PASSWORD), fam_a['id'], keep_pid,
+                  generate_password_hash(PASSWORD), fam_a['id'], drop_pid))
+            conn.commit()
+            uk = q1(conn, "SELECT id FROM users WHERE email = 'zztest.dualkeep@example.com'")
+            ud = q1(conn, "SELECT id FROM users WHERE email = 'zztest.dualdrop@example.com'")
+            ids['users'].update({uk['id'], ud['id']})
+            r = client_a.post('/api/admin/merge-players', json={
+                'keep_id': drop_pid, 'dup_id': keep_pid, 'auto_keep': True})
+            body = r.get_json() or {}
+            check('super admin can merge dual logins with auto_keep',
+                  r.status_code == 200 and body.get('success') is not False, str(body))
+            kept = body.get('keep_id') or body.get('kept_id') or keep_pid
+            # Prefer checking DB: player with more games should remain.
+            still_keep = q1(conn, 'SELECT id FROM players WHERE id = %s', (keep_pid,))
+            still_drop = q1(conn, 'SELECT id FROM players WHERE id = %s', (drop_pid,))
+            check('merge kept more-games player', still_keep is not None and still_drop is None,
+                  f'keep={still_keep} drop={still_drop} resp={body}')
+            check('retire login on discarded player',
+                  q1(conn, "SELECT id FROM users WHERE email = 'zztest.dualdrop@example.com'") is None)
+            check('kept login remains',
+                  q1(conn, "SELECT player_id FROM users WHERE email = 'zztest.dualkeep@example.com'")['player_id'] == keep_pid)
+            ids['users'].discard(ud['id'])
+            ids['players'].discard(drop_pid)
+
+            # Game summary page for completed game.
+            r = client_a.get(f'/games/{ag_k}/summary')
+            html = r.get_data(as_text=True)
+            check('game summary page loads for participant family',
+                  r.status_code == 200 and 'Round by Round' in html and 'Final Standings' in html)
+            gslug = q1(conn, 'SELECT slug FROM games WHERE id = %s', (game_def['id'],))
+            if gslug and gslug.get('slug'):
+                # Route aliases vary; also accept direct template wiring check.
+                game_page = client_a.get(f"/game/{gslug['slug']}").get_data(as_text=True)
+                from pathlib import Path as _Path
+                tpl = _Path(__file__).resolve().parents[1] / 'app' / 'templates' / 'five_crowns.html'
+                check('completed games link to summary',
+                      'main.game_summary' in tpl.read_text()
+                      or '/summary' in game_page)
+
+        # Leaderboard circle vs All-Time Stats.
+        r = client_a.get('/leaderboard')
+        check('main leaderboard loads', r.status_code == 200)
+        r = client_a.get('/stats/all-time')
+        at = r.get_data(as_text=True)
+        check('all-time stats page loads', r.status_code == 200 and 'All-Time' in at)
+        nav = client_a.get('/dashboard').get_data(as_text=True)
+        check('nav has All-Time Stats', 'All-Time Stats' in nav or '/stats/all-time' in nav)
+
+        client_iso = app.test_client()
+        register(client_iso, 'zztest.iso@example.com', 'Zztestiso', 'Lone', 'Zztest Isolated')
+        activate_and_login(conn, client_iso, 'zztest.iso@example.com')
+        iso_user = q1(conn, "SELECT id, player_id, family_id FROM users WHERE email = 'zztest.iso@example.com'")
+        ids['users'].add(iso_user['id'])
+        ids['players'].add(iso_user['player_id'])
+        ids['families'].add(iso_user['family_id'])
+        r = client_iso.post('/api/team/players', json={
+            'first_name': 'Zztestisopartner', 'last_name': 'P', 'display_name': 'Zztestisopartner'})
+        iso_p2 = (r.get_json() or {}).get('id')
+        if iso_p2:
+            ids['players'].add(iso_p2)
+        game_def = q1(conn, 'SELECT id FROM games ORDER BY id LIMIT 1')
+        if iso_p2 and game_def:
+            r = client_iso.post('/api/games/new', json={
+                'game_id': game_def['id'],
+                'player_ids': [iso_user['player_id'], iso_p2]})
+            ag_iso = (r.get_json() or {}).get('id')
+            client_iso.post('/api/scores', json={
+                'game_id': ag_iso, 'player_id': iso_user['player_id'],
+                'round_number': 1, 'score': 1})
+            run(conn, '''
+                INSERT INTO game_stats (game_id, winner_id, winning_score, player_count, is_tie)
+                VALUES (%s, %s, 1, 2, FALSE)
+            ''', (ag_iso, iso_user['player_id']))
+            run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (ag_iso,))
+            conn.commit()
+            lb_a = client_a.get('/leaderboard').get_data(as_text=True)
+            at_a = client_a.get('/stats/all-time').get_data(as_text=True)
+            check('circle leaderboard hides isolated family player',
+                  'Zztestiso' not in lb_a)
+            check('all-time stats includes isolated family player',
+                  'Zztestiso' in at_a)
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')

@@ -7,87 +7,81 @@
     <h2 class="page-heading mb-1">
       <i class="fas fa-shield-alt me-2"></i>Admin Dashboard
     </h2>
-    <p class="mb-0" style="color: var(--df-muted);">System overview and management tools</p>
+    <p class="mb-0" style="color: var(--df-muted);">Pick the tool that matches the job. Each card says when to use it.</p>
   </div>
 
   <div class="row g-4">
-    <!-- Player Management -->
-    <div class="col-md-6 col-lg-3">
-      <div class="admin-widget" onclick="openPlayerManagement()" role="button" tabindex="0">
-        <div class="widget-icon-wrap">
-          <i class="fas fa-users"></i>
-        </div>
-        <div class="widget-stat" id="playerCountStat">{{ player_count }}</div>
-        <div class="widget-title">Player Management</div>
-        <div class="widget-desc">Add, edit, and remove players</div>
-        <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
-      </div>
-    </div>
-
-    <!-- Game Management -->
-    <div class="col-md-6 col-lg-3">
-      <div class="admin-widget" onclick="openGameManagement()" role="button" tabindex="0">
-        <div class="widget-icon-wrap">
-          <i class="fas fa-gamepad"></i>
-        </div>
-        <div class="widget-stat" id="gameCountStat">{{ game_count }}</div>
-        <div class="widget-title">Game Management</div>
-        <div class="widget-desc">View, edit scores, and manage games</div>
-        <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
-      </div>
-    </div>
-
-    <!-- User Management -->
-    <div class="col-md-6 col-lg-3">
-      <a href="/auth/admin/users" class="text-decoration-none">
+    <div class="col-md-6 col-lg-4">
+      <a href="{{ url_for('main.admin_people') }}" class="text-decoration-none">
         <div class="admin-widget">
-          <div class="widget-icon-wrap">
-            <i class="fas fa-user-cog"></i>
-          </div>
-          <div class="widget-stat">{{ user_count }}</div>
-          <div class="widget-title">User Management</div>
-          <div class="widget-desc">Manage accounts, roles, and access</div>
+          <div class="widget-icon-wrap"><i class="fas fa-users"></i></div>
+          <div class="widget-stat" id="playerCountStat">{{ player_count }}</div>
+          <div class="widget-title">People &amp; Accounts</div>
+          <div class="widget-desc"><strong>Use when:</strong> someone signed up twice, needs a new team, needs a password email, or you must move people for them. My Team or Entire Site.</div>
           <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
         </div>
       </a>
     </div>
 
-    <!-- Family Management -->
-    <div class="col-md-6 col-lg-3">
+    <div class="col-md-6 col-lg-4">
+      <a href="/auth/admin/users" class="text-decoration-none">
+        <div class="admin-widget">
+          <div class="widget-icon-wrap"><i class="fas fa-user-cog"></i></div>
+          <div class="widget-stat">{{ user_count }}</div>
+          <div class="widget-title">Logins &amp; Approvals</div>
+          <div class="widget-desc"><strong>Use when:</strong> approve/verify a new signup, deactivate a login, force-set a password, or change Super Admin roles.</div>
+          <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
+        </div>
+      </a>
+    </div>
+
+    <div class="col-md-6 col-lg-4">
       <div class="admin-widget" onclick="openFamilyManagement()" role="button" tabindex="0">
-        <div class="widget-icon-wrap">
-          <i class="fas fa-house-user"></i>
-        </div>
+        <div class="widget-icon-wrap"><i class="fas fa-house-user"></i></div>
         <div class="widget-stat" id="familyCountStat">{{ family_count }}</div>
-        <div class="widget-title">Family Management</div>
-        <div class="widget-desc">Manage families and move players</div>
+        <div class="widget-title">Families / Teams</div>
+        <div class="widget-desc"><strong>Use when:</strong> you need a family roster overview or bulk-move several people between existing teams.</div>
         <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
       </div>
     </div>
 
-    <!-- Merge Duplicates -->
-    <div class="col-md-6 col-lg-3">
+    <div class="col-md-6 col-lg-4">
+      <div class="admin-widget" onclick="openGameManagement()" role="button" tabindex="0">
+        <div class="widget-icon-wrap"><i class="fas fa-gamepad"></i></div>
+        <div class="widget-stat" id="gameCountStat">{{ game_count }}</div>
+        <div class="widget-title">Games &amp; Scores</div>
+        <div class="widget-desc"><strong>Use when:</strong> a completed game needs score edits or cleanup.</div>
+        <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
+      </div>
+    </div>
+
+    <div class="col-md-6 col-lg-4">
       <div class="admin-widget" onclick="openMergeTool()" role="button" tabindex="0">
-        <div class="widget-icon-wrap">
-          <i class="fas fa-code-branch"></i>
-        </div>
+        <div class="widget-icon-wrap"><i class="fas fa-code-branch"></i></div>
         <div class="widget-stat"><i class="fas fa-people-arrows"></i></div>
-        <div class="widget-title">Merge Duplicates</div>
-        <div class="widget-desc">Combine two profiles for the same person</div>
+        <div class="widget-title">Quick Merge</div>
+        <div class="widget-desc"><strong>Use when:</strong> you already know two profiles are the same person and want a fast merge (also in People &amp; Accounts).</div>
         <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
       </div>
     </div>
 
-    <!-- Feedback Inbox -->
-    <div class="col-md-6 col-lg-3">
+    <div class="col-md-6 col-lg-4">
+      <div class="admin-widget" onclick="openPlayerManagement()" role="button" tabindex="0">
+        <div class="widget-icon-wrap"><i class="fas fa-user-edit"></i></div>
+        <div class="widget-stat"><i class="fas fa-pen"></i></div>
+        <div class="widget-title">Edit Player Details</div>
+        <div class="widget-desc"><strong>Use when:</strong> you need to edit a name, email, or linked login fields on a single player row.</div>
+        <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
+      </div>
+    </div>
+
+    <div class="col-md-6 col-lg-4">
       <a href="{{ url_for('main.admin_feedback_list') }}" class="text-decoration-none">
         <div class="admin-widget">
-          <div class="widget-icon-wrap">
-            <i class="fas fa-inbox"></i>
-          </div>
+          <div class="widget-icon-wrap"><i class="fas fa-inbox"></i></div>
           <div class="widget-stat"><i class="fas fa-comment-dots"></i></div>
           <div class="widget-title">Feedback Inbox</div>
-          <div class="widget-desc">Bugs, enhancements, and new game requests</div>
+          <div class="widget-desc"><strong>Use when:</strong> reading bugs, ideas, and new game requests from users.</div>
           <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
         </div>
       </a>

@@ -675,6 +675,60 @@ def validate_password(password):
     valid, _ = validate_password_strength(password)
     return valid
 
+
+def create_password_reset_token(user_id, ttl_hours=1):
+    """Issue a single-use password reset token. Returns token string or None."""
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.utcnow() + timedelta(hours=ttl_hours)
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE password_reset_tokens SET used = TRUE
+            WHERE user_id = %s AND used = FALSE AND expires_at > CURRENT_TIMESTAMP
+        ''', (user_id,))
+        cursor.execute('''
+            INSERT INTO password_reset_tokens (user_id, token, expires_at, used)
+            VALUES (%s, %s, %s, FALSE) RETURNING token
+        ''', (user_id, token, expires_at))
+        row = cursor.fetchone()
+        conn.commit()
+        cursor.close()
+        return row['token'] if isinstance(row, dict) else (row[0] if row else None)
+    except Exception as e:
+        conn.rollback()
+        print(f"Error creating password reset token: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def peek_password_reset_token(conn, token):
+    """Return reset token row if valid/unused/unexpired, else None."""
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT * FROM password_reset_tokens
+        WHERE token = %s AND used = FALSE AND expires_at > CURRENT_TIMESTAMP
+    ''', (token,))
+    row = cursor.fetchone()
+    cursor.close()
+    return dict(row) if row else None
+
+
+def consume_password_reset_token(conn, token):
+    """Mark reset token used. Returns row or None. Caller commits."""
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE password_reset_tokens SET used = TRUE
+        WHERE token = %s AND used = FALSE AND expires_at > CURRENT_TIMESTAMP
+        RETURNING *
+    ''', (token,))
+    row = cursor.fetchone()
+    cursor.close()
+    return dict(row) if row else None
+
 def create_verification_token(user_id):
     """Simple wrapper for creating verification tokens"""
     return UserManager.create_verification_token(user_id)

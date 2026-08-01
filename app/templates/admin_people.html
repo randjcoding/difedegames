@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+{% block title %}People & Accounts{% endblock %}
+
+{% block styles %}
+<style>
+  .aph { max-width: 1100px; }
+  .aph-card {
+    background: #fff; color: #212529; border-radius: 12px;
+    border: 1px solid var(--df-border, #dee2e6); padding: 0.85rem 1rem;
+    margin-bottom: 0.65rem;
+  }
+  .aph-name { font-weight: 700; font-size: 1.05rem; }
+  .aph-meta { font-size: 0.8rem; color: #6c757d; margin: 0.25rem 0 0.5rem; word-break: break-word; }
+  .aph-badges { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.5rem; }
+  .aph-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .aph-actions .btn { font-size: 0.78rem; }
+  .aph-toolbar .btn { white-space: nowrap; }
+  .aph-help {
+    background: var(--df-card, #fff); color: var(--df-text-card, #212529);
+    border-radius: 10px; padding: 0.75rem 1rem; margin-bottom: 1rem;
+    border-left: 4px solid var(--df-accent);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3 aph">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+      <h2 class="page-heading mb-1"><i class="fas fa-users me-2"></i>People &amp; Accounts</h2>
+      <p class="mb-0" style="color:var(--df-muted);font-size:0.9rem;">Find anyone, merge duplicates, move teams, create logins.</p>
+    </div>
+    <a href="{{ url_for('main.admin') }}" class="btn btn-outline-secondary btn-sm">Back to Admin</a>
+  </div>
+
+  <div class="aph-help">
+    <strong>Use this when</strong> someone signed up twice, needs a new team, needs a password email, or you need to move people for them.
+    Historical game scores stay attributed to the family they played with.
+  </div>
+
+  <div class="aph-toolbar d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="btn-group" role="group">
+      <button type="button" class="btn btn-sm btn-primary" id="scopeMine">My Team</button>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="scopeSite">Entire Site</button>
+    </div>
+    <input type="search" id="peopleSearch" class="form-control form-control-sm" style="max-width:280px;background:#fff;color:#212529;"
+           placeholder="Search name, email, family...">
+    <button type="button" class="btn btn-sm btn-success" id="btnReload">Refresh</button>
+  </div>
+
+  <div id="peopleStatus" class="text-muted mb-2" style="font-size:0.85rem;">Loading...</div>
+  <div id="peopleList"></div>
+</div>
+
+<!-- Move modal -->
+<div class="modal fade" id="moveModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="color:#212529;">
+      <div class="modal-header"><h5 class="modal-title">Move to Family</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <p class="mb-2" id="moveWho"></p>
+        <label class="form-label">Target family</label>
+        <select class="form-select" id="moveFamily">
+          {% for f in families %}
+          <option value="{{ f.id }}">{{ f.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="moveConfirm">Move</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Create family modal -->
+<div class="modal fade" id="createFamModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content" style="color:#212529;">
+      <div class="modal-header"><h5 class="modal-title">Create Team for Person</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <p class="mb-2" id="createWho"></p>
+        <div class="mb-3">
+          <label class="form-label">New team name</label>
+          <input type="text" class="form-control" id="createFamName" style="background:#fff;color:#212529;">
+        </div>
+        <div class="mb-3" id="createEmailWrap" style="display:none;">
+          <label class="form-label">Email for new login</label>
+          <input type="email" class="form-control" id="createEmail" style="background:#fff;color:#212529;">
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="createInvite" checked>
+          <label class="form-check-label" for="createInvite">Email them a password setup link</label>
+        </div>
+        <label class="form-label">Also move these people onto the new team</label>
+        <div id="createMoveList" style="max-height:180px;overflow:auto;border:1px solid #dee2e6;border-radius:8px;padding:0.5rem;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="createFamConfirm">Create Team</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Merge modal -->
+<div class="modal fade" id="mergePickModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="color:#212529;">
+      <div class="modal-header"><h5 class="modal-title">Merge Same Person</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <p id="mergeKeepLabel" class="mb-2"></p>
+        <label class="form-label">Merge this duplicate into them</label>
+        <select class="form-select" id="mergeDupSelect"></select>
+        <p class="small text-muted mt-2 mb-0">The profile with more games played is kept automatically. The other login (if any) is removed. All scores stay.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="mergeConfirm">Merge</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var scope = 'mine';
+  var people = [];
+  var currentId = null;
+  var MY_FAMILY_ID = {{ my_family_id|tojson }};
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function setScope(next) {
+    scope = next;
+    document.getElementById('scopeMine').className = 'btn btn-sm ' + (scope === 'mine' ? 'btn-primary' : 'btn-outline-primary');
+    document.getElementById('scopeSite').className = 'btn btn-sm ' + (scope === 'site' ? 'btn-primary' : 'btn-outline-primary');
+    loadPeople();
+  }
+
+  function loadPeople() {
+    var q = document.getElementById('peopleSearch').value.trim();
+    var url = '/api/admin/people?scope=' + encodeURIComponent(scope);
+    if (q) url += '&q=' + encodeURIComponent(q);
+    document.getElementById('peopleStatus').textContent = 'Loading...';
+    fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+      people = data.people || [];
+      document.getElementById('peopleStatus').textContent = people.length + ' people (' + (scope === 'mine' ? 'My Team' : 'Entire Site') + ')';
+      render();
+    }).catch(function() {
+      document.getElementById('peopleStatus').textContent = 'Failed to load people.';
+    });
+  }
+
+  function render() {
+    var root = document.getElementById('peopleList');
+    if (!people.length) {
+      root.innerHTML = '<div class="text-muted py-4 text-center">No people match this view.</div>';
+      return;
+    }
+    var html = '';
+    people.forEach(function(p) {
+      var login = p.login_email
+        ? ('Login: ' + p.login_email + (p.is_approved ? '' : ' (needs approval)'))
+        : 'No login yet';
+      html += '<div class="aph-card">'
+        + '<div class="aph-name">' + esc(p.display_name) + ' <span class="text-muted" style="font-weight:400;">' + esc(p.first_name) + ' ' + esc(p.last_name) + '</span></div>'
+        + '<div class="aph-meta">' + esc(p.family_name || 'No family') + ' · ' + esc(login)
+        + ' · ' + (p.games || 0) + ' games · ' + (p.wins || 0) + 'W / ' + (p.losses || 0) + 'L</div>'
+        + '<div class="aph-badges">'
+        + (p.is_lead ? '<span class="badge bg-dark">Team Lead</span>' : '')
+        + (p.user_role === 'super_admin' ? '<span class="badge bg-danger">Super Admin</span>' : '')
+        + (!p.user_id ? '<span class="badge bg-secondary">No account</span>' : '')
+        + (p.user_id && !p.is_active ? '<span class="badge bg-warning text-dark">Inactive login</span>' : '')
+        + '</div>'
+        + '<div class="aph-actions">'
+        + '<a class="btn btn-outline-info btn-sm" href="/player/' + p.id + '">Profile</a>'
+        + '<button type="button" class="btn btn-outline-primary btn-sm" data-act="move" data-id="' + p.id + '">Move Family</button>'
+        + '<button type="button" class="btn btn-outline-success btn-sm" data-act="create-fam" data-id="' + p.id + '">Create Team + Lead</button>'
+        + '<button type="button" class="btn btn-outline-danger btn-sm" data-act="merge" data-id="' + p.id + '">Merge Duplicate</button>'
+        + (p.user_id
+            ? '<button type="button" class="btn btn-outline-secondary btn-sm" data-act="reset" data-uid="' + p.user_id + '">Email Password Reset</button>'
+              + '<button type="button" class="btn btn-outline-secondary btn-sm" data-act="force-pwd" data-uid="' + p.user_id + '">Force Password</button>'
+            : '<button type="button" class="btn btn-outline-secondary btn-sm" data-act="invite" data-id="' + p.id + '">Send Password Invite</button>')
+        + '</div></div>';
+    });
+    root.innerHTML = html;
+  }
+
+  function personById(id) {
+    id = parseInt(id, 10);
+    for (var i = 0; i < people.length; i++) if (people[i].id === id) return people[i];
+    return null;
+  }
+
+  document.getElementById('scopeMine').onclick = function() { setScope('mine'); };
+  document.getElementById('scopeSite').onclick = function() { setScope('site'); };
+  document.getElementById('btnReload').onclick = loadPeople;
+  var searchTimer = null;
+  document.getElementById('peopleSearch').addEventListener('input', function() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadPeople, 250);
+  });
+
+  document.getElementById('peopleList').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    var act = btn.getAttribute('data-act');
+    var id = btn.getAttribute('data-id');
+    var uid = btn.getAttribute('data-uid');
+    var p = id ? personById(id) : null;
+
+    if (act === 'move' && p) {
+      currentId = p.id;
+      document.getElementById('moveWho').textContent = 'Move ' + p.display_name + ' to:';
+      if (p.family_id) document.getElementById('moveFamily').value = String(p.family_id);
+      new bootstrap.Modal(document.getElementById('moveModal')).show();
+    } else if (act === 'create-fam' && p) {
+      currentId = p.id;
+      document.getElementById('createWho').textContent = 'Create a team led by ' + p.display_name + '.';
+      document.getElementById('createFamName').value = (p.last_name || p.display_name || '') + ' Family';
+      document.getElementById('createEmailWrap').style.display = p.user_id ? 'none' : '';
+      document.getElementById('createEmail').value = p.player_email || p.login_email || '';
+      var list = document.getElementById('createMoveList');
+      list.innerHTML = people.filter(function(x) { return x.id !== p.id; }).map(function(x) {
+        return '<div class="form-check"><input class="form-check-input" type="checkbox" value="' + x.id + '" id="mv' + x.id + '">'
+          + '<label class="form-check-label" for="mv' + x.id + '">' + esc(x.display_name)
+          + ' <span class="text-muted">(' + esc(x.family_name || 'none') + ')</span></label></div>';
+      }).join('') || '<div class="text-muted small">No other people loaded in this view.</div>';
+      new bootstrap.Modal(document.getElementById('createFamModal')).show();
+    } else if (act === 'merge' && p) {
+      currentId = p.id;
+      document.getElementById('mergeKeepLabel').textContent = 'Keeping candidate: ' + p.display_name + ' (auto-picks whoever has more games).';
+      var sel = document.getElementById('mergeDupSelect');
+      sel.innerHTML = people.filter(function(x) { return x.id !== p.id; }).map(function(x) {
+        return '<option value="' + x.id + '">' + esc(x.display_name) + ' — ' + esc(x.family_name || 'no family')
+          + ' (' + (x.games || 0) + ' games)</option>';
+      }).join('');
+      new bootstrap.Modal(document.getElementById('mergePickModal')).show();
+    } else if (act === 'reset' && uid) {
+      AppModal.confirm('Email Reset', 'Send a 1-hour password reset email?', function() {
+        fetch('/auth/admin/users/' + uid + '/set-password', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ mode: 'email' })
+        }).then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
+          .then(function(res) {
+            if (res.ok) AppModal.success('Sent', res.j.message || 'Email sent.');
+            else AppModal.error('Error', res.j.error || 'Failed');
+          });
+      }, { confirmText: 'Send Email' });
+    } else if (act === 'force-pwd' && uid) {
+      var pwd = window.prompt('Emergency password (8+ chars, upper, lower, number, special):');
+      if (!pwd) return;
+      fetch('/auth/admin/users/' + uid + '/set-password', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ mode: 'set', password: pwd })
+      }).then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
+        .then(function(res) {
+          if (res.ok) AppModal.success('Updated', res.j.message || 'Password set.');
+          else AppModal.error('Error', res.j.error || 'Failed');
+        });
+    } else if (act === 'invite' && p) {
+      AppModal.confirm('Password Invite', 'Email a set-password link for ' + p.display_name + '?', function() {
+        fetch('/api/players/' + p.id + '/password-invite', { method: 'POST' })
+          .then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
+          .then(function(res) {
+            if (res.ok) AppModal.success('Invite Sent', res.j.message || 'Email sent.');
+            else AppModal.error('Error', res.j.error || 'Failed');
+          });
+      }, { confirmText: 'Send Invite' });
+    }
+  });
+
+  document.getElementById('moveConfirm').onclick = function() {
+    var fam = document.getElementById('moveFamily').value;
+    fetch('/api/admin/move-player', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ player_id: currentId, target_family_id: parseInt(fam, 10) })
+    }).then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
+      .then(function(res) {
+        bootstrap.Modal.getInstance(document.getElementById('moveModal')).hide();
+        if (res.ok) { AppModal.success('Moved', 'Player moved to the selected family.'); loadPeople(); }
+        else AppModal.error('Error', res.j.error || 'Move failed');
+      });
+  };
+
+  document.getElementById('createFamConfirm').onclick = function() {
+    var name = document.getElementById('createFamName').value.trim();
+    var move = [];
+    document.querySelectorAll('#createMoveList input:checked').forEach(function(cb) {
+      move.push(parseInt(cb.value, 10));
+    });
+    var body = {
+      player_id: currentId,
+      name: name,
+      move_player_ids: move,
+      send_password_invite: document.getElementById('createInvite').checked,
+      email: document.getElementById('createEmail').value.trim()
+    };
+    fetch('/api/admin/create-family-for-player', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    }).then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
+      .then(function(res) {
+        bootstrap.Modal.getInstance(document.getElementById('createFamModal')).hide();
+        if (res.ok) { AppModal.success('Team Created', res.j.message || 'Done.'); loadPeople(); }
+        else AppModal.error('Error', res.j.error || 'Failed');
+      });
+  };
+
+  document.getElementById('mergeConfirm').onclick = function() {
+    var dup = parseInt(document.getElementById('mergeDupSelect').value, 10);
+    fetch('/api/admin/merge-players', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ keep_id: currentId, dup_id: dup, auto_keep: true })
+    }).then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
+      .then(function(res) {
+        bootstrap.Modal.getInstance(document.getElementById('mergePickModal')).hide();
+        if (res.ok) { AppModal.success('Merged', res.j.message || 'Merged.'); loadPeople(); }
+        else AppModal.error('Error', res.j.error || 'Merge failed');
+      });
+  };
+
+  setScope(MY_FAMILY_ID ? 'mine' : 'site');
+})();
+</script>
+{% endblock %}

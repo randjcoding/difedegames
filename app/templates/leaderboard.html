@@ -1,12 +1,19 @@
-{% extends "base.html" %} {% block title %}Leaderboard{% endblock %} {% block
-content %}
+{% extends "base.html" %}
+{% block title %}{% if leaderboard_scope == 'all' %}All-Time Stats{% else %}Leaderboard{% endif %}{% endblock %}
+{% block content %}
+{% set lb_endpoint = 'main.all_time_stats' if leaderboard_scope == 'all' else 'main.leaderboard' %}
 <div class="container mt-4">
-  <h1>Leaderboard</h1>
-  <p class="mb-1" style="color:var(--df-muted);font-size:0.85rem;">
-    <i class="fas fa-globe me-1"></i>Lifetime stats across all families and crews. For family-only numbers, see your family page.
+  <h1>{% if leaderboard_scope == 'all' %}All-Time Stats{% else %}Leaderboard{% endif %}</h1>
+  <p class="mb-2" style="color:var(--df-muted);font-size:0.85rem;">
+    {% if leaderboard_scope == 'all' %}
+    <i class="fas fa-globe me-1"></i>Site-wide stats across every family and crew.
+    <a href="{{ url_for('main.leaderboard') }}">Back to your Leaderboard</a>
+    {% else %}
+    <i class="fas fa-users me-1"></i>Your team, personal crew, and accepted alliances.
+    <a href="{{ url_for('main.all_time_stats') }}">View All-Time Stats (all teams)</a>
+    {% endif %}
   </p>
 
-  <!-- Game Filter Subtitle -->
   <p class="text-muted mb-3" id="filterSubtitle">
     {% if current_game_type %}
       {% for game in available_games %}
@@ -19,15 +26,14 @@ content %}
     {% endif %}
   </p>
 
-  <!-- Game Filter Buttons -->
   <div class="mb-4">
     <div class="btn-group flex-wrap game-filter-group" role="group" aria-label="Filter by game type">
-      <a href="{{ url_for('main.leaderboard') }}"
+      <a href="{{ url_for(lb_endpoint) }}"
          class="btn btn-game-filter {% if not current_game_type %}active{% endif %}">
         All Games
       </a>
       {% for game in available_games %}
-      <a href="{{ url_for('main.leaderboard', game_type=game.id) }}"
+      <a href="{{ url_for(lb_endpoint, game_type=game.id) }}"
          class="btn btn-game-filter {% if current_game_type|string == game.id|string %}active{% endif %}">
         {{ game.name }}
       </a>
@@ -39,12 +45,12 @@ content %}
   <div class="mb-4">
     <small class="text-muted d-block mb-1">Filter by game name:</small>
     <div class="btn-group flex-wrap game-filter-group" role="group" aria-label="Filter by sub-game">
-      <a href="{{ url_for('main.leaderboard', game_type=current_game_type) }}"
+      <a href="{{ url_for(lb_endpoint, game_type=current_game_type) }}"
          class="btn btn-game-filter btn-sm {% if not current_sub_game %}active{% endif %}">
         All
       </a>
       {% for sg in sub_game_names %}
-      <a href="{{ url_for('main.leaderboard', game_type=current_game_type, sub_game=sg) }}"
+      <a href="{{ url_for(lb_endpoint, game_type=current_game_type, sub_game=sg) }}"
          class="btn btn-game-filter btn-sm {% if current_sub_game == sg %}active{% endif %}">
         {{ sg }}
       </a>
@@ -226,7 +232,11 @@ content %}
                   <td>{{ game.player_names }}</td>
                   <td>{{ game.winner_display }}</td>
                   <td>{{ game.winning_score }}</td>
-                  <td>
+                  <td class="d-flex flex-wrap gap-1">
+                    <a
+                      href="{{ url_for('main.game_summary', game_id=game.game_id) }}"
+                      class="btn btn-sm btn-outline-primary"
+                    >Full Summary</a>
                     <button
                       class="btn btn-sm btn-primary round-by-round-btn"
                       data-game-id="{{ game.game_id }}"

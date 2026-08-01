@@ -241,6 +241,14 @@
                     data-aum-action="delete" data-user-id="{{ user.id }}">
               <i class="fas fa-trash"></i> Delete
             </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm"
+                    data-aum-action="set-password" data-user-id="{{ user.id }}">
+              <i class="fas fa-key"></i> Set Password
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm"
+                    data-aum-action="email-reset" data-user-id="{{ user.id }}">
+              <i class="fas fa-envelope"></i> Email Reset Link
+            </button>
             {% endif %}
             {% if is_owner and user.email|lower != owner_email|lower %}
               {% if user.role == 'super_admin' %}
@@ -352,6 +360,14 @@
                   <button type="button" class="btn btn-outline-danger btn-sm"
                           data-aum-action="delete" data-user-id="{{ user.id }}">
                     <i class="fas fa-trash"></i> Delete
+                  </button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                          data-aum-action="set-password" data-user-id="{{ user.id }}">
+                    <i class="fas fa-key"></i> Set Password
+                  </button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                          data-aum-action="email-reset" data-user-id="{{ user.id }}">
+                    <i class="fas fa-envelope"></i> Email Reset Link
                   </button>
                   {% endif %}
                   {% if is_owner and user.email|lower != owner_email|lower %}
@@ -557,6 +573,39 @@
     );
   }
 
+  function forceSetPassword(userId) {
+    var userName = userDisplayName(userById(userId));
+    var pwd = window.prompt(
+      'Emergency password for ' + userName + '.\nMust be 8+ chars with upper, lower, number, and special character.'
+    );
+    if (pwd == null) return;
+    pwd = String(pwd).trim();
+    if (!pwd) return;
+    postJson('/auth/admin/users/' + userId + '/set-password', { mode: 'set', password: pwd })
+      .then(function(res) {
+        if (res.ok) AppModal.success('Password Updated', res.j.message || 'Password set.');
+        else AppModal.error('Error', res.j.error || 'Failed to set password');
+      })
+      .catch(function() { AppModal.error('Error', 'Failed to set password'); });
+  }
+
+  function emailPasswordReset(userId) {
+    var userName = userDisplayName(userById(userId));
+    AppModal.confirm(
+      'Email Reset Link',
+      'Send ' + userName + ' a 1-hour password reset email?',
+      function() {
+        postJson('/auth/admin/users/' + userId + '/set-password', { mode: 'email' })
+          .then(function(res) {
+            if (res.ok) AppModal.success('Reset Email', res.j.message || 'Email sent.');
+            else AppModal.error('Error', res.j.error || 'Failed to send reset email');
+          })
+          .catch(function() { AppModal.error('Error', 'Failed to send reset email'); });
+      },
+      { confirmText: 'Send Email' }
+    );
+  }
+
   document.addEventListener('click', function(e) {
     var el = e.target.closest('[data-aum-action]');
     if (!el) return;
@@ -575,6 +624,8 @@
     else if (action === 'details') viewUserDetails(userId);
     else if (action === 'delete') deleteUser(userId);
     else if (action === 'set-role') setRole(userId, el.getAttribute('data-role'));
+    else if (action === 'set-password') forceSetPassword(userId);
+    else if (action === 'email-reset') emailPasswordReset(userId);
   });
 
   var pendingUsers = {{ users|rejectattr('is_verified')|list|length }};

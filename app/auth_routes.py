@@ -6,8 +6,12 @@ from .auth import (
     create_verification_token, verify_email_token, resend_verification_email,
     login_required, admin_required, load_current_user,
     peek_action_token, consume_action_token,
+    create_password_reset_token, peek_password_reset_token, consume_password_reset_token,
 )
-from .email_utils import send_verification_email, send_registration_notification, APP_BASE_URL
+from .email_utils import (
+    send_verification_email, send_registration_notification, APP_BASE_URL,
+    send_password_reset_email,
+)
 from .identity import unique_family_slug, audit
 import logging
 from datetime import datetime
@@ -738,18 +742,111 @@ def resend_verification():
 
 @auth_bp.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
-    """Forgot password page and handler"""
+    """Forgot password page and handler. Always shows the same success message
+    so we do not reveal whether an email is registered."""
     if request.method == 'GET':
         return render_template('auth/forgot_password.html')
-    
+
     email = request.form.get('email', '').strip().lower()
     if not email:
         flash('Please enter your email address.', 'error')
         return render_template('auth/forgot_password.html')
-    
-    # TODO: Implement password reset logic
-    flash('Password reset functionality is not yet implemented. Please contact administrator.', 'info')
+
+    generic = ('If that email is on file, we sent a reset link. '
+               'Check your inbox (and spam). The link expires in 1 hour.')
+    conn = get_db_connection()
+    try:
+        if conn:
+            import psycopg2.extras
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute('''
+                SELECT id, first_name, email, is_active, archived_at
+                FROM users WHERE lower(email) = %s
+            ''', (email,))
+            user = cursor.fetchone()
+            cursor.close()
+            if user and user.get('is_active') and not user.get('archived_at'):
+                token = create_password_reset_token(user['id'], ttl_hours=1)
+                if token:
+                    link = f"{APP_BASE_URL}/auth/reset-password/{token}"
+                    send_password_reset_email(user['email'], user['first_name'] or 'there', link)
+    except Exception as e:
+        logger.error(f"Forgot password error: {e}", exc_info=True)
+    finally:
+        if conn:
+            conn.close()
+
+    flash(generic, 'info')
     return redirect(url_for('auth.login'))
+
+
+@auth_bp.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    """Consume a 1-hour password reset token and set a new password."""
+    conn = get_db_connection()
+    if not conn:
+        flash('Database connection error.', 'error')
+        return redirect(url_for('auth.login'))
+    try:
+        import psycopg2.extras
+        tok = peek_password_reset_token(conn, token)
+        if not tok:
+            flash('This password reset link is invalid or has expired. Request a new one.', 'error')
+            return redirect(url_for('auth.forgot_password'))
+
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            'SELECT id, email, first_name FROM users WHERE id = %s',
+            (tok['user_id'],))
+        user = cursor.fetchone()
+        cursor.close()
+        if not user:
+            flash('That account no longer exists.', 'error')
+            return redirect(url_for('auth.login'))
+
+        if request.method == 'GET':
+            return render_template('auth/reset_password.html',
+                                  email=user['email'], token=token)
+
+        password = request.form.get('password', '')
+        confirm = request.form.get('confirm_password', '')
+        if not password or not confirm:
+            flash('Please enter and confirm your new password.', 'error')
+            return render_template('auth/reset_password.html',
+                                  email=user['email'], token=token)
+        if password != confirm:
+            flash('Passwords do not match.', 'error')
+            return render_template('auth/reset_password.html',
+                                  email=user['email'], token=token)
+        if not validate_password(password):
+            flash('Password must be at least 8 characters and include upper, lower, a number, and a special character.', 'error')
+            return render_template('auth/reset_password.html',
+                                  email=user['email'], token=token)
+
+        consumed = consume_password_reset_token(conn, token)
+        if not consumed:
+            flash('This password reset link is invalid or has expired. Request a new one.', 'error')
+            return redirect(url_for('auth.forgot_password'))
+
+        new_hash = generate_password_hash(password)
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE users SET password_hash = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        ''', (new_hash, user['id']))
+        cursor.execute('DELETE FROM user_sessions WHERE user_id = %s', (user['id'],))
+        audit(conn, user['id'], 'password_reset', 'users', user['id'])
+        conn.commit()
+        cursor.close()
+        flash('Password updated. Sign in with your new password.', 'success')
+        return redirect(url_for('auth.login'))
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Reset password error: {e}", exc_info=True)
+        flash('Could not reset password. Please try again.', 'error')
+        return redirect(url_for('auth.forgot_password'))
+    finally:
+        conn.close()
 
 @auth_bp.route('/admin/verify-user/<int:user_id>')
 @login_required
@@ -920,6 +1017,79 @@ def admin_set_role(user_id):
         conn.rollback()
         logger.error(f"Error changing role: {e}")
         return jsonify({'error': 'Failed to change role'}), 500
+    finally:
+        conn.close()
+
+
+@auth_bp.route('/admin/users/<int:user_id>/set-password', methods=['POST'])
+@login_required
+def admin_set_password(user_id):
+    """Super-admin emergency password set, or send a 1-hour reset email."""
+    current_user = load_current_user()
+    if not current_user or current_user.get('role') != 'super_admin':
+        return jsonify({'error': 'Admin privileges required'}), 403
+
+    data = request.get_json(silent=True) or {}
+    mode = (data.get('mode') or 'set').strip().lower()
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed'}), 500
+    try:
+        import psycopg2.extras
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            'SELECT id, email, first_name, archived_at, is_active FROM users WHERE id = %s',
+            (user_id,))
+        target = cursor.fetchone()
+        if not target:
+            return jsonify({'error': 'User not found'}), 404
+        if target.get('archived_at') or not target.get('is_active'):
+            return jsonify({'error': 'Reactivate the account before changing its password'}), 400
+
+        if mode == 'email':
+            token = create_password_reset_token(user_id, ttl_hours=1)
+            if not token:
+                return jsonify({'error': 'Could not create reset token'}), 500
+            link = f"{APP_BASE_URL}/auth/reset-password/{token}"
+            sent = send_password_reset_email(
+                target['email'], target['first_name'] or 'there', link)
+            audit(conn, current_user['id'], 'password_reset_emailed', 'users', user_id)
+            conn.commit()
+            if not sent:
+                return jsonify({
+                    'success': True,
+                    'message': 'Reset link created, but the email could not be sent. '
+                               'Check email settings.',
+                    'link': link,
+                })
+            return jsonify({
+                'success': True,
+                'message': f'Reset email sent to {target["email"]}. Link expires in 1 hour.',
+            })
+
+        new_password = data.get('password') or ''
+        if not validate_password(new_password):
+            return jsonify({
+                'error': 'Password must be at least 8 characters and include upper, '
+                         'lower, a number, and a special character.'
+            }), 400
+        new_hash = generate_password_hash(new_password)
+        cursor.execute('''
+            UPDATE users SET password_hash = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        ''', (new_hash, user_id))
+        cursor.execute('DELETE FROM user_sessions WHERE user_id = %s', (user_id,))
+        audit(conn, current_user['id'], 'password_force_set', 'users', user_id)
+        conn.commit()
+        cursor.close()
+        return jsonify({
+            'success': True,
+            'message': f'Password updated for {target["email"]}. They were signed out everywhere.',
+        })
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Admin set password error: {e}", exc_info=True)
+        return jsonify({'error': 'Failed to set password'}), 500
     finally:
         conn.close()
 

@@ -132,14 +132,14 @@
     <div class="card-header"><i class="fas fa-clock-rotate-left me-2"></i>Recent Games</div>
     <div class="card-body p-0">
       {% for r in recent %}
-      <div class="pp-row">
+      <a href="{{ url_for('main.game_summary', game_id=r.active_game_id) }}" class="pp-row text-decoration-none d-block">
         <div>
           <div style="font-weight:600;">{{ r.game_name }}
             {% if r.won %}<span class="badge bg-success ms-1" style="font-size:0.65rem;">Won</span>{% endif %}
           </div>
           <div class="meta">with {{ r.family_name }}{% if r.completion_time %} &middot; {{ r.completion_time.strftime('%b %-d, %Y') }}{% endif %}</div>
         </div>
-      </div>
+      </a>
       {% endfor %}
       {% if not recent %}<div class="text-center py-3" style="color:var(--df-muted);">No completed games yet</div>{% endif %}
     </div>

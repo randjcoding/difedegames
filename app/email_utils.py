@@ -213,6 +213,23 @@ def send_site_invite_email(to_email: str, inviter_name: str, family_name: str | 
     return send_email(to_email, subject, body)
 
 
+def send_password_reset_email(to_email: str, first_name: str, link: str) -> bool:
+    subject = "Reset your DiFede Games password"
+    body = f"""
+    Hi {first_name},
+
+    We received a request to reset your DiFede Games password. Use this link:
+
+    {link}
+
+    The link expires in 1 hour. If you did not ask for a reset, you can ignore this message and your password will stay the same.
+
+    — DiFede Games
+    {APP_BASE_URL}
+    """
+    return send_email(to_email, subject, body)
+
+
 def send_set_password_email(to_email: str, person_name: str, family_name: str, inviter_name: str, link: str) -> bool:
     subject = f"Set your password for DiFede Games"
     body = f"""

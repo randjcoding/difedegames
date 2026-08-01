@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Game Summary - {{ game.custom_game_name or game.game_name }}{% endblock %}
+
+{% block styles %}
+<style>
+  .gs-wrap { max-width: 960px; }
+  .gs-card {
+    background: #fff; color: #212529; border-radius: 12px;
+    border: 1px solid var(--df-border, #dee2e6); padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  .gs-card h2, .gs-card h3 { color: #212529; }
+  .gs-table { color: #212529; font-size: 0.9rem; }
+  .gs-table th, .gs-table td { vertical-align: middle; }
+  @media (max-width: 576px) {
+    .gs-table { font-size: 0.78rem; }
+    .gs-table th, .gs-table td { padding: 0.35rem; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3 gs-wrap">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+      <h1 class="page-heading mb-1">Game Summary</h1>
+      <p class="mb-0" style="color:var(--df-muted);">
+        {{ game.custom_game_name or game.game_name }}
+        {% if game.game_number %} · Game #{{ game.game_number }}{% endif %}
+      </p>
+    </div>
+    <a href="javascript:history.back()" class="btn btn-outline-secondary btn-sm">Back</a>
+  </div>
+
+  <div class="gs-card">
+    <h2 class="h5 mb-2">Final Standings</h2>
+    {% if winner %}
+    <p class="mb-3">
+      <strong>{% if winner.is_tie %}Tie{% else %}Winner{% endif %}:</strong>
+      {{ winner.display_name }}
+      {% if winner.winning_score is not none %}({{ winner.winning_score }}){% endif %}
+    </p>
+    {% endif %}
+    <div class="table-responsive">
+      <table class="table table-striped gs-table mb-0">
+        <thead class="table-dark">
+          <tr><th>Rank</th><th>Player</th><th>Total</th></tr>
+        </thead>
+        <tbody>
+          {% for p in standings %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ p.display_name }}</td>
+            <td><strong>{{ p.total_score }}</strong></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="text-muted">No scores recorded.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="small text-muted mt-2 mb-0">
+      {% if game.start_time %}Started: <span data-utc="{{ game.start_time|utc_iso }}">{{ game.start_time }}</span>{% endif %}
+      {% if game.completion_time %} · Finished: <span data-utc="{{ game.completion_time|utc_iso }}">{{ game.completion_time }}</span>{% endif %}
+    </p>
+  </div>
+
+  <div class="gs-card">
+    <h3 class="h5 mb-2">Round by Round</h3>
+    {% if rounds and players %}
+    <div class="table-responsive">
+      <table class="table table-bordered gs-table mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th>Round</th>
+            {% for p in players %}<th>{{ p.display_name }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rounds %}
+          <tr>
+            <td class="fw-bold">{{ r }}</td>
+            {% for p in players %}
+              {% set s = by_round.get(r, {}).get(p.id) %}
+              <td>{% if s is not none %}{{ s }}{% endif %}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+          <tr class="table-warning">
+            <td class="fw-bold">Total</td>
+            {% for p in players %}<td class="fw-bold">{{ totals.get(p.id, 0) }}</td>{% endfor %}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">No round scores available for this game.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

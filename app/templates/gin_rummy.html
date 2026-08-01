@@ -34,7 +34,7 @@ content %}
       </div>
       <div class="list-group">
         {% for game in completed_games %}
-        <div class="list-group-item py-2">
+        <a href="{{ url_for('main.game_summary', game_id=game.id) }}" class="list-group-item list-group-item-action py-2 text-decoration-none">
           <div class="small">
             <h6 class="mb-1">Game #{{ game.game_number or game.id }}</h6>
             <p class="mb-1">Players: {{ game.player_names }}</p>
@@ -45,7 +45,7 @@ content %}
             {% endif %}
             <small class="text-muted">Completed: {% if game.start_time %}<span data-utc="{{ game.start_time|utc_iso }}">{{ game.start_time.strftime('%Y-%m-%d %H:%M') }}</span>{% else %}Unknown{% endif %}</small>
           </div>
-        </div>
+        </a>
         {% endfor %}
       </div>
     </div>

@@ -371,21 +371,205 @@ def dashboard():
 def admin():
     conn = get_db_connection()
     try:
-        player_count = execute_query_one(conn, 'SELECT COUNT(*) as c FROM players')['c']
+        player_count = execute_query_one(conn, 'SELECT COUNT(*) as c FROM players WHERE purged_at IS NULL')['c']
         game_count = execute_query_one(conn, 'SELECT COUNT(*) as c FROM active_games')['c']
         user_count = execute_query_one(conn, 'SELECT COUNT(*) as c FROM users')['c']
-        family_count = execute_query_one(conn, 'SELECT COUNT(*) as c FROM families')['c']
+        family_count = execute_query_one(conn, 'SELECT COUNT(*) as c FROM families WHERE archived_at IS NULL')['c']
         families_raw = execute_query(conn, '''
             SELECT f.id, f.name,
-                (SELECT COUNT(*) FROM players p WHERE p.family_id = f.id) as player_count,
+                (SELECT COUNT(*) FROM players p WHERE p.family_id = f.id AND p.purged_at IS NULL) as player_count,
                 (SELECT COUNT(*) FROM users u WHERE u.family_id = f.id) as user_count
-            FROM families f ORDER BY f.name
+            FROM families f WHERE f.archived_at IS NULL ORDER BY f.name
         ''')
         families = [dict(f) for f in families_raw]
         return render_template('admin.html',
             player_count=player_count, game_count=game_count,
             user_count=user_count, family_count=family_count,
             families=families)
+    finally:
+        conn.close()
+
+
+@main.route('/admin/people')
+@admin_required
+def admin_people():
+    """Super-admin People Hub: My Team vs Entire Site person management."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        families_raw = execute_query(conn, '''
+            SELECT id, name FROM families WHERE archived_at IS NULL ORDER BY name
+        ''')
+        return render_template(
+            'admin_people.html',
+            families=[dict(f) for f in families_raw],
+            my_family_id=user.get('family_id'),
+        )
+    finally:
+        conn.close()
+
+
+@main.route('/api/admin/people')
+@admin_required
+def admin_people_api():
+    """Site-wide or my-team player list with login + win/loss stats."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        scope = (request.args.get('scope') or 'site').strip().lower()
+        q = (request.args.get('q') or '').strip()
+        params = []
+        where = ['p.purged_at IS NULL', 'p.archived_at IS NULL']
+        if scope == 'mine':
+            where.append('p.family_id = %s')
+            params.append(user.get('family_id') or -1)
+        if q:
+            where.append('''(
+                p.first_name ILIKE %s OR p.last_name ILIKE %s
+                OR COALESCE(p.display_name, '') ILIKE %s
+                OR COALESCE(p.email, '') ILIKE %s
+                OR COALESCE(u.email, '') ILIKE %s
+                OR COALESCE(f.name, '') ILIKE %s
+            )''')
+            like = f'%{q}%'
+            params.extend([like, like, like, like, like, like])
+        sql = '''
+            SELECT p.id, p.first_name, p.last_name,
+                COALESCE(p.display_name, p.first_name) AS display_name,
+                p.email AS player_email, p.family_id,
+                f.name AS family_name, f.lead_user_id,
+                u.id AS user_id, u.email AS login_email, u.role AS user_role,
+                u.is_verified, u.is_approved, u.is_active, u.last_login,
+                u.archived_at AS user_archived_at,
+                (SELECT COUNT(DISTINCT agp.active_game_id)
+                   FROM active_game_players agp
+                   JOIN active_games ag ON ag.id = agp.active_game_id
+                  WHERE agp.player_id = p.id AND ag.is_complete = TRUE) AS games,
+                (SELECT COUNT(*) FROM game_stats gs WHERE gs.winner_id = p.id) AS wins
+            FROM players p
+            LEFT JOIN families f ON f.id = p.family_id
+            LEFT JOIN users u ON u.player_id = p.id
+            WHERE ''' + ' AND '.join(where) + '''
+            ORDER BY f.name NULLS LAST, p.first_name, p.last_name
+            LIMIT 500
+        '''
+        rows = execute_query(conn, sql, tuple(params) if params else None)
+        out = []
+        for r in rows:
+            d = dict(r)
+            games = int(d.get('games') or 0)
+            wins = int(d.get('wins') or 0)
+            d['losses'] = max(games - wins, 0)
+            d['is_lead'] = bool(d.get('user_id') and d.get('lead_user_id')
+                                and d['user_id'] == d['lead_user_id'])
+            out.append(d)
+        return jsonify({'people': out, 'scope': scope})
+    finally:
+        conn.close()
+
+
+@main.route('/api/admin/create-family-for-player', methods=['POST'])
+@admin_required
+def admin_create_family_for_player():
+    """Create a team, make a player its lead (creating/linking login as needed),
+    optionally move other players onto that team, optionally email set-password."""
+    conn = get_db_connection()
+    admin = get_current_user()
+    try:
+        from app.auth import create_action_token
+        from app.email_utils import send_set_password_email
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        player_id = data.get('player_id')
+        move_ids = [int(x) for x in (data.get('move_player_ids') or []) if x]
+        send_invite = bool(data.get('send_password_invite'))
+        if not name:
+            return jsonify({'error': 'Family name is required'}), 400
+        if not player_id:
+            return jsonify({'error': 'player_id is required'}), 400
+        player_id = int(player_id)
+        player = execute_query_one(conn, '''
+            SELECT * FROM players WHERE id = %s AND purged_at IS NULL
+        ''', (player_id,))
+        if not player:
+            return jsonify({'error': 'Player not found'}), 404
+
+        lead_user = execute_query_one(conn, 'SELECT * FROM users WHERE player_id = %s', (player_id,))
+        if not lead_user:
+            email = (data.get('email') or player.get('email') or '').strip().lower()
+            if not email:
+                return jsonify({'error': 'This person has no login. Provide an email to create one.'}), 400
+            existing = execute_query_one(conn, 'SELECT id FROM users WHERE lower(email) = %s', (email,))
+            if existing:
+                return jsonify({'error': 'That email already has a login. Merge or link it first.'}), 400
+            from werkzeug.security import generate_password_hash
+            import secrets as _secrets
+            temp = data.get('temp_password') or (_secrets.token_urlsafe(10) + 'Aa1!')
+            lead_user = execute_query_one(conn, '''
+                INSERT INTO users (email, password_hash, first_name, last_name, family_name,
+                    role, is_verified, is_approved, is_active, player_id)
+                VALUES (%s, %s, %s, %s, %s, 'family_admin', TRUE, TRUE, TRUE, %s)
+                RETURNING *
+            ''', (email, generate_password_hash(temp),
+                  player['first_name'], player['last_name'], name, player_id))
+            execute_modify(conn, 'UPDATE players SET email = COALESCE(email, %s) WHERE id = %s',
+                           (email, player_id))
+
+        fam = execute_query_one(conn, '''
+            INSERT INTO families (name, slug, lead_user_id, created_by_user_id)
+            VALUES (%s, %s, %s, %s) RETURNING id, name
+        ''', (name, unique_family_slug(conn, name), lead_user['id'], admin['id']))
+        family_id = fam['id']
+
+        set_player_home_family(conn, player_id, family_id)
+        execute_modify(conn, '''
+            UPDATE player_family_memberships SET role = 'lead'
+            WHERE player_id = %s AND family_id = %s
+        ''', (player_id, family_id))
+        execute_modify(conn, 'UPDATE users SET family_id = %s, role = COALESCE(role, %s) WHERE id = %s',
+                       (family_id, 'family_admin', lead_user['id']))
+
+        moved = 0
+        for pid in move_ids:
+            if pid == player_id:
+                continue
+            set_player_home_family(conn, pid, family_id)
+            moved += 1
+
+        invite_sent = False
+        invite_link = None
+        if send_invite and lead_user.get('email'):
+            token = create_action_token(
+                'set_password', player_id=player_id, user_id=lead_user['id'],
+                family_id=family_id, ttl_hours=168)
+            if token:
+                invite_link = f"{APP_BASE_URL}/auth/set-password/{token}"
+                invite_sent = send_set_password_email(
+                    lead_user['email'],
+                    player.get('display_name') or player['first_name'],
+                    name,
+                    f"{admin.get('first_name', '')} {admin.get('last_name', '')}".strip() or 'Admin',
+                    invite_link,
+                )
+
+        audit(conn, admin['id'], 'family_created_for_player', 'families', family_id,
+              new={'player_id': player_id, 'moved': moved, 'invite_sent': invite_sent})
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'family_id': family_id,
+            'family_name': fam['name'],
+            'lead_user_id': lead_user['id'],
+            'moved': moved,
+            'invite_sent': invite_sent,
+            'message': f'Created {fam["name"]}, made them lead'
+                       + (f', moved {moved} other member(s)' if moved else '')
+                       + (', and emailed a password setup link' if invite_sent else '')
+                       + '.',
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
@@ -2666,6 +2850,136 @@ def _can_merge(conn, user, keep_id, dup_id):
     fams = {r['family_id'] for r in rows}
     return len(fams) == 1 and is_family_lead(conn, user, fams.pop())
 
+
+def _retire_login_account(conn, actor_user_id, user_id):
+    """Hard-delete a login after clearing FK blockers. Player history stays."""
+    if not user_id:
+        return
+    if actor_user_id and int(user_id) == int(actor_user_id):
+        raise ValueError('Cannot retire your own login during a merge')
+    execute_modify(conn, 'UPDATE families SET lead_user_id = NULL WHERE lead_user_id = %s', (user_id,))
+    execute_modify(conn, 'UPDATE families SET archived_by_user_id = NULL WHERE archived_by_user_id = %s', (user_id,))
+    execute_modify(conn, 'UPDATE players SET archived_by_user_id = NULL WHERE archived_by_user_id = %s', (user_id,))
+    execute_modify(conn, 'UPDATE users SET archived_by_user_id = NULL WHERE archived_by_user_id = %s', (user_id,))
+    execute_modify(conn, '''
+        UPDATE player_release_requests SET decided_by_user_id = NULL WHERE decided_by_user_id = %s
+    ''', (user_id,))
+    execute_modify(conn, 'DELETE FROM user_sessions WHERE user_id = %s', (user_id,))
+    execute_modify(conn, 'DELETE FROM users WHERE id = %s', (user_id,))
+
+
+def _merge_players_core(conn, keep_id, dup_id, actor_user_id):
+    """Repoint all history from dup -> keep, resolve dual logins, delete dup player.
+    Caller commits and audits."""
+    keep = execute_query_one(conn, 'SELECT id, family_id, email FROM players WHERE id = %s', (keep_id,))
+    dup = execute_query_one(conn, '''
+        SELECT id, first_name, last_name, family_id, email FROM players WHERE id = %s
+    ''', (dup_id,))
+    if not keep or not dup:
+        raise ValueError('Player not found')
+
+    keep_user = execute_query_one(conn, 'SELECT id, email FROM users WHERE player_id = %s', (keep_id,))
+    dup_user = execute_query_one(conn, 'SELECT id, email FROM users WHERE player_id = %s', (dup_id,))
+
+    for tbl in ('game_scores', 'five_crowns_scores'):
+        execute_modify(conn, f'''
+            DELETE FROM {tbl} a WHERE a.player_id = %s AND EXISTS (
+                SELECT 1 FROM {tbl} b
+                WHERE b.active_game_id = a.active_game_id
+                  AND b.round_number = a.round_number AND b.player_id = %s)
+        ''', (dup_id, keep_id))
+        execute_modify(conn, f'UPDATE {tbl} SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
+
+    execute_modify(conn, '''
+        DELETE FROM active_game_players a WHERE a.player_id = %s AND EXISTS (
+            SELECT 1 FROM active_game_players b
+            WHERE b.active_game_id = a.active_game_id AND b.player_id = %s)
+    ''', (dup_id, keep_id))
+    execute_modify(conn, 'UPDATE active_game_players SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
+    execute_modify(conn, 'UPDATE game_stats SET winner_id = %s WHERE winner_id = %s', (keep_id, dup_id))
+
+    execute_modify(conn, '''
+        INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
+        SELECT %s, d.family_id, FALSE, d.status, 'member'
+        FROM player_family_memberships d
+        WHERE d.player_id = %s AND NOT EXISTS (
+            SELECT 1 FROM player_family_memberships k
+            WHERE k.player_id = %s AND k.family_id = d.family_id)
+    ''', (keep_id, dup_id, keep_id))
+    execute_modify(conn, 'DELETE FROM player_family_memberships WHERE player_id = %s', (dup_id,))
+    has_primary = execute_query_one(conn, '''
+        SELECT 1 FROM player_family_memberships WHERE player_id = %s AND is_primary
+    ''', (keep_id,))
+    if not has_primary:
+        execute_modify(conn, '''
+            UPDATE player_family_memberships SET is_primary = TRUE
+            WHERE id = (SELECT id FROM player_family_memberships
+                        WHERE player_id = %s ORDER BY joined_at ASC, id ASC LIMIT 1)
+        ''', (keep_id,))
+
+    # Personal crew links are ordered (player_a_id < player_b_id). Rebuild
+    # each link involving the duplicate onto the kept player.
+    crew_links = execute_query(conn, '''
+        SELECT * FROM player_crew_links
+        WHERE player_a_id = %s OR player_b_id = %s
+           OR requested_by_player_id = %s OR responded_by_player_id = %s
+    ''', (dup_id, dup_id, dup_id, dup_id))
+    for link in crew_links or []:
+        a = keep_id if link['player_a_id'] == dup_id else link['player_a_id']
+        b = keep_id if link['player_b_id'] == dup_id else link['player_b_id']
+        req = keep_id if link['requested_by_player_id'] == dup_id else link['requested_by_player_id']
+        resp = link.get('responded_by_player_id')
+        if resp == dup_id:
+            resp = keep_id
+        execute_modify(conn, 'DELETE FROM player_crew_links WHERE id = %s', (link['id'],))
+        if a == b:
+            continue
+        lo, hi = (a, b) if a < b else (b, a)
+        exists = execute_query_one(conn, '''
+            SELECT id FROM player_crew_links WHERE player_a_id = %s AND player_b_id = %s
+        ''', (lo, hi))
+        if exists:
+            continue
+        execute_modify(conn, '''
+            INSERT INTO player_crew_links
+                (player_a_id, player_b_id, status, requested_by_player_id, responded_by_player_id)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (lo, hi, link.get('status') or 'accepted', req, resp))
+
+    if keep.get('email') is None and dup.get('email'):
+        execute_modify(conn, 'UPDATE players SET email = %s WHERE id = %s', (dup['email'], keep_id))
+
+    retired_login = None
+    if keep_user and dup_user:
+        # Keep the login on the kept player; retire the duplicate login.
+        execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE id = %s', (dup_user['id'],))
+        _retire_login_account(conn, actor_user_id, dup_user['id'])
+        retired_login = dup_user.get('email')
+        execute_modify(conn, '''
+            UPDATE users SET family_id = COALESCE(family_id, %s) WHERE id = %s
+        ''', (keep.get('family_id'), keep_user['id']))
+    elif dup_user and not keep_user:
+        execute_modify(conn, '''
+            UPDATE users SET player_id = %s, family_id = COALESCE(family_id, %s)
+            WHERE id = %s
+        ''', (keep_id, keep.get('family_id'), dup_user['id']))
+    else:
+        execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (dup_id,))
+
+    execute_modify(conn, 'UPDATE invitations SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
+    execute_modify(conn, 'DELETE FROM players WHERE id = %s', (dup_id,))
+    execute_modify(conn, '''
+        DELETE FROM player_not_duplicates
+        WHERE player_a_id IN (%s, %s) OR player_b_id IN (%s, %s)
+    ''', (keep_id, dup_id, keep_id, dup_id))
+    return {
+        'kept_id': keep_id,
+        'duplicate_id': dup_id,
+        'duplicate_name': f"{dup.get('first_name', '')} {dup.get('last_name', '')}".strip(),
+        'retired_login': retired_login,
+    }
+
+
 @main.route('/api/admin/merge-preview')
 @login_required
 def merge_preview():
@@ -2681,18 +2995,33 @@ def merge_preview():
         def info(pid):
             p = execute_query_one(conn, '''
                 SELECT p.id, COALESCE(p.display_name, p.first_name) AS display_name,
-                    p.first_name, p.last_name, f.name AS family_name
-                FROM players p LEFT JOIN families f ON f.id = p.family_id WHERE p.id = %s
+                    p.first_name, p.last_name, f.name AS family_name,
+                    u.id AS user_id, u.email AS login_email
+                FROM players p
+                LEFT JOIN families f ON f.id = p.family_id
+                LEFT JOIN users u ON u.player_id = p.id
+                WHERE p.id = %s
             ''', (pid,))
             if not p:
                 return None
             d = dict(p)
             d['history'] = _player_history_counts(conn, pid)
             return d
-        keep, dup = info(keep_id), info(dup_id)
-        if not keep or not dup:
+        a, b = info(keep_id), info(dup_id)
+        if not a or not b:
             return jsonify({'error': 'Player not found'}), 404
-        return jsonify({'keep': keep, 'dup': dup})
+        allow_dual = user.get('role') == 'super_admin'
+        try:
+            rec_keep, rec_dup, why, _rows = _choose_keep_player(
+                conn, keep_id, dup_id, allow_dual_accounts=allow_dual)
+        except ValueError as e:
+            return jsonify({'error': str(e), 'keep': a, 'dup': b}), 400
+        return jsonify({
+            'keep': a, 'dup': b,
+            'recommended_keep_id': rec_keep,
+            'recommended_dup_id': rec_dup,
+            'recommended_reason': why,
+        })
     finally:
         conn.close()
 
@@ -2701,8 +3030,8 @@ def merge_preview():
 def merge_players():
     """Merge a duplicate person into a canonical one. All history (scores,
     wins, games, memberships) is repointed to the kept player, then the
-    duplicate row is deleted. This is the ONLY place a players row may be
-    hard-deleted, and only after every reference has been repointed."""
+    duplicate row is deleted. Dual logins: keep the kept player's login and
+    retire the other. With auto_keep=true, keep the side with more games."""
     conn = get_db_connection()
     user = get_current_user()
     try:
@@ -2711,77 +3040,39 @@ def merge_players():
         dup_id = data.get('dup_id')
         if not keep_id or not dup_id:
             return jsonify({'error': 'keep_id and dup_id are required'}), 400
+        keep_id, dup_id = int(keep_id), int(dup_id)
         if keep_id == dup_id:
             return jsonify({'error': 'Cannot merge a player into itself'}), 400
         if not _can_merge(conn, user, keep_id, dup_id):
             return jsonify({'error': 'Only a super admin, or the lead of both players\' home family, can merge'}), 403
-        keep = execute_query_one(conn, 'SELECT id FROM players WHERE id = %s', (keep_id,))
-        dup = execute_query_one(conn, 'SELECT id, first_name, last_name FROM players WHERE id = %s', (dup_id,))
-        if not keep or not dup:
-            return jsonify({'error': 'Player not found'}), 404
 
-        # Repoint score tables, dropping duplicate rows that would collide on
-        # the (game, player, round) unique keys.
-        for tbl in ('game_scores', 'five_crowns_scores'):
-            execute_modify(conn, f'''
-                DELETE FROM {tbl} a WHERE a.player_id = %s AND EXISTS (
-                    SELECT 1 FROM {tbl} b
-                    WHERE b.active_game_id = a.active_game_id
-                      AND b.round_number = a.round_number AND b.player_id = %s)
-            ''', (dup_id, keep_id))
-            execute_modify(conn, f'UPDATE {tbl} SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
+        allow_dual = user.get('role') == 'super_admin'
+        why = 'manual selection'
+        if data.get('auto_keep'):
+            keep_id, dup_id, why, _rows = _choose_keep_player(
+                conn, keep_id, dup_id, allow_dual_accounts=allow_dual)
+        else:
+            # Still block non-admins from dual-login merges.
+            _choose_keep_player(conn, keep_id, dup_id, allow_dual_accounts=allow_dual)
 
-        # Roster rows: avoid two entries for the same game.
-        execute_modify(conn, '''
-            DELETE FROM active_game_players a WHERE a.player_id = %s AND EXISTS (
-                SELECT 1 FROM active_game_players b
-                WHERE b.active_game_id = a.active_game_id AND b.player_id = %s)
-        ''', (dup_id, keep_id))
-        execute_modify(conn, 'UPDATE active_game_players SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
-
-        execute_modify(conn, 'UPDATE game_stats SET winner_id = %s WHERE winner_id = %s', (keep_id, dup_id))
-
-        # Memberships: bring over families the kept player isn't already in.
-        execute_modify(conn, '''
-            INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
-            SELECT %s, d.family_id, FALSE, d.status, 'member'
-            FROM player_family_memberships d
-            WHERE d.player_id = %s AND NOT EXISTS (
-                SELECT 1 FROM player_family_memberships k
-                WHERE k.player_id = %s AND k.family_id = d.family_id)
-        ''', (keep_id, dup_id, keep_id))
-        execute_modify(conn, 'DELETE FROM player_family_memberships WHERE player_id = %s', (dup_id,))
-
-        # Guarantee exactly one primary for the kept player.
-        has_primary = execute_query_one(conn, '''
-            SELECT 1 FROM player_family_memberships WHERE player_id = %s AND is_primary
-        ''', (keep_id,))
-        if not has_primary:
-            execute_modify(conn, '''
-                UPDATE player_family_memberships SET is_primary = TRUE
-                WHERE id = (SELECT id FROM player_family_memberships
-                            WHERE player_id = %s ORDER BY joined_at ASC, id ASC LIMIT 1)
-            ''', (keep_id,))
-
-        # Account identity: move an owning account if the kept player has none.
-        execute_modify(conn, '''
-            UPDATE users SET player_id = %s
-            WHERE player_id = %s AND NOT EXISTS (SELECT 1 FROM users WHERE player_id = %s)
-        ''', (keep_id, dup_id, keep_id))
-        execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (dup_id,))
-
-        execute_modify(conn, 'DELETE FROM players WHERE id = %s', (dup_id,))
-        execute_modify(conn, '''
-            DELETE FROM player_not_duplicates
-            WHERE player_a_id = %s OR player_b_id = %s
-               OR player_a_id = %s OR player_b_id = %s
-        ''', (keep_id, keep_id, dup_id, dup_id))
+        result = _merge_players_core(conn, keep_id, dup_id, user['id'])
         audit(conn, user['id'], 'players_merged', 'players', keep_id,
-              old={'duplicate_id': dup_id,
-                   'duplicate_name': f"{dup.get('first_name','')} {dup.get('last_name','')}".strip()},
+              old={'duplicate_id': result['duplicate_id'],
+                   'duplicate_name': result['duplicate_name'],
+                   'retired_login': result.get('retired_login'),
+                   'reason': why},
               new={'kept_id': keep_id})
         conn.commit()
-        return jsonify({'success': True, 'message': 'Players merged'})
+        msg = 'Players merged. All game history is on the kept profile.'
+        if result.get('retired_login'):
+            msg += f" Login {result['retired_login']} was removed."
+        if data.get('auto_keep'):
+            msg += f' Kept the profile with {why}.'
+        return jsonify({'success': True, 'message': msg, 'kept_id': keep_id,
+                        'retired_login': result.get('retired_login')})
+    except ValueError as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 500
@@ -2789,9 +3080,10 @@ def merge_players():
         conn.close()
 
 
-def _choose_keep_player(conn, a_id, b_id):
-    """Smart keep: prefer more game history; tie-break to the one with a login.
-    Returns (keep_id, discard_id, reason) or raises ValueError."""
+def _choose_keep_player(conn, a_id, b_id, allow_dual_accounts=False):
+    """Smart keep: prefer more games played; tie-break login, then older id.
+    Returns (keep_id, discard_id, reason, rows). Raises ValueError if both have
+    logins and allow_dual_accounts is False."""
     rows = {}
     for pid in (a_id, b_id):
         hist = _player_history_counts(conn, pid)
@@ -2804,15 +3096,15 @@ def _choose_keep_player(conn, a_id, b_id):
         if not p:
             raise ValueError('Player not found')
         rows[pid] = {'player': p, 'history': hist, 'account': acct,
-                     'score': (hist.get('games') or 0) * 1000 + (hist.get('scores') or 0)}
+                     'score': int(hist.get('games') or 0) * 1000 + int(hist.get('scores') or 0)}
     both_accounts = bool(rows[a_id]['account'] and rows[b_id]['account'])
-    if both_accounts:
+    if both_accounts and not allow_dual_accounts:
         raise ValueError(
             'Both profiles have logins. Ask a super admin to merge these, or revoke one account first.')
     if rows[a_id]['score'] > rows[b_id]['score']:
-        keep, discard, why = a_id, b_id, 'more game history'
+        keep, discard, why = a_id, b_id, 'more games played'
     elif rows[b_id]['score'] > rows[a_id]['score']:
-        keep, discard, why = b_id, a_id, 'more game history'
+        keep, discard, why = b_id, a_id, 'more games played'
     elif rows[a_id]['account'] and not rows[b_id]['account']:
         keep, discard, why = a_id, b_id, 'has the login'
     elif rows[b_id]['account'] and not rows[a_id]['account']:
@@ -2927,79 +3219,31 @@ def same_person_confirm():
         a, b = int(a), int(b)
         if not _can_merge(conn, user, a, b):
             return jsonify({'error': 'Only the family lead of both home families can do this'}), 403
+        allow_dual = user.get('role') == 'super_admin'
         try:
-            keep_id, dup_id, why, rows = _choose_keep_player(conn, a, b)
+            keep_id, dup_id, why, rows = _choose_keep_player(
+                conn, a, b, allow_dual_accounts=allow_dual)
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
 
-        # Prefer email from the account side onto the kept player.
-        keep_email = rows[keep_id]['player'].get('email')
-        discard_email = rows[dup_id]['player'].get('email')
-        acct = rows[dup_id]['account'] or rows[keep_id]['account']
-        if acct and acct.get('email'):
-            keep_email = keep_email or acct['email']
-        elif discard_email and not keep_email:
-            keep_email = discard_email
-        if keep_email:
-            execute_modify(conn, 'UPDATE players SET email = COALESCE(email, %s) WHERE id = %s',
-                           (keep_email, keep_id))
-
-        for tbl in ('game_scores', 'five_crowns_scores'):
-            execute_modify(conn, f'''
-                DELETE FROM {tbl} x WHERE x.player_id = %s AND EXISTS (
-                    SELECT 1 FROM {tbl} y
-                    WHERE y.active_game_id = x.active_game_id
-                      AND y.round_number = x.round_number AND y.player_id = %s)
-            ''', (dup_id, keep_id))
-            execute_modify(conn, f'UPDATE {tbl} SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
-        execute_modify(conn, '''
-            DELETE FROM active_game_players x WHERE x.player_id = %s AND EXISTS (
-                SELECT 1 FROM active_game_players y
-                WHERE y.active_game_id = x.active_game_id AND y.player_id = %s)
-        ''', (dup_id, keep_id))
-        execute_modify(conn, 'UPDATE active_game_players SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
-        execute_modify(conn, 'UPDATE game_stats SET winner_id = %s WHERE winner_id = %s', (keep_id, dup_id))
-        execute_modify(conn, '''
-            INSERT INTO player_family_memberships (player_id, family_id, is_primary, status, role)
-            SELECT %s, d.family_id, FALSE, d.status, 'member'
-            FROM player_family_memberships d
-            WHERE d.player_id = %s AND NOT EXISTS (
-                SELECT 1 FROM player_family_memberships k
-                WHERE k.player_id = %s AND k.family_id = d.family_id)
-        ''', (keep_id, dup_id, keep_id))
-        execute_modify(conn, 'DELETE FROM player_family_memberships WHERE player_id = %s', (dup_id,))
-        has_primary = execute_query_one(conn, '''
-            SELECT 1 FROM player_family_memberships WHERE player_id = %s AND is_primary
-        ''', (keep_id,))
-        if not has_primary:
-            execute_modify(conn, '''
-                UPDATE player_family_memberships SET is_primary = TRUE
-                WHERE id = (SELECT id FROM player_family_memberships
-                            WHERE player_id = %s ORDER BY joined_at ASC, id ASC LIMIT 1)
-            ''', (keep_id,))
-        execute_modify(conn, '''
-            UPDATE users SET player_id = %s, family_id = COALESCE(family_id, %s)
-            WHERE player_id = %s AND NOT EXISTS (SELECT 1 FROM users WHERE player_id = %s)
-        ''', (keep_id, rows[keep_id]['player'].get('family_id'), dup_id, keep_id))
-        execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (dup_id,))
-        execute_modify(conn, '''
-            UPDATE invitations SET player_id = %s WHERE player_id = %s
-        ''', (keep_id, dup_id))
-        execute_modify(conn, 'DELETE FROM players WHERE id = %s', (dup_id,))
-        execute_modify(conn, '''
-            DELETE FROM player_not_duplicates
-            WHERE player_a_id IN (%s, %s) OR player_b_id IN (%s, %s)
-        ''', (keep_id, dup_id, keep_id, dup_id))
+        result = _merge_players_core(conn, keep_id, dup_id, user['id'])
         audit(conn, user['id'], 'same_person_merged', 'players', keep_id,
-              old={'discarded_id': dup_id, 'reason': why},
+              old={'discarded_id': dup_id, 'reason': why,
+                   'retired_login': result.get('retired_login')},
               new={'kept_id': keep_id})
         conn.commit()
         kept_name = rows[keep_id]['player']['display_name']
+        msg = f'Merged into {kept_name}. History preserved ({why}).'
+        if result.get('retired_login'):
+            msg += f" Login {result['retired_login']} was removed."
         return jsonify({
             'success': True,
             'kept_id': keep_id,
-            'message': f'Merged into {kept_name}. History preserved ({why}).',
+            'message': msg,
         })
+    except ValueError as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 500
@@ -3456,7 +3700,7 @@ def player_profile(player_id):
         ''', (player_id,)))
 
         recent = list(execute_query(conn, '''
-            SELECT g.name AS game_name, ag.completion_time,
+            SELECT ag.id AS active_game_id, g.name AS game_name, ag.completion_time,
                    COALESCE(f.name, 'No family') AS family_name,
                    (gs.winner_id = %s) AS won
             FROM active_game_players agp
@@ -5064,22 +5308,33 @@ def handle_connect():
 def handle_disconnect():
     print('Client disconnected')
 
-@main.route('/leaderboard')
-@login_required
-def leaderboard():
+def _viewer_circle_player_ids(conn, user):
+    """Home family + accepted alliance families + personal crew."""
+    fam = user.get('family_id')
+    pid = user.get('player_id')
+    if not fam and not pid:
+        return [-1]
+    roster = get_family_players(fam, include_crew=True, for_player_id=pid) if fam else []
+    ids = [p['id'] for p in roster]
+    if pid and pid not in ids:
+        ids.append(pid)
+    return ids or [-1]
+
+
+def _leaderboard_page(scope='circle'):
+    """Build leaderboard.html context. scope=circle|all."""
     conn = get_db_connection()
+    user = get_current_user()
     try:
         game_type = request.args.get('game_type', type=int)
-        
+
         available_games_list = execute_query(conn, '''
             SELECT id, name, slug FROM games WHERE is_variant_group = FALSE ORDER BY COALESCE(display_order, id * 10), id
         ''')
-        
+
         sub_game = request.args.get('sub_game')
         BASIC_GAME_ID = 7
 
-        # Score columns are only meaningful for a single game (mixed scoring
-        # directions make aggregate avg/best scores meaningless across games).
         show_scores = bool(game_type)
         scoring_direction = 'low_wins'
         if game_type:
@@ -5101,6 +5356,13 @@ def leaderboard():
         if sub_game and game_type == BASIC_GAME_ID:
             gt_filter += ' AND ag.custom_game_name = %s'
             gt_params.append(sub_game)
+
+        circle_ids = None
+        if scope == 'circle':
+            circle_ids = _viewer_circle_player_ids(conn, user)
+            gt_filter += ' AND p.id = ANY(%s)'
+            gt_params.append(circle_ids)
+
         gt_params = tuple(gt_params) if gt_params else ()
 
         sub_game_names = []
@@ -5227,6 +5489,26 @@ def leaderboard():
             ORDER BY win_percentage DESC, wins DESC
         ''', gt_params or None)
 
+        # Recent games: for circle scope, include any completed game that
+        # involved at least one circle player (not only winners).
+        recent_filter = gt_filter
+        recent_params = list(gt_params) if gt_params else []
+        if scope == 'circle' and circle_ids is not None:
+            # Drop the p.id filter from gt_filter for this query and use EXISTS.
+            recent_filter = ''
+            recent_params = []
+            if game_type:
+                recent_filter += ' AND ag.game_id = %s'
+                recent_params.append(game_type)
+            if sub_game and game_type == BASIC_GAME_ID:
+                recent_filter += ' AND ag.custom_game_name = %s'
+                recent_params.append(sub_game)
+            recent_filter += ''' AND EXISTS (
+                SELECT 1 FROM active_game_players cx
+                WHERE cx.active_game_id = ag.id AND cx.player_id = ANY(%s)
+            )'''
+            recent_params.append(circle_ids)
+
         recent_games = execute_query(conn, '''
             WITH GameDetails AS (
                 SELECT 
@@ -5285,7 +5567,7 @@ def leaderboard():
                     GROUP BY COALESCE(display_name, first_name)
                     HAVING COUNT(*) > 1
                 ) dc ON COALESCE(p.display_name, p.first_name) = dc.display_name
-                WHERE ag.is_complete = TRUE ''' + gt_filter + '''
+                WHERE ag.is_complete = TRUE ''' + recent_filter + '''
                 GROUP BY ag.id, ag.start_time, g.name, ag.custom_game_name
             )
             SELECT 
@@ -5304,7 +5586,7 @@ def leaderboard():
                 ROW_NUMBER() OVER (PARTITION BY game_name ORDER BY start_time ASC) as game_number
             FROM GameDetails
             ORDER BY start_time DESC
-        ''', gt_params or None)
+        ''', tuple(recent_params) if recent_params else None)
 
         return render_template('leaderboard.html',
                             top_winners=top_winners,
@@ -5317,9 +5599,23 @@ def leaderboard():
                             sub_game_names=sub_game_names,
                             current_sub_game=sub_game,
                             show_scores=show_scores,
-                            scoring_direction=scoring_direction)
+                            scoring_direction=scoring_direction,
+                            leaderboard_scope=scope)
     finally:
         conn.close()
+
+
+@main.route('/leaderboard')
+@login_required
+def leaderboard():
+    return _leaderboard_page(scope='circle')
+
+
+@main.route('/stats/all-time')
+@login_required
+def all_time_stats():
+    return _leaderboard_page(scope='all')
+
 
 @main.route('/api/games', methods=['GET'])
 @login_required
@@ -5529,6 +5825,93 @@ def get_game_details(game_id):
         return jsonify({'success': False, 'error': str(e)})
     finally:
         conn.close()
+
+@main.route('/games/<int:game_id>/summary')
+@login_required
+def game_summary(game_id):
+    """Full final standings + round-by-round page for a completed game."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        game = fetch_accessible_game(conn, game_id, user)
+        if not game:
+            # Also allow anyone who sat in the game.
+            seated = execute_query_one(conn, '''
+                SELECT 1 FROM active_game_players agp
+                WHERE agp.active_game_id = %s AND agp.player_id = %s
+            ''', (game_id, user.get('player_id') or -1))
+            if seated or user.get('role') == 'super_admin':
+                game = execute_query_one(conn, 'SELECT * FROM active_games WHERE id = %s', (game_id,))
+        if not game:
+            flash('That game is not available.', 'error')
+            return redirect(url_for('main.games'))
+        if not game.get('is_complete'):
+            flash('That game is not finished yet.', 'info')
+            return redirect(url_for('main.games'))
+
+        meta = execute_query_one(conn, '''
+            SELECT ag.id, ag.start_time, ag.completion_time, ag.custom_game_name,
+                   g.name AS game_name, g.slug,
+                   COALESCE(ag.scoring_direction, g.scoring_direction) AS scoring_direction,
+                   gsn.game_number
+            FROM active_games ag
+            JOIN games g ON g.id = ag.game_id
+            LEFT JOIN game_sessions_numbered gsn ON gsn.id = ag.id
+            WHERE ag.id = %s
+        ''', (game_id,))
+        order = 'DESC' if (meta and meta.get('scoring_direction') == 'high_wins') else 'ASC'
+        standings = execute_query(conn, '''
+            SELECT p.id,
+                COALESCE(p.display_name, p.first_name) AS display_name,
+                p.first_name, p.last_name,
+                COALESCE(SUM(gs.score), 0) AS total_score
+            FROM active_game_players agp
+            JOIN players p ON p.id = agp.player_id
+            LEFT JOIN game_scores gs ON gs.active_game_id = agp.active_game_id AND gs.player_id = p.id
+            WHERE agp.active_game_id = %s
+            GROUP BY p.id, p.display_name, p.first_name, p.last_name
+            ORDER BY total_score ''' + order + '''
+        ''', (game_id,))
+        players = execute_query(conn, '''
+            SELECT p.id, COALESCE(p.display_name, p.first_name) AS display_name
+            FROM active_game_players agp
+            JOIN players p ON p.id = agp.player_id
+            WHERE agp.active_game_id = %s
+            ORDER BY agp.id
+        ''', (game_id,))
+        score_rows = execute_query(conn, '''
+            SELECT player_id, round_number, score
+            FROM game_scores WHERE active_game_id = %s
+            ORDER BY round_number, player_id
+        ''', (game_id,))
+        by_round = {}
+        for s in score_rows or []:
+            by_round.setdefault(s['round_number'], {})[s['player_id']] = s['score']
+        rounds = sorted(by_round.keys())
+        totals = {p['id']: 0 for p in (players or [])}
+        for r in rounds:
+            for p in players or []:
+                val = by_round.get(r, {}).get(p['id'])
+                if val is not None:
+                    totals[p['id']] += val
+        winner = execute_query_one(conn, '''
+            SELECT COALESCE(p.display_name, p.first_name) AS display_name, gs.winning_score, gs.is_tie
+            FROM game_stats gs JOIN players p ON p.id = gs.winner_id
+            WHERE gs.game_id = %s ORDER BY gs.id DESC LIMIT 1
+        ''', (game_id,))
+        return render_template(
+            'game_summary.html',
+            game=meta,
+            standings=standings,
+            players=players,
+            rounds=rounds,
+            by_round=by_round,
+            totals=totals,
+            winner=winner,
+        )
+    finally:
+        conn.close()
+
 
 @main.route('/api/games/<int:game_id>/final-scores')
 @login_required
