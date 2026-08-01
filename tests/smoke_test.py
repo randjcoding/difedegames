@@ -1187,6 +1187,9 @@ def main():
         check('people hub can delete/archive a person',
               'apDeletePerson' in page and 'aph-delete-btn' in page
               and '/archive' in page)
+        check('people hub can clear email and permanently purge',
+              'apClearEmail' in page and 'clear-email' in page
+              and 'apPurgePerson' in page and 'showArchived' in page)
         check('people hub has administer modal',
               'adminPersonModal' in page and 'apSave' in page and 'Remove login' in page)
         check('people hub has merge-two toolbar and wizard',
@@ -1483,6 +1486,52 @@ def main():
                 'display_name': 'Zztestmail', 'email': 'zztest.freemail@example.com'})
             check('freed email can be assigned to another player',
                   r.status_code == 200, str(r.get_json()))
+
+        # Clear-email endpoint frees profile email + invites; permanent purge.
+        r = client_a.post('/api/team/players', json={
+            'first_name': 'Zzteststuck', 'last_name': 'Mail',
+            'display_name': 'Zzteststuck', 'email': 'zztest.stuckmail@example.com'})
+        stuck_pid = (r.get_json() or {}).get('id')
+        ids['players'].add(stuck_pid)
+        run(conn, """
+            INSERT INTO invitations (email, invited_by_user_id, family_id, player_id,
+                invite_type, token, expires_at, status)
+            VALUES ('zztest.stuckmail@example.com', %s, %s, %s, 'set_password',
+                    'zztest-stuck-token', NOW() + INTERVAL '7 days', 'accepted')
+        """, (user_a['id'], fam_a['id'], stuck_pid))
+        conn.commit()
+        r = client_a.post(f'/api/admin/player/{stuck_pid}/clear-email',
+                          json={'remove_login': True})
+        check('clear-email frees stuck profile email',
+              r.status_code == 200, str(r.get_json()))
+        check('clear-email nulls players.email',
+              q1(conn, 'SELECT email FROM players WHERE id = %s', (stuck_pid,))['email'] is None)
+        check('clear-email revokes invitations for that address',
+              q1(conn, """
+                  SELECT COUNT(*) AS n FROM invitations
+                  WHERE lower(email) = 'zztest.stuckmail@example.com' AND status = 'accepted'
+              """)['n'] == 0)
+
+        r = client_a.get('/api/admin/people', query_string={
+            'scope': 'site', 'include_archived': '1'})
+        check('people API accepts include_archived',
+              r.status_code == 200 and (r.get_json() or {}).get('include_archived') is True)
+
+        r = client_a.post('/api/team/players', json={
+            'first_name': 'Zztestpurge2', 'last_name': 'Gone', 'display_name': 'Zztestpurge2',
+            'email': 'zztest.purge2@example.com'})
+        purge2 = (r.get_json() or {}).get('id')
+        ids['players'].add(purge2)
+        r = client_a.post(f'/api/players/{purge2}/purge',
+                          json={'confirm': 'PURGE', 'archive_first': True})
+        check('permanent purge with archive_first succeeds',
+              r.status_code == 200, str(r.get_json()))
+        row = q1(conn, 'SELECT first_name, display_name, email, purged_at FROM players WHERE id = %s',
+                 (purge2,))
+        check('purged person is anonymized with old name hint',
+              row and row['first_name'] == 'Deleted' and row['purged_at'] is not None
+              and row['email'] is None and 'Zztestpurge2' in (row['display_name'] or ''),
+              str(row))
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')

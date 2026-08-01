@@ -418,8 +418,12 @@ def admin_people_api():
     try:
         scope = (request.args.get('scope') or 'site').strip().lower()
         q = (request.args.get('q') or '').strip()
+        include_archived = (request.args.get('include_archived') or '').lower() in (
+            '1', 'true', 'yes')
         params = []
-        where = ['p.purged_at IS NULL', 'p.archived_at IS NULL']
+        where = ['p.purged_at IS NULL']
+        if not include_archived:
+            where.append('p.archived_at IS NULL')
         if scope == 'mine':
             where.append('p.family_id = %s')
             params.append(user.get('family_id') or -1)
@@ -437,12 +441,16 @@ def admin_people_api():
             SELECT p.id, p.first_name, p.last_name,
                 COALESCE(p.display_name, p.first_name) AS display_name,
                 p.email AS player_email, p.family_id,
+                p.archived_at AS player_archived_at,
                 f.name AS family_name, f.lead_user_id,
                 u.id AS user_id, u.email AS login_email, u.role AS user_role,
                 u.is_verified, u.is_approved, u.is_active, u.last_login,
                 u.created_at AS user_created_at,
                 u.phone_number,
                 u.archived_at AS user_archived_at,
+                (SELECT i.email FROM invitations i
+                  WHERE i.player_id = p.id AND i.status IN ('sent', 'accepted')
+                  ORDER BY i.id DESC LIMIT 1) AS invite_email,
                 (SELECT COUNT(DISTINCT agp.active_game_id)
                    FROM active_game_players agp
                    JOIN active_games ag ON ag.id = agp.active_game_id
@@ -452,7 +460,7 @@ def admin_people_api():
             LEFT JOIN families f ON f.id = p.family_id
             LEFT JOIN users u ON u.player_id = p.id
             WHERE ''' + ' AND '.join(where) + '''
-            ORDER BY f.name NULLS LAST, p.first_name, p.last_name
+            ORDER BY (p.archived_at IS NOT NULL), f.name NULLS LAST, p.first_name, p.last_name
             LIMIT 500
         '''
         rows = execute_query(conn, sql, tuple(params) if params else None)
@@ -462,6 +470,7 @@ def admin_people_api():
             games = int(d.get('games') or 0)
             wins = int(d.get('wins') or 0)
             d['losses'] = max(games - wins, 0)
+            d['is_archived'] = bool(d.get('player_archived_at'))
             d['is_lead'] = bool(d.get('user_id') and d.get('lead_user_id')
                                 and d['user_id'] == d['lead_user_id'])
             if d.get('user_id'):
@@ -473,19 +482,97 @@ def admin_people_api():
                     d['login_status'] = 'Active'
             else:
                 d['login_status'] = 'None'
-            if d['is_lead']:
+            if d['is_archived']:
+                d['role_label'] = 'Archived'
+            elif d['is_lead']:
                 d['role_label'] = 'Team Lead'
             elif d.get('user_id'):
                 d['role_label'] = 'Member'
             else:
                 d['role_label'] = 'No login'
-            d['email'] = d.get('login_email') or d.get('player_email') or ''
+            # Prefer login email, then profile email, then latest invite email.
+            d['email'] = (d.get('login_email') or d.get('player_email')
+                          or d.get('invite_email') or '')
             created = d.get('user_created_at')
             d['joined_at'] = created.isoformat() if created else None
             if d.get('last_login'):
                 d['last_login'] = d['last_login'].isoformat()
+            if d.get('player_archived_at'):
+                d['player_archived_at'] = d['player_archived_at'].isoformat()
             out.append(d)
-        return jsonify({'people': out, 'scope': scope})
+        return jsonify({
+            'people': out, 'scope': scope, 'include_archived': include_archived,
+        })
+    finally:
+        conn.close()
+
+
+@main.route('/api/admin/player/<int:player_id>/clear-email', methods=['POST'])
+@admin_required
+def admin_clear_player_email(player_id):
+    """Fully free an email: clear players.email, revoke invites, optionally
+    remove the linked login. Use this when an address is stuck on a profile."""
+    conn = get_db_connection()
+    admin = get_current_user()
+    try:
+        data = request.get_json(silent=True) or {}
+        remove_login = bool(data.get('remove_login', True))
+        player = execute_query_one(conn, '''
+            SELECT * FROM players WHERE id = %s AND purged_at IS NULL
+        ''', (player_id,))
+        if not player:
+            return jsonify({'error': 'Player not found'}), 404
+
+        linked = execute_query_one(conn, 'SELECT id, email FROM users WHERE player_id = %s', (player_id,))
+        emails = set()
+        if player.get('email'):
+            emails.add(player['email'].strip().lower())
+        if linked and linked.get('email'):
+            emails.add(linked['email'].strip().lower())
+        for e in list(emails):
+            inv = execute_query(conn, '''
+                SELECT email FROM invitations WHERE player_id = %s OR lower(email) = %s
+            ''', (player_id, e))
+            for row in inv or []:
+                if row.get('email'):
+                    emails.add(row['email'].strip().lower())
+
+        if linked and remove_login:
+            if linked['id'] == admin['id']:
+                return jsonify({'error': 'You cannot remove your own login from here'}), 400
+            execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE id = %s', (linked['id'],))
+            _retire_login_account(conn, admin['id'], linked['id'])
+        elif linked and not remove_login:
+            return jsonify({
+                'error': 'This person still has a login. Pass remove_login=true, or use Remove login first.',
+            }), 400
+
+        execute_modify(conn, '''
+            UPDATE players SET email = NULL, email_verified = FALSE WHERE id = %s
+        ''', (player_id,))
+        for e in emails:
+            execute_modify(conn, '''
+                UPDATE invitations SET status = 'revoked'
+                WHERE lower(email) = %s AND status IN ('sent', 'accepted')
+            ''', (e,))
+        execute_modify(conn, '''
+            UPDATE invitations SET status = 'revoked'
+            WHERE player_id = %s AND status IN ('sent', 'accepted')
+        ''', (player_id,))
+
+        audit(conn, admin['id'], 'player_email_cleared', 'players', player_id,
+              old={'emails': sorted(emails), 'removed_login': bool(linked and remove_login)})
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'message': 'Email cleared from this person'
+                       + (' and login removed' if linked and remove_login else '')
+                       + '. Address is free to use elsewhere.',
+            'cleared_emails': sorted(emails),
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
@@ -4625,32 +4712,79 @@ def reinstate_player(player_id):
 @admin_required
 def purge_player(player_id):
     """Irreversibly anonymize a person (GDPR-style). Scores keep their shape
-    for everyone else's records, but the identity is gone forever. Requires
-    the player to be archived first, as a two-step safety."""
+    for everyone else's records, but the identity is gone forever.
+    By default requires archive first; pass archive_first=true to do both."""
     conn = get_db_connection()
     user = get_current_user()
     try:
+        data = request.get_json(silent=True) or {}
         player = execute_query_one(conn, 'SELECT * FROM players WHERE id = %s AND purged_at IS NULL', (player_id,))
         if not player:
             return jsonify({'error': 'Player not found or already purged'}), 404
-        if not player.get('archived_at'):
-            return jsonify({'error': 'Archive the player first; purge is the second, irreversible step'}), 400
-        confirm = (request.get_json(silent=True) or {}).get('confirm')
+        confirm = data.get('confirm')
         if confirm != 'PURGE':
             return jsonify({'error': 'Send {"confirm": "PURGE"} to confirm this irreversible action'}), 400
 
-        execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (player_id,))
+        if not player.get('archived_at'):
+            if data.get('archive_first'):
+                # Skip active-game check only if explicitly forcing; still block
+                # unfinished games for safety.
+                active_game = execute_query_one(conn, '''
+                    SELECT 1 FROM active_game_players agp
+                    JOIN active_games ag ON agp.active_game_id = ag.id
+                    WHERE agp.player_id = %s AND ag.is_complete = FALSE
+                ''', (player_id,))
+                if active_game:
+                    return jsonify({
+                        'error': 'Cannot permanently delete a player in an active game. Finish or delete the game first.',
+                    }), 400
+                execute_modify(conn, '''
+                    UPDATE players SET archived_at = CURRENT_TIMESTAMP, archived_by_user_id = %s,
+                        archive_reason = %s WHERE id = %s
+                ''', (user['id'], 'Permanently deleted from People Hub', player_id))
+            else:
+                return jsonify({'error': 'Archive the player first; purge is the second, irreversible step'}), 400
+
+        linked = execute_query_one(conn, 'SELECT id, email FROM users WHERE player_id = %s', (player_id,))
+        emails = set()
+        if player.get('email'):
+            emails.add(player['email'].strip().lower())
+        if linked and linked.get('email'):
+            emails.add(linked['email'].strip().lower())
+
+        if linked:
+            if linked['id'] == user['id']:
+                return jsonify({'error': 'You cannot permanently delete your own account'}), 400
+            execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE id = %s', (linked['id'],))
+            _retire_login_account(conn, user['id'], linked['id'])
+        else:
+            execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (player_id,))
+
+        old_name = f"{player.get('first_name', '')} {player.get('last_name', '')}".strip()
         execute_modify(conn, '''
             UPDATE players SET first_name = 'Deleted', last_name = 'Player',
-                display_name = 'Deleted Player', email = NULL, email_verified = FALSE,
+                display_name = %s, email = NULL, email_verified = FALSE,
                 is_discoverable = FALSE, purged_at = CURRENT_TIMESTAMP
             WHERE id = %s
+        ''', (f'Deleted ({old_name})' if old_name else 'Deleted Player', player_id))
+        for e in emails:
+            execute_modify(conn, '''
+                UPDATE invitations SET status = 'revoked'
+                WHERE lower(email) = %s AND status IN ('sent', 'accepted')
+            ''', (e,))
+        execute_modify(conn, '''
+            UPDATE invitations SET status = 'revoked'
+            WHERE player_id = %s AND status IN ('sent', 'accepted')
         ''', (player_id,))
-        execute_modify(conn, "UPDATE invitations SET status = 'revoked' WHERE player_id = %s AND status = 'sent'", (player_id,))
         audit(conn, user['id'], 'player_purged', 'players', player_id,
-              old={'first_name': player['first_name'], 'last_name': player['last_name']})
+              old={'first_name': player['first_name'], 'last_name': player['last_name'],
+                   'email': player.get('email'), 'emails_cleared': sorted(emails)})
         conn.commit()
-        return jsonify({'message': 'Player permanently anonymized. Game records remain for other players.'})
+        return jsonify({
+            'success': True,
+            'message': 'Person permanently removed (shown as Deleted). '
+                       'Game score rows remain for other players\' history. Email is free.',
+        })
     except Exception as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 500
