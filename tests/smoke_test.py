@@ -457,9 +457,15 @@ def main():
         page = client_a.get('/five-crowns').get_data(as_text=True)
         check('game pages load live_game.js sync helper',
               'live_game.js' in page or 'DiFedeLiveGame' in page)
-        fc_tpl = client_a.get('/five-crowns').get_data(as_text=True)
-        check('five crowns score cells are bold',
-              'font-weight: 700' in fc_tpl or 'font-weight:700' in fc_tpl)
+        for path, label in (
+            ('/five-crowns', 'five crowns'),
+            ('/uno', 'uno classic'),
+            ('/gin-rummy', 'gin rummy'),
+            ('/skyjo', 'skyjo'),
+        ):
+            page_html = client_a.get(path).get_data(as_text=True)
+            check(f'{label} score cells are bold',
+                  'font-weight: 700' in page_html or 'font-weight:700' in page_html)
 
         cur = conn.cursor()
         blocked = False
