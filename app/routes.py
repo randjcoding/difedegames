@@ -1821,7 +1821,7 @@ def my_team():
         players = list(execute_query(conn, '''
             SELECT p.id, p.first_name, p.last_name,
                 COALESCE(p.display_name, p.first_name) as display_name,
-                p.email as player_email,
+                p.email as player_email, p.is_discoverable, p.is_minor,
                 m.is_primary AS is_home, m.role AS membership_role,
                 p.family_id AS home_family_id, hf.name AS home_family_name,
                 acc.id AS account_id, acc.email AS account_email
@@ -1999,7 +1999,9 @@ def team_edit_player(player_id):
             return jsonify({'error': 'You can only edit your own profile'}), 403
         # Player must belong to this family (any membership).
         member = execute_query_one(conn, '''
-            SELECT p.* FROM players p
+            SELECT p.*,
+                EXISTS (SELECT 1 FROM users u WHERE u.player_id = p.id) AS has_login
+            FROM players p
             JOIN player_family_memberships m ON m.player_id = p.id
             WHERE p.id = %s AND m.family_id = %s
         ''', (player_id, family_id))
@@ -2020,16 +2022,75 @@ def team_edit_player(player_id):
             ''', (email, player_id))
             if taken:
                 return jsonify({'error': 'That email is already on another player profile'}), 409
+
+        # Public visibility: people with a login control their own setting
+        # (Profile / self-edit). Leads may set it only for people without a login.
+        is_discoverable = member.get('is_discoverable', True)
+        if 'is_discoverable' in data:
+            want = bool(data.get('is_discoverable'))
+            if is_self or (is_lead and not member.get('has_login')):
+                is_discoverable = want
+            elif is_lead and member.get('has_login') and want != bool(member.get('is_discoverable')):
+                return jsonify({
+                    'error': 'This person has a login and controls their own public visibility. '
+                             'Ask them to change it on their Profile.',
+                }), 403
+
         execute_modify(conn, '''
             UPDATE players SET first_name = %s, last_name = %s, display_name = %s,
-                email = %s WHERE id = %s
+                email = %s, is_discoverable = %s WHERE id = %s
         ''', (data.get('first_name', member['first_name']),
               data.get('last_name', member['last_name']),
               data.get('display_name', member.get('display_name')),
               email,
+              is_discoverable,
               player_id))
         conn.commit()
         return jsonify({'message': 'Player updated'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@main.route('/api/team/settings', methods=['PUT'])
+@login_required
+def team_update_settings():
+    """Family lead: toggle team discoverability and public roster visibility."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        family_id = user.get('family_id')
+        if not family_id or not is_family_lead(conn, user, family_id):
+            return jsonify({'error': 'Only the team lead can change these settings'}), 403
+        data = request.get_json(silent=True) or {}
+        family = execute_query_one(conn, '''
+            SELECT id, name, is_discoverable, show_roster FROM families
+            WHERE id = %s AND archived_at IS NULL
+        ''', (family_id,))
+        if not family:
+            return jsonify({'error': 'Family not found'}), 404
+        is_discoverable = (bool(data['is_discoverable']) if 'is_discoverable' in data
+                           else bool(family['is_discoverable']))
+        show_roster = (bool(data['show_roster']) if 'show_roster' in data
+                       else bool(family['show_roster']))
+        execute_modify(conn, '''
+            UPDATE families SET is_discoverable = %s, show_roster = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        ''', (is_discoverable, show_roster, family_id))
+        audit(conn, user['id'], 'family_privacy_updated', 'families', family_id,
+              old={'is_discoverable': family['is_discoverable'],
+                   'show_roster': family['show_roster']},
+              new={'is_discoverable': is_discoverable, 'show_roster': show_roster})
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'message': 'Team visibility updated.',
+            'is_discoverable': is_discoverable,
+            'show_roster': show_roster,
+        })
     except Exception as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 500
@@ -2404,8 +2465,7 @@ def directory_people():
     if _directory_rate_limited(user['id']):
         return jsonify({'error': 'Too many searches. Please wait a minute.'}), 429
     q = (request.args.get('q') or '').strip()
-    if len(q) < 2:
-        return jsonify({'results': [], 'page': 1})
+    # Empty q = browse publicly visible people. Short typed search still works.
     try:
         page = max(1, int(request.args.get('page', 1)))
     except ValueError:
@@ -2413,32 +2473,48 @@ def directory_people():
 
     conn = get_db_connection()
     try:
+        my_family = user.get('family_id')
+        allied = set(allied_family_ids(conn, my_family)) if my_family else set()
+        trusted_families = list({fid for fid in ([my_family] if my_family else []) + list(allied) if fid})
+        if not trusted_families:
+            trusted_families = [-1]
         minor_families = _visible_family_ids_for_minors(conn, user) or [-1]
-        like = f'%{q}%'
-        # Logged-in search is intentionally easy to use while Joe is the sole
-        # approving authority. Minors still require a direct crew alliance.
-        # Emails are never returned. Full names are shown so families are easy
-        # to tell apart; tighten privacy later if the user base grows.
+        params = []
+        where = [
+            'p.archived_at IS NULL',
+            'p.purged_at IS NULL',
+            'f.archived_at IS NULL',
+            '(p.is_minor = FALSE OR p.family_id = ANY(%s))',
+            # Public people OR anyone in your own/crew families.
+            '(p.is_discoverable = TRUE OR p.family_id = ANY(%s))',
+            # Their team must also be public unless you are crewed with them.
+            '(f.is_discoverable = TRUE OR f.id = ANY(%s))',
+        ]
+        params.extend([minor_families, trusted_families, trusted_families])
+        if q:
+            where.append('''(
+                p.first_name ILIKE %s OR p.last_name ILIKE %s
+                OR COALESCE(p.display_name, '') ILIKE %s
+                OR f.name ILIKE %s
+            )''')
+            like = f'%{q}%'
+            params.extend([like, like, like, like])
+        limit = 100 if not q else 40
+        params.append((page - 1) * limit)
         rows = execute_query(conn, f'''
             SELECT p.id, p.first_name, p.last_name, p.display_name,
-                p.show_full_last_name, p.is_minor, p.family_id,
+                p.show_full_last_name, p.is_minor, p.is_discoverable, p.family_id,
                 f.name AS family_name,
                 EXISTS (SELECT 1 FROM users u WHERE u.player_id = p.id) AS is_claimed,
                 {_LEAD_COLS}
             FROM players p
             JOIN families f ON f.id = p.family_id
             {_LEAD_JOIN}
-            WHERE p.archived_at IS NULL AND p.purged_at IS NULL
-              AND f.archived_at IS NULL
-              AND (p.first_name ILIKE %s OR p.last_name ILIKE %s
-                   OR COALESCE(p.display_name, '') ILIKE %s
-                   OR f.name ILIKE %s)
-              AND (p.is_minor = FALSE OR p.family_id = ANY(%s))
+            WHERE {' AND '.join(where)}
             ORDER BY p.first_name, p.last_name
-            LIMIT 40 OFFSET %s
-        ''', (like, like, like, like, minor_families, (page - 1) * 40))
+            LIMIT {int(limit)} OFFSET %s
+        ''', tuple(params))
 
-        my_family = user.get('family_id')
         my_pid = user.get('player_id')
         linked = set()
         if my_pid:
@@ -2461,6 +2537,7 @@ def directory_people():
                 'family_label': _family_label(r),
                 'is_claimed': bool(r['is_claimed']),
                 'in_my_family': r['family_id'] == my_family,
+                'is_allied': r['family_id'] in allied,
                 'can_personal_crew': can_pc,
             })
         return jsonify({'page': page, 'results': results})
@@ -2498,6 +2575,18 @@ def directory_lookup_email():
 
         if not row or row['family_archived']:
             return jsonify({'found': False})
+        my_family = user.get('family_id')
+        allied = set(allied_family_ids(conn, my_family)) if my_family else set()
+        trusted = (row['family_id'] == my_family or row['family_id'] in allied
+                   or user.get('role') == 'super_admin')
+        if not trusted:
+            if not row.get('is_discoverable'):
+                return jsonify({'found': False})
+            fam_pub = execute_query_one(conn, '''
+                SELECT is_discoverable FROM families WHERE id = %s
+            ''', (row['family_id'],))
+            if not fam_pub or not fam_pub.get('is_discoverable'):
+                return jsonify({'found': False})
         if row['is_minor'] and row['family_id'] not in _visible_family_ids_for_minors(conn, user):
             return jsonify({'found': False})
         return jsonify({
@@ -2513,12 +2602,12 @@ def directory_lookup_email():
 @main.route('/api/directory/families')
 @login_required
 def directory_families():
+    """List / search teams. Empty q browses all teams that are public to you
+    (discoverable) plus your own team and accepted crew alliances."""
     user = get_current_user()
     if _directory_rate_limited(user['id']):
         return jsonify({'error': 'Too many searches. Please wait a minute.'}), 429
     q = (request.args.get('q') or '').strip()
-    if len(q) < 2:
-        return jsonify({'results': [], 'page': 1})
     try:
         page = max(1, int(request.args.get('page', 1)))
     except ValueError:
@@ -2526,8 +2615,26 @@ def directory_families():
 
     conn = get_db_connection()
     try:
+        my_family = user.get('family_id')
+        i_am_lead = bool(my_family and is_family_lead(conn, user, my_family))
+        allied = set(allied_family_ids(conn, my_family)) if my_family else set()
+        trusted_families = list({fid for fid in ([my_family] if my_family else []) + list(allied) if fid})
+        if not trusted_families:
+            trusted_families = [-1]
+
+        params = [trusted_families]
+        where = [
+            'f.archived_at IS NULL',
+            '(f.is_discoverable = TRUE OR f.id = ANY(%s))',
+        ]
+        if q:
+            where.append('f.name ILIKE %s')
+            params.append(f'%{q}%')
+        limit = 200 if not q else 40
+        params.append((page - 1) * limit)
+
         rows = execute_query(conn, f'''
-            SELECT f.id, f.name, f.slug, f.show_roster,
+            SELECT f.id, f.name, f.slug, f.show_roster, f.is_discoverable,
                 (SELECT COUNT(*) FROM player_family_memberships m
                   JOIN players mp ON mp.id = m.player_id
                   WHERE m.family_id = f.id AND m.status = 'active'
@@ -2535,15 +2642,11 @@ def directory_families():
                 {_LEAD_COLS}
             FROM families f
             {_LEAD_JOIN}
-            WHERE f.archived_at IS NULL
-              AND f.name ILIKE %s
+            WHERE {' AND '.join(where)}
             ORDER BY f.name
-            LIMIT 40 OFFSET %s
-        ''', (f'%{q}%', (page - 1) * 40))
+            LIMIT {int(limit)} OFFSET %s
+        ''', tuple(params))
 
-        my_family = user.get('family_id')
-        i_am_lead = bool(my_family and is_family_lead(conn, user, my_family))
-        allied = set(allied_family_ids(conn, my_family)) if my_family else set()
         results = []
         for r in rows:
             lead_name = None
@@ -2554,6 +2657,9 @@ def directory_families():
                     'display_name': r['lead_display_name'],
                     'show_full_last_name': r['lead_show_full_last_name'],
                 })
+            is_trusted = r['id'] == my_family or r['id'] in allied
+            # Crew always sees roster; strangers only when the team opts in.
+            roster_visible = bool(r['show_roster']) or is_trusted
             results.append({
                 'family_id': r['id'],
                 'name': r['name'],
@@ -2561,7 +2667,8 @@ def directory_families():
                 'label': _family_label(r),
                 'lead_name': lead_name,
                 'member_count': r['member_count'],
-                'roster_visible': bool(r['show_roster']),
+                'roster_visible': roster_visible,
+                'is_discoverable': bool(r['is_discoverable']),
                 'is_my_family': r['id'] == my_family,
                 'is_allied': r['id'] in allied,
                 'can_crew_up': i_am_lead and r['id'] != my_family and r['id'] not in allied,
@@ -2573,18 +2680,25 @@ def directory_families():
 @main.route('/api/directory/families/<int:family_id>/roster')
 @login_required
 def directory_family_roster(family_id):
-    """Roster preview so someone can confirm they found the right family."""
+    """Roster preview. Crew / own family always see members. Strangers only
+    when show_roster is on, and then only publicly visible people."""
     user = get_current_user()
     if _directory_rate_limited(user['id']):
         return jsonify({'error': 'Too many searches. Please wait a minute.'}), 429
     conn = get_db_connection()
     try:
         family = execute_query_one(conn, '''
-            SELECT id, name, show_roster FROM families
+            SELECT id, name, show_roster, is_discoverable FROM families
             WHERE id = %s AND archived_at IS NULL
         ''', (family_id,))
         if not family:
             return jsonify({'error': 'Family not found'}), 404
+
+        my_family = user.get('family_id')
+        allied = set(allied_family_ids(conn, my_family)) if my_family else set()
+        is_trusted = (family_id == my_family or family_id in allied
+                      or is_family_lead(conn, user, family_id)
+                      or user.get('role') == 'super_admin')
 
         member_count = execute_query_one(conn, '''
             SELECT COUNT(*) AS n FROM player_family_memberships m
@@ -2592,8 +2706,11 @@ def directory_family_roster(family_id):
             WHERE m.family_id = %s AND m.status = 'active' AND p.archived_at IS NULL
         ''', (family_id,))['n']
 
-        if not family['show_roster'] and not is_family_lead(conn, user, family_id) \
-                and user.get('family_id') != family_id:
+        # Non-crew cannot browse a private (non-discoverable) team at all.
+        if not is_trusted and not family.get('is_discoverable'):
+            return jsonify({'error': 'Family not found'}), 404
+
+        if not family['show_roster'] and not is_trusted:
             return jsonify({'family_id': family_id, 'name': family['name'],
                             'roster_visible': False, 'member_count': member_count})
 
@@ -2601,7 +2718,7 @@ def directory_family_roster(family_id):
             or user.get('role') == 'super_admin'
         rows = execute_query(conn, '''
             SELECT p.id, p.first_name, p.last_name, p.display_name,
-                p.show_full_last_name, p.is_minor,
+                p.show_full_last_name, p.is_minor, p.is_discoverable,
                 EXISTS (SELECT 1 FROM users u WHERE u.player_id = p.id) AS is_claimed
             FROM player_family_memberships m
             JOIN players p ON p.id = m.player_id
@@ -2610,12 +2727,19 @@ def directory_family_roster(family_id):
             ORDER BY p.first_name, p.last_name
         ''', (family_id,))
 
-        members = [{
-            'player_id': r['id'],
-            'name': _directory_person_name(r),
-            'is_claimed': bool(r['is_claimed']),
-            'is_minor': bool(r['is_minor']),
-        } for r in rows if can_see_minors or not r['is_minor']]
+        members = []
+        for r in rows:
+            if not can_see_minors and r['is_minor']:
+                continue
+            # Strangers only see people marked publicly visible.
+            if not is_trusted and not r.get('is_discoverable'):
+                continue
+            members.append({
+                'player_id': r['id'],
+                'name': _directory_person_name(r),
+                'is_claimed': bool(r['is_claimed']),
+                'is_minor': bool(r['is_minor']),
+            })
 
         # A lead viewing another family's roster can select people to request
         # a transfer into their own family (W5). Minors can only be moved by
@@ -4439,25 +4563,42 @@ def family_page(family_id):
     user = get_current_user()
     try:
         family = execute_query_one(conn, 'SELECT * FROM families WHERE id = %s', (family_id,))
-        if not family:
+        if not family or family.get('archived_at'):
             return redirect(url_for('main.dashboard'))
-        
+
+        my_family = user.get('family_id')
+        allied = set(allied_family_ids(conn, my_family)) if my_family else set()
+        is_trusted = (family_id == my_family or family_id in allied
+                      or user.get('role') == 'super_admin')
+        # Private teams are only visible to own family + crew (+ super admin).
+        if not is_trusted and not family.get('is_discoverable'):
+            return redirect(url_for('main.directory'))
+
         leader = execute_query_one(conn, '''
             SELECT u.id, u.email, u.first_name, u.last_name, u.role
             FROM users u
             JOIN families f ON f.lead_user_id = u.id
             WHERE f.id = %s
         ''', (family_id,))
-        
-        members = list(execute_query(conn, '''
-            SELECT p.id, p.first_name, p.last_name,
-                COALESCE(p.display_name, p.first_name) as display_name,
-                m.is_primary AS is_home
-            FROM player_family_memberships m
-            JOIN players p ON p.id = m.player_id
-            WHERE m.family_id = %s AND m.status = 'active' AND p.archived_at IS NULL
-            ORDER BY m.is_primary DESC, p.first_name, p.last_name
-        ''', (family_id,)))
+
+        show_members = is_trusted or bool(family.get('show_roster'))
+        if show_members:
+            members = list(execute_query(conn, '''
+                SELECT p.id, p.first_name, p.last_name,
+                    COALESCE(p.display_name, p.first_name) as display_name,
+                    m.is_primary AS is_home, p.is_discoverable, p.is_minor
+                FROM player_family_memberships m
+                JOIN players p ON p.id = m.player_id
+                WHERE m.family_id = %s AND m.status = 'active' AND p.archived_at IS NULL
+                ORDER BY m.is_primary DESC, p.first_name, p.last_name
+            ''', (family_id,)))
+            if not is_trusted:
+                can_see_minors = family_id in _visible_family_ids_for_minors(conn, user)
+                members = [m for m in members
+                           if m.get('is_discoverable')
+                           and (can_see_minors or not m.get('is_minor'))]
+        else:
+            members = []
         
         stats = list(execute_query(conn, '''
             SELECT g.name as game_name, g.slug, COUNT(*) as games_played
@@ -4507,23 +4648,15 @@ def family_page(family_id):
             WHERE ag.family_id = %s AND ag.is_complete = TRUE
         ''', (family_id,))
         
-        is_own_family = user.get('family_id') == family_id
-        is_allied = False
-        if not is_own_family:
-            uf = user.get('family_id')
-            ally = execute_query_one(conn, '''
-                SELECT id FROM family_alliances
-                WHERE status = 'accepted'
-                AND ((requesting_family_id = %s AND target_family_id = %s)
-                  OR (requesting_family_id = %s AND target_family_id = %s))
-            ''', (uf, family_id, family_id, uf))
-            is_allied = ally is not None
-        
+        is_own_family = my_family == family_id
+        is_allied = family_id in allied
+
         return render_template('family_page.html',
             family=family, leader=leader, members=members,
             stats=stats, family_top=family_top, lifetime_top=lifetime_top,
             total_games=total_games['cnt'] if total_games else 0,
-            is_own_family=is_own_family, is_allied=is_allied)
+            is_own_family=is_own_family, is_allied=is_allied,
+            roster_visible=show_members)
     finally:
         conn.close()
 

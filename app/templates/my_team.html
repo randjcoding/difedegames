@@ -102,6 +102,14 @@
     color: var(--df-muted);
     border: 1px solid var(--df-border);
   }
+  .tag-public { background: #0ea5e9; color: #fff; }
+  .tag-private {
+    background: color-mix(in srgb, var(--df-text) 12%, transparent);
+    color: var(--df-muted);
+    border: 1px solid var(--df-border);
+  }
+  .privacy-card .form-check-label { color: var(--df-text); }
+  .privacy-card .setting-help { font-size: 0.78rem; color: var(--df-muted); margin-top: 0.15rem; }
 
   .ally-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1rem; border-bottom: 1px solid var(--df-border, #2a2a4a); }
   .ally-row:last-child { border-bottom: none; }
@@ -205,6 +213,33 @@
   </div>
 
   {% if is_lead %}
+  <div class="section-card privacy-card">
+    <div class="card-header"><span><i class="fas fa-eye me-2"></i>Public Visibility</span></div>
+    <div class="card-body">
+      <p class="mb-3" style="font-size:0.88rem;color:var(--df-muted);">
+        Public means people you are <strong style="color:var(--df-text);">not</strong> crewed up with.
+        Accepted crew always sees your team name and full roster.
+      </p>
+      <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" id="teamDiscoverable"
+               {% if family.is_discoverable %}checked{% endif %}>
+        <label class="form-check-label" for="teamDiscoverable">List this team publicly in the Directory</label>
+        <div class="setting-help">When off, only your team and crew can find {{ family.name }} by name.</div>
+      </div>
+      <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" id="teamShowRoster"
+               {% if family.show_roster %}checked{% endif %}>
+        <label class="form-check-label" for="teamShowRoster">Show our roster to the public</label>
+        <div class="setting-help">When on, non-crew can open the member list (each person still needs their own public setting). Crew always sees everyone.</div>
+      </div>
+      <button type="button" class="btn btn-sm" id="saveTeamPrivacy"
+              style="background:var(--df-accent-gradient);color:var(--df-btn-primary-text);font-weight:600;">
+        Save visibility
+      </button>
+      <span id="teamPrivacyStatus" class="ms-2 small" style="color:var(--df-muted);"></span>
+    </div>
+  </div>
+
   <!-- Transfer requests (release workflow): filled in by JS -->
   <div class="section-card" id="transfersCard" style="display:none;">
     <div class="card-header"><span><i class="fas fa-people-arrows me-2"></i>Transfer Requests</span></div>
@@ -265,6 +300,8 @@
           </div>
           <div class="sub">
             {{ p.first_name }} {{ p.last_name }}
+            {% if p.is_discoverable %}<span class="tag tag-public ms-1">Public</span>
+            {% else %}<span class="tag tag-private ms-1">Private</span>{% endif %}
             {% if p.account_email %}<span class="tag tag-login ms-1"><i class="fas fa-check"></i> {{ p.account_email }}</span>
             {% elif p.player_email %}<span class="tag tag-nologin ms-1">Invite pending: {{ p.player_email }}</span>
             {% else %}<span class="tag tag-nologin ms-1">No Login</span>{% endif %}
@@ -287,7 +324,8 @@
             title="Edit player details" aria-label="Edit player details"
             data-id="{{ p.id }}" data-first="{{ p.first_name }}" data-last="{{ p.last_name }}"
             data-display="{{ p.display_name }}" data-email="{{ p.player_email or '' }}"
-            data-has-login="{{ 1 if p.account_id else 0 }}">
+            data-has-login="{{ 1 if p.account_id else 0 }}"
+            data-discoverable="{{ 1 if p.is_discoverable else 0 }}">
             <i class="fas fa-pen" aria-hidden="true"></i>
           </button>
           {% endif %}
@@ -586,12 +624,12 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <p class="help-text" style="font-size:0.88rem;">Search for a family and send a crew-up request. Only family leads can accept. Crewed families can play together, and you can see each other's children in the directory.</p>
+        <p class="help-text" style="font-size:0.88rem;">Pick a team and send a crew-up request. Only team leads can accept. Crewed teams can play together and always see each other's full rosters.</p>
         <div class="input-group mb-2">
-          <input type="text" class="form-control" id="crewTeamQuery" placeholder="Family name (at least 2 letters)" autocomplete="off">
+          <input type="text" class="form-control" id="crewTeamQuery" placeholder="Optional: filter by team name" autocomplete="off">
           <button type="button" class="btn btn-outline-secondary" id="crewTeamSearchBtn" title="Search families" aria-label="Search families"><i class="fas fa-search" aria-hidden="true"></i></button>
         </div>
-        <div id="crewTeamResults" class="join-empty">Type at least 2 letters to find a family.</div>
+        <div id="crewTeamResults" class="join-empty">Loading teams...</div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -616,6 +654,11 @@
         </div>
         <div class="mb-2"><label class="form-label fw-semibold">Display Name</label><input type="text" class="form-control" id="epDisplayName" required></div>
         <div class="mb-2"><label class="form-label fw-semibold">Email</label><input type="email" class="form-control" id="epEmail" placeholder="them@example.com"></div>
+        <div class="form-check form-switch mb-2" id="epDiscoverableWrap">
+          <input class="form-check-input" type="checkbox" id="epDiscoverable">
+          <label class="form-check-label" for="epDiscoverable">Show publicly in the Directory</label>
+          <div class="form-text" id="epDiscoverableHelp" style="color:#6c757d;">Public = visible to people outside your crew. Crew always sees teammates.</div>
+        </div>
         <div class="form-check" id="epSendLoginWrap" style="display:none;">
           <input class="form-check-input" type="checkbox" id="epSendLogin">
           <label class="form-check-label" for="epSendLogin">Also email them a link to set a password and log in</label>
@@ -638,14 +681,14 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <p class="help-text" style="font-size:0.88rem;">Type a family name to search, then send a request to their lead. Once approved you can play and be scored there.</p>
+        <p class="help-text" style="font-size:0.88rem;">Browse or filter public teams, then send a request to their lead. Once approved you can play and be scored there.</p>
         <div class="input-group mb-2">
-          <input type="text" class="form-control" id="joinFamilyQuery" placeholder="Family name (at least 2 letters)" autocomplete="off">
+          <input type="text" class="form-control" id="joinFamilyQuery" placeholder="Optional: filter by team name" autocomplete="off">
           <button type="button" class="btn btn-outline-secondary" id="joinFamilySearchBtn" title="Search families" aria-label="Search families">
             <i class="fas fa-search" aria-hidden="true"></i>
           </button>
         </div>
-        <div id="joinFamilyResults" class="join-empty">Type at least 2 letters to find a family.</div>
+        <div id="joinFamilyResults" class="join-empty">Loading teams...</div>
         <p class="help-text mb-0 mt-2" style="font-size:0.75rem;">Want more detail first? Use the <a href="{{ url_for('main.directory') }}">Directory</a> to view rosters before you request.</p>
       </div>
       <div class="modal-footer">
@@ -818,11 +861,14 @@ $(function() {
   function searchCrewFamilies() {
     var q = $("#crewTeamQuery").val().trim();
     var box = $("#crewTeamResults");
-    if (q.length < 2) { box.attr('class','join-empty').html('Type at least 2 letters to find a family.'); return; }
-    box.attr('class','join-empty').html('Searching...');
-    $.get('/api/directory/families', { q: q }, function(data) {
+    box.attr('class','join-empty').html(q ? 'Searching...' : 'Loading teams...');
+    var req = q ? { q: q } : {};
+    $.get('/api/directory/families', req, function(data) {
       var list = (data.results || []).filter(function(f){ return f.can_crew_up; });
-      if (!list.length) { box.attr('class','join-empty').html('No families available to crew up with for that name.'); return; }
+      if (!list.length) {
+        box.attr('class','join-empty').html(q ? 'No families available to crew up with for that name.' : 'No other public teams available to crew up with.');
+        return;
+      }
       var html = list.map(function(f) {
         return '<div class="join-result-row"><div><div class="name">' + escText(f.name) + '</div>' +
           '<div class="sub">' + escText(f.label || '') + ' - ' + f.member_count + ' members</div></div>' +
@@ -843,7 +889,29 @@ $(function() {
   });
   $('#crewUpTeamModal').on('shown.bs.modal', function() {
     $("#crewTeamQuery").val('').trigger('focus');
-    $("#crewTeamResults").attr('class','join-empty').html('Type at least 2 letters to find a family.');
+    searchCrewFamilies();
+  });
+
+  $("#saveTeamPrivacy").click(function() {
+    var btn = $(this);
+    btn.prop('disabled', true);
+    $("#teamPrivacyStatus").text('Saving...');
+    $.ajax({
+      url: '/api/team/settings', method: 'PUT', contentType: 'application/json',
+      data: JSON.stringify({
+        is_discoverable: $("#teamDiscoverable").is(':checked'),
+        show_roster: $("#teamShowRoster").is(':checked')
+      }),
+      success: function(d) {
+        $("#teamPrivacyStatus").text(d.message || 'Saved.');
+        btn.prop('disabled', false);
+      },
+      error: function(xhr) {
+        btn.prop('disabled', false);
+        $("#teamPrivacyStatus").text('');
+        fail(xhr);
+      }
+    });
   });
 
   function renderTransfers(data) {
@@ -898,6 +966,15 @@ $(function() {
     $("#epDisplayName").val($b.data("display"));
     $("#epEmail").val($b.data("email"));
     var hasLogin = String($b.data("has-login")) === "1";
+    var isSelf = String($b.data("id")) === "{{ my_player_id or '' }}";
+    var canSetPublic = isSelf || !hasLogin;
+    $("#epDiscoverable").prop("checked", String($b.data("discoverable")) === "1");
+    $("#epDiscoverable").prop("disabled", !canSetPublic);
+    if (hasLogin && !isSelf) {
+      $("#epDiscoverableHelp").text("This person has a login and controls their own public setting on Profile.");
+    } else {
+      $("#epDiscoverableHelp").text("Public = visible to people outside your crew. Crew always sees teammates.");
+    }
     $("#epSendLoginWrap").toggle(!hasLogin);
     $("#epSendLogin").prop("checked", !hasLogin && !!($b.data("email")));
     new bootstrap.Modal($("#editPlayerModal")).show();
@@ -909,6 +986,9 @@ $(function() {
     var sendLogin = $("#epSendLoginWrap").is(":visible") && $("#epSendLogin").is(":checked") && !!email;
     var data = { first_name: $("#epFirstName").val(), last_name: $("#epLastName").val(),
       display_name: $("#epDisplayName").val(), email: email };
+    if (!$("#epDiscoverable").prop("disabled")) {
+      data.is_discoverable = $("#epDiscoverable").is(":checked");
+    }
     $.ajax({ url: "/api/team/players/" + pid, method: "PUT", contentType: "application/json",
       data: JSON.stringify(data),
       success: function() {
@@ -952,17 +1032,16 @@ $(function() {
   function searchJoinFamilies() {
     var q = $("#joinFamilyQuery").val().trim();
     var box = $("#joinFamilyResults");
-    if (q.length < 2) {
-      box.attr('class', 'join-empty').html('Type at least 2 letters to find a family.');
-      return;
-    }
-    box.attr('class', 'join-empty').html('Searching...');
-    $.get('/api/directory/families', { q: q })
+    box.attr('class', 'join-empty').html(q ? 'Searching...' : 'Loading teams...');
+    var req = q ? { q: q } : {};
+    $.get('/api/directory/families', req)
       .done(function(data) {
         var list = (data && data.results) ? data.results : [];
         list = list.filter(function(f) { return !f.is_my_family; });
         if (!list.length) {
-          box.attr('class', 'join-empty').html('No matching families found. They may not be listed, or you may already belong.');
+          box.attr('class', 'join-empty').html(q
+            ? 'No matching families found. They may not be listed, or you may already belong.'
+            : 'No other public teams available right now.');
           return;
         }
         var html = list.map(function(f) {
@@ -999,7 +1078,7 @@ $(function() {
   });
   $('#joinFamilyModal').on('shown.bs.modal', function() {
     $("#joinFamilyQuery").val('').trigger('focus');
-    $("#joinFamilyResults").attr('class', 'join-empty').html('Type at least 2 letters to find a family.');
+    searchJoinFamilies();
   });
 
   $("#createFamilyBtn").click(function() {

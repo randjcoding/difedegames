@@ -192,7 +192,13 @@
           </a>
           {% endfor %}
           {% if not members %}
-          <div class="text-center py-3 text-muted">No players yet</div>
+          <div class="text-center py-3 text-muted">
+            {% if roster_visible is defined and not roster_visible %}
+            This team keeps its roster private.
+            {% else %}
+            No players yet
+            {% endif %}
+          </div>
           {% endif %}
         </div>
       </div>

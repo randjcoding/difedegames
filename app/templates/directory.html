@@ -99,24 +99,25 @@
 <div class="container py-3" style="max-width: 900px;">
   <div class="dir-hero">
     <h1><i class="fas fa-search me-2"></i>Directory</h1>
-    <p>Find players and families by name, confirm you have the right one, and send a join request. Full names and family leads are shown so you can tell people apart. Email addresses are never displayed.</p>
+    <p>Browse public teams and people, or search by name. Families you are crewed up with always show their full roster. Everyone else only sees what each team and person marks as public. Email addresses are never displayed.</p>
   </div>
 
   <ul class="nav nav-tabs dir-tabs mb-3" role="tablist">
-    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabPeople" type="button" role="tab">People</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabFamilies" type="button" role="tab">Families</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabPeople" type="button" role="tab">People</button></li>
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabFamilies" type="button" role="tab">Families</button></li>
   </ul>
 
   <div class="tab-content">
-    <div class="tab-pane fade show active" id="tabPeople" role="tabpanel">
+    <div class="tab-pane fade" id="tabPeople" role="tabpanel">
       <div class="dir-card card">
         <div class="card-header">Search People</div>
         <div class="card-body">
           <div class="input-group mb-2">
-            <input type="text" class="form-control" id="peopleQuery" placeholder="First name, last name, or family name" autocomplete="off">
+            <input type="text" class="form-control" id="peopleQuery" placeholder="Optional: first name, last name, or family" autocomplete="off">
             <button class="btn btn-primary" id="peopleSearchBtn"><i class="fas fa-search"></i></button>
           </div>
-          <div id="peopleResults"><div class="dir-empty">Search by first name, last name, or family name.</div></div>
+          <div class="privacy-note mb-2">Leave blank to browse publicly visible people. Your crew always sees people on allied teams.</div>
+          <div id="peopleResults"><div class="dir-empty">Loading...</div></div>
         </div>
       </div>
 
@@ -133,15 +134,16 @@
       </div>
     </div>
 
-    <div class="tab-pane fade" id="tabFamilies" role="tabpanel">
+    <div class="tab-pane fade show active" id="tabFamilies" role="tabpanel">
       <div class="dir-card card">
-        <div class="card-header">Search Families</div>
+        <div class="card-header">Teams &amp; Families</div>
         <div class="card-body">
           <div class="input-group mb-2">
-            <input type="text" class="form-control" id="familyQuery" placeholder="Family name (at least 2 letters)" autocomplete="off">
+            <input type="text" class="form-control" id="familyQuery" placeholder="Optional: filter by team name" autocomplete="off">
             <button class="btn btn-primary" id="familySearchBtn"><i class="fas fa-search"></i></button>
           </div>
-          <div id="familyResults"><div class="dir-empty">Search for a family, then open its roster to make sure it is the right one.</div></div>
+          <div class="privacy-note mb-2">All public teams load below. Open a roster to confirm the right one. Crewed teams always show members.</div>
+          <div id="familyResults"><div class="dir-empty">Loading teams...</div></div>
         </div>
       </div>
     </div>
@@ -228,9 +230,9 @@
   function searchPeople() {
     var q = document.getElementById('peopleQuery').value.trim();
     var box = document.getElementById('peopleResults');
-    if (q.length < 2) { box.innerHTML = '<div class="dir-empty">Type at least 2 letters.</div>'; return; }
-    box.innerHTML = '<div class="dir-empty">Searching...</div>';
-    fetch('/api/directory/people?q=' + encodeURIComponent(q))
+    box.innerHTML = '<div class="dir-empty">' + (q ? 'Searching...' : 'Loading people...') + '</div>';
+    var url = '/api/directory/people' + (q ? ('?q=' + encodeURIComponent(q)) : '');
+    fetch(url)
       .then(function(r) { return r.json(); })
       .then(function(j) {
         if (j.error) { box.innerHTML = '<div class="dir-empty">' + esc(j.error) + '</div>'; return; }
@@ -344,14 +346,17 @@
   function searchFamilies() {
     var q = document.getElementById('familyQuery').value.trim();
     var box = document.getElementById('familyResults');
-    if (q.length < 2) { box.innerHTML = '<div class="dir-empty">Type at least 2 letters.</div>'; return; }
-    box.innerHTML = '<div class="dir-empty">Searching...</div>';
-    fetch('/api/directory/families?q=' + encodeURIComponent(q))
+    box.innerHTML = '<div class="dir-empty">' + (q ? 'Searching...' : 'Loading teams...') + '</div>';
+    var url = '/api/directory/families' + (q ? ('?q=' + encodeURIComponent(q)) : '');
+    fetch(url)
       .then(function(r) { return r.json(); })
       .then(function(j) {
         if (j.error) { box.innerHTML = '<div class="dir-empty">' + esc(j.error) + '</div>'; return; }
         var list = j.results || [];
-        if (!list.length) { box.innerHTML = '<div class="dir-empty">No families found by that name.</div>'; return; }
+        if (!list.length) {
+          box.innerHTML = '<div class="dir-empty">' + (q ? 'No teams match that name.' : 'No public teams yet.') + '</div>';
+          return;
+        }
         box.innerHTML = list.map(familyRowHtml).join('');
         box.querySelectorAll('.join-btn').forEach(function(b) {
           b.addEventListener('click', function() { requestJoin(b.dataset.family, b); });
@@ -382,12 +387,26 @@
       .catch(function() { box.innerHTML = '<div class="dir-empty">Search failed. Try again.</div>'; });
   }
 
+  var familyFilterTimer = null;
   document.getElementById('peopleSearchBtn').addEventListener('click', searchPeople);
   document.getElementById('peopleQuery').addEventListener('keydown', function(e) { if (e.key === 'Enter') searchPeople(); });
   document.getElementById('emailSearchBtn').addEventListener('click', searchEmail);
   document.getElementById('emailQuery').addEventListener('keydown', function(e) { if (e.key === 'Enter') searchEmail(); });
   document.getElementById('familySearchBtn').addEventListener('click', searchFamilies);
   document.getElementById('familyQuery').addEventListener('keydown', function(e) { if (e.key === 'Enter') searchFamilies(); });
+  document.getElementById('familyQuery').addEventListener('input', function() {
+    clearTimeout(familyFilterTimer);
+    familyFilterTimer = setTimeout(searchFamilies, 250);
+  });
+
+  // Families tab is default: load all public + crew teams immediately.
+  searchFamilies();
+  document.querySelector('[data-bs-target="#tabPeople"]').addEventListener('shown.bs.tab', function() {
+    if (!document.getElementById('peopleResults').dataset.loaded) {
+      document.getElementById('peopleResults').dataset.loaded = '1';
+      searchPeople();
+    }
+  });
 })();
 </script>
 {% endblock %}

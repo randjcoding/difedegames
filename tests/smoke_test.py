@@ -306,6 +306,43 @@ def main():
         check('minor hidden from a non-allied family',
               not any(x['player_id'] == minor_id for x in r.get_json().get('results', [])))
 
+        # Browse-all (no 2-letter minimum) returns public teams.
+        r = client_b.get('/api/directory/families')
+        browse = (r.get_json() or {}).get('results') or []
+        check('directory browse lists teams without search letters',
+              r.status_code == 200 and any(f.get('family_id') == fam_a['id'] for f in browse),
+              str([(f.get('name'), f.get('family_id')) for f in browse[:6]]))
+
+        # Lead can hide team from public; crew still sees them later.
+        r = client_a.put('/api/team/settings', json={
+            'is_discoverable': False, 'show_roster': False})
+        check('lead can set team public visibility off',
+              r.status_code == 200 and (r.get_json() or {}).get('success'), str(r.get_json()))
+        r = client_b.get('/api/directory/families')
+        browse_hidden = (r.get_json() or {}).get('results') or []
+        check('hidden team not listed for non-crew browse',
+              not any(f.get('family_id') == fam_a['id'] for f in browse_hidden))
+        r = client_b.get(f"/api/directory/families/{fam_a['id']}/roster")
+        check('hidden team roster blocked for non-crew',
+              r.status_code == 404 or (r.get_json() or {}).get('roster_visible') is False
+              or (r.get_json() or {}).get('error'),
+              str(r.get_json()))
+
+        # Lead sets adult private; self/login later can override — adult has no login.
+        r = client_a.put(f'/api/team/players/{adult_id}', json={
+            'first_name': 'Zztestadult', 'last_name': 'Grownup',
+            'display_name': 'Zztestadult', 'is_discoverable': False})
+        check('lead can set no-login member public off', r.status_code == 200, str(r.get_json()))
+        # Restore team public for people-search checks; person stays private.
+        r = client_a.put('/api/team/settings', json={
+            'is_discoverable': True, 'show_roster': True})
+        check('lead restores team public visibility', r.status_code == 200, str(r.get_json()))
+        r = client_b.get('/api/directory/people?q=Zztestadult')
+        check('private adult hidden from non-crew people search',
+              not any(x['player_id'] == adult_id for x in (r.get_json() or {}).get('results', [])))
+        run(conn, 'UPDATE players SET is_discoverable = TRUE WHERE id = %s', (adult_id,))
+        conn.commit()
+
         # Transfer request that includes a minor must be blocked before allying.
         r = client_b.post('/api/release-requests', json={
             'player_ids': [minor_id], 'to_family_id': fam_b['id']})
@@ -321,6 +358,25 @@ def main():
         r = client_b.get('/api/directory/people?q=Zztestminor')
         check('minor visible to a directly allied family',
               any(x['player_id'] == minor_id for x in r.get_json().get('results', [])))
+
+        # After crewing up, private team+roster still visible to ally even if toggled off.
+        r = client_a.put('/api/team/settings', json={
+            'is_discoverable': False, 'show_roster': False})
+        check('lead can hide team from public while crewed', r.status_code == 200)
+        r = client_b.get('/api/directory/families')
+        browse_crew = (r.get_json() or {}).get('results') or []
+        check('crewed ally still sees private team in directory',
+              any(f.get('family_id') == fam_a['id'] and f.get('is_allied') for f in browse_crew),
+              str([(f.get('name'), f.get('is_allied')) for f in browse_crew[:8]]))
+        r = client_b.get(f"/api/directory/families/{fam_a['id']}/roster")
+        roster = r.get_json() or {}
+        check('crewed ally sees roster even when show_roster is off',
+              r.status_code == 200 and roster.get('roster_visible') is True
+              and any(m.get('player_id') == adult_id for m in (roster.get('members') or [])),
+              str(roster)[:300])
+        # Restore public for later sections that expect Alpha findable.
+        client_a.put('/api/team/settings', json={
+            'is_discoverable': True, 'show_roster': True})
 
         print('\n== Section 4: join requests and invitations ==')
         SENT_EMAILS.clear()

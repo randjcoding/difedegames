@@ -86,14 +86,17 @@
         <div class="form-check form-switch mb-3">
           <input class="form-check-input" type="checkbox" id="is_discoverable" name="is_discoverable"
                  {% if person.is_discoverable %}checked{% endif %}>
-          <label class="form-check-label" for="is_discoverable">Let people find me in the Directory</label>
-          <div class="setting-help">When off, searches will not return you. People already in your family and crew can still see you.</div>
+          <label class="form-check-label" for="is_discoverable">Show me publicly in the Directory</label>
+          <div class="setting-help">
+            Public means people you are <em>not</em> crewed up with can find you.
+            Your own team and accepted crew always see you. Because you have a login, only you control this setting — not your team lead.
+          </div>
         </div>
         <div class="form-check form-switch">
           <input class="form-check-input" type="checkbox" id="show_full_last_name" name="show_full_last_name"
                  {% if person.show_full_last_name %}checked{% endif %}>
-          <label class="form-check-label" for="show_full_last_name">Show my full last name in search results</label>
-          <div class="setting-help">When off, you appear as "{{ person.first_name }} {{ person.last_name[0] }}." to people outside your family.</div>
+          <label class="form-check-label" for="show_full_last_name">Show my full last name on my public profile</label>
+          <div class="setting-help">When off, people outside your family/crew may see you as "{{ person.first_name }} {{ person.last_name[0] if person.last_name else '' }}."</div>
         </div>
       </div>
     </div>
@@ -107,19 +110,22 @@
 
     {% if lead_of %}
     <div class="profile-card card">
-      <div class="card-header">Family Settings ({{ lead_of.name }})</div>
+      <div class="card-header">Team Visibility ({{ lead_of.name }})</div>
       <div class="card-body">
         <div class="form-check form-switch mb-3">
           <input class="form-check-input" type="checkbox" id="family_discoverable" name="family_discoverable"
                  {% if lead_of.is_discoverable %}checked{% endif %}>
-          <label class="form-check-label" for="family_discoverable">List {{ lead_of.name }} in the family directory</label>
-          <div class="setting-help">When off, nobody can find your family by searching.</div>
+          <label class="form-check-label" for="family_discoverable">List {{ lead_of.name }} publicly in the Directory</label>
+          <div class="setting-help">When off, only your team and crewed-up teams can see this team by name. You can also change this on My Team.</div>
         </div>
         <div class="form-check form-switch">
           <input class="form-check-input" type="checkbox" id="family_show_roster" name="family_show_roster"
                  {% if lead_of.show_roster %}checked{% endif %}>
-          <label class="form-check-label" for="family_show_roster">Show our member list to non-members</label>
-          <div class="setting-help">Members appear by first name and last initial. Children are only ever visible to your own family and directly allied crews, regardless of this setting.</div>
+          <label class="form-check-label" for="family_show_roster">Show our roster to the public</label>
+          <div class="setting-help">
+            When on, people outside your crew can open the member list (still respecting each person's public setting).
+            Crewed-up teams always see your full roster. Children stay hidden from non-crew.
+          </div>
         </div>
       </div>
     </div>
