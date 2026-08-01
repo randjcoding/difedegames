@@ -613,6 +613,165 @@ def admin_clear_player_email(player_id):
         conn.close()
 
 
+@main.route('/api/admin/player/<int:player_id>/make-lead', methods=['POST'])
+@admin_required
+def admin_make_player_lead(player_id):
+    """Super admin: make this person the lead of their home team (or a chosen
+    family they belong to). Creates a login + password invite when needed."""
+    conn = get_db_connection()
+    admin = get_current_user()
+    try:
+        from app.auth import create_action_token
+        from app.email_utils import send_set_password_email
+        from werkzeug.security import generate_password_hash
+        import secrets as _secrets
+
+        data = request.get_json(silent=True) or {}
+        send_invite = bool(data.get('send_password_invite', True))
+        player = execute_query_one(conn, '''
+            SELECT * FROM players WHERE id = %s AND purged_at IS NULL AND archived_at IS NULL
+        ''', (player_id,))
+        if not player:
+            return jsonify({'error': 'Player not found (or archived)'}), 404
+
+        family_id = data.get('family_id') or player.get('family_id')
+        if not family_id:
+            return jsonify({'error': 'This person has no home family. Move them to a team first.'}), 400
+        family_id = int(family_id)
+        family = execute_query_one(conn, '''
+            SELECT id, name, lead_user_id FROM families
+            WHERE id = %s AND archived_at IS NULL
+        ''', (family_id,))
+        if not family:
+            return jsonify({'error': 'Family not found'}), 404
+
+        member = execute_query_one(conn, '''
+            SELECT 1 FROM player_family_memberships
+            WHERE player_id = %s AND family_id = %s AND status = 'active'
+        ''', (player_id, family_id))
+        if not member:
+            # Ensure they belong to the team before leading it.
+            set_player_home_family(conn, player_id, family_id)
+
+        lead_user = execute_query_one(conn, 'SELECT * FROM users WHERE player_id = %s', (player_id,))
+        created_login = False
+        if not lead_user:
+            email = (data.get('email') or player.get('email') or '').strip().lower()
+            if not email or '@' not in email:
+                return jsonify({
+                    'error': 'This person has no login. Provide an email to create one, then they can be lead.',
+                }), 400
+            taken_player = execute_query_one(conn, '''
+                SELECT id, COALESCE(display_name, first_name) AS display_name
+                FROM players
+                WHERE lower(email) = %s AND id <> %s
+                  AND email IS NOT NULL AND email <> ''
+            ''', (email, player_id))
+            if taken_player:
+                return jsonify({
+                    'error': f'That email is already on {taken_player["display_name"]}. Merge first.',
+                    'conflict_player_id': taken_player['id'],
+                    'suggest_merge': True,
+                }), 409
+            existing = execute_query_one(conn, '''
+                SELECT id, player_id FROM users WHERE lower(email) = %s
+            ''', (email,))
+            if existing:
+                if existing.get('player_id') and existing['player_id'] != player_id:
+                    return jsonify({
+                        'error': 'That email already has a login on another person. Merge first.',
+                        'conflict_player_id': existing['player_id'],
+                        'suggest_merge': True,
+                    }), 409
+                # Orphan login with this email — bind it.
+                execute_modify(conn, '''
+                    UPDATE users SET player_id = %s, family_id = %s,
+                        is_verified = TRUE, is_approved = TRUE, is_active = TRUE,
+                        role = 'family_admin'
+                    WHERE id = %s
+                ''', (player_id, family_id, existing['id']))
+                lead_user = execute_query_one(conn, 'SELECT * FROM users WHERE id = %s', (existing['id'],))
+            else:
+                temp = data.get('temp_password') or (_secrets.token_urlsafe(10) + 'Aa1!')
+                lead_user = execute_query_one(conn, '''
+                    INSERT INTO users (email, password_hash, first_name, last_name, family_name,
+                        role, is_verified, is_approved, is_active, family_id, player_id)
+                    VALUES (%s, %s, %s, %s, %s, 'family_admin', TRUE, TRUE, TRUE, %s, %s)
+                    RETURNING *
+                ''', (email, generate_password_hash(temp),
+                      player['first_name'], player['last_name'], family['name'],
+                      family_id, player_id))
+                created_login = True
+            execute_modify(conn, 'UPDATE players SET email = COALESCE(email, %s) WHERE id = %s',
+                           (email, player_id))
+
+        # Previous lead membership becomes member; this person becomes home + lead.
+        execute_modify(conn, "UPDATE player_family_memberships SET role = 'member' WHERE family_id = %s",
+                       (family_id,))
+        set_player_home_family(conn, player_id, family_id)
+        execute_modify(conn, '''
+            UPDATE player_family_memberships SET role = 'lead', status = 'active'
+            WHERE player_id = %s AND family_id = %s
+        ''', (player_id, family_id))
+        execute_modify(conn, 'UPDATE families SET lead_user_id = %s WHERE id = %s',
+                       (lead_user['id'], family_id))
+        execute_modify(conn, '''
+            UPDATE users SET family_id = %s,
+                role = CASE WHEN role = 'super_admin' THEN role ELSE 'family_admin' END,
+                is_active = TRUE, is_approved = TRUE
+            WHERE id = %s
+        ''', (family_id, lead_user['id']))
+
+        invite_sent = False
+        if send_invite and (created_login or data.get('force_invite')):
+            token = create_action_token(
+                'set_password', player_id=player_id, user_id=lead_user['id'],
+                family_id=family_id, ttl_hours=168)
+            if token:
+                invite_sent = send_set_password_email(
+                    lead_user['email'],
+                    player.get('display_name') or player['first_name'],
+                    family['name'],
+                    f"{admin.get('first_name', '')} {admin.get('last_name', '')}".strip() or 'Admin',
+                    f"{APP_BASE_URL}/auth/set-password/{token}",
+                )
+
+        if family.get('lead_user_id') and family['lead_user_id'] != lead_user['id']:
+            notify_user(conn, family['lead_user_id'], 'family_lead_transfer',
+                'Family leadership changed',
+                f"A super admin made {player.get('display_name') or player['first_name']} "
+                f"the lead of {family['name']}.")
+        notify_user(conn, lead_user['id'], 'family_lead_transfer',
+            'You are now a family lead',
+            f"You have been made lead of {family['name']}.")
+
+        audit(conn, admin['id'], 'player_made_lead', 'families', family_id,
+              old={'previous_lead_user_id': family.get('lead_user_id')},
+              new={'player_id': player_id, 'lead_user_id': lead_user['id'],
+                   'created_login': created_login, 'invite_sent': invite_sent})
+        conn.commit()
+        msg = f"{player.get('display_name') or player['first_name']} is now lead of {family['name']}."
+        if created_login:
+            msg += ' A login was created for them.'
+        if invite_sent:
+            msg += ' Password setup email sent.'
+        elif created_login and send_invite:
+            msg += ' Login created, but the password email could not be sent.'
+        return jsonify({
+            'success': True,
+            'message': msg,
+            'family_id': family_id,
+            'lead_user_id': lead_user['id'],
+            'created_login': created_login,
+            'invite_sent': invite_sent,
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
 @main.route('/api/admin/create-family-for-player', methods=['POST'])
 @admin_required
 def admin_create_family_for_player():

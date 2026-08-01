@@ -1190,6 +1190,8 @@ def main():
         check('people hub can clear email and permanently purge',
               'apClearEmail' in page and 'clear-email' in page
               and 'apPurgePerson' in page and 'showArchived' in page)
+        check('people hub can make team lead',
+              'apMakeLead' in page and 'make-lead' in page)
         check('people hub has administer modal',
               'adminPersonModal' in page and 'apSave' in page and 'Remove login' in page)
         check('people hub has merge-two toolbar and wizard',
@@ -1566,6 +1568,49 @@ def main():
               row and row['first_name'] == 'Deleted' and row['purged_at'] is not None
               and row['email'] is None and 'Zztestpurge2' in (row['display_name'] or ''),
               str(row))
+
+        # Make-lead: team with no lead + person without login gets login + lead.
+        print('\n== Make team lead (orphan team) ==')
+        orphan_fam = q1(conn, """
+            INSERT INTO families (name, slug, lead_user_id, created_by_user_id)
+            VALUES ('Zztest Orphan Team', 'zztest-orphan-team', NULL, %s)
+            RETURNING id
+        """, (user_a['id'],))
+        conn.commit()
+        ids['families'].add(orphan_fam['id'])
+        r = client_a.post('/api/team/players', json={
+            'first_name': 'Zztestnewlead', 'last_name': 'Boss',
+            'display_name': 'Zztestnewlead', 'email': 'zztest.newlead@example.com'})
+        newlead_pid = (r.get_json() or {}).get('id')
+        ids['players'].add(newlead_pid)
+        # Move onto orphan family (no lead).
+        r = client_a.post('/api/admin/move-player', json={
+            'player_id': newlead_pid, 'target_family_id': orphan_fam['id']})
+        check('moved player onto team with no lead', r.status_code == 200, str(r.get_json()))
+        SENT_EMAILS.clear()
+        r = client_a.post(f'/api/admin/player/{newlead_pid}/make-lead', json={
+            'family_id': orphan_fam['id'],
+            'email': 'zztest.newlead@example.com',
+            'send_password_invite': True})
+        body = r.get_json() or {}
+        check('make-lead creates login and assigns lead',
+              r.status_code == 200 and body.get('success') is True
+              and body.get('created_login') is True, str(body))
+        fam_row = q1(conn, 'SELECT lead_user_id FROM families WHERE id = %s', (orphan_fam['id'],))
+        lead_u = q1(conn, 'SELECT id, player_id, email, role FROM users WHERE player_id = %s',
+                    (newlead_pid,))
+        check('family lead_user_id points at new login',
+              fam_row and lead_u and fam_row['lead_user_id'] == lead_u['id'], str(fam_row))
+        check('new lead login bound to player',
+              lead_u and lead_u['player_id'] == newlead_pid
+              and lead_u['email'] == 'zztest.newlead@example.com')
+        if lead_u:
+            ids['users'].add(lead_u['id'])
+        mem = q1(conn, '''
+            SELECT role FROM player_family_memberships
+            WHERE player_id = %s AND family_id = %s
+        ''', (newlead_pid, orphan_fam['id']))
+        check('membership role is lead', mem and mem['role'] == 'lead', str(mem))
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')

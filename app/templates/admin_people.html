@@ -200,9 +200,11 @@
           <h6>Family tools</h6>
           <p class="small text-muted mb-2">
             Historical scores stay with the family they played under. Home family changes going forward.
+            Make team lead works even when a team has no lead (creates a login + password email if needed).
           </p>
           <div class="aph-modal-actions">
             <button type="button" class="btn btn-outline-primary btn-sm" id="apMove">Move to family</button>
+            <button type="button" class="btn btn-success btn-sm" id="apMakeLead">Make team lead</button>
             <button type="button" class="btn btn-outline-success btn-sm" id="apCreateTeam">Create team + make lead</button>
           </div>
         </div>
@@ -933,6 +935,44 @@
     document.getElementById('moveWho').textContent = 'Move ' + p.display_name + ' to:';
     if (p.family_id) document.getElementById('moveFamily').value = String(p.family_id);
     new bootstrap.Modal(document.getElementById('moveModal')).show();
+  };
+
+  document.getElementById('apMakeLead').onclick = function() {
+    var p = currentPerson;
+    if (!p) return;
+    if (!p.family_id) {
+      AppModal.error('No team', 'Move this person to a family first, then make them lead.');
+      return;
+    }
+    var teamName = p.family_name || 'their team';
+    var needsLogin = !p.user_id;
+    var email = (document.getElementById('apEmail').value || p.player_email || p.login_email || '').trim();
+    if (needsLogin && !email) {
+      AppModal.error('Email required', 'This person has no login. Enter an email in the Profile section, Save or keep it filled in, then try Make team lead again.');
+      return;
+    }
+    var bodyMsg = 'Make ' + (p.display_name || 'this person') + ' the lead of ' + teamName + '?';
+    if (needsLogin) {
+      bodyMsg += ' A login will be created for ' + email + ' and a password setup email will be sent.';
+    } else if (p.is_lead) {
+      bodyMsg += ' They are already marked as lead; this will refresh lead assignment.';
+    }
+    AppModal.confirm('Make team lead', bodyMsg, function() {
+      postJson('/api/admin/player/' + p.id + '/make-lead', {
+        family_id: p.family_id,
+        email: email,
+        send_password_invite: needsLogin
+      }).then(function(res) {
+        if (handleConflict(res, p.id)) return;
+        if (res.ok) {
+          AppModal.success('Lead updated', res.j.message || 'They are now the team lead.');
+          bootstrap.Modal.getInstance(document.getElementById('adminPersonModal')).hide();
+          loadPeople();
+        } else {
+          AppModal.error('Error', res.j.error || 'Could not make them lead.');
+        }
+      });
+    }, { confirmText: 'Make team lead' });
   };
 
   document.getElementById('apCreateTeam').onclick = function() {
