@@ -60,9 +60,8 @@ def execute_modify(conn, query, params=None):
         return cursor.rowcount
 
 def family_access_clause(user, alias='ag'):
-    """SQL fragment + params deciding which active_games a user may access:
-    started by them, hosted by their home family, hosted by a directly allied
-    crew family, or any game they personally played in (guest scoring)."""
+    """Legacy broader access (alliances / seated guest). Prefer play_family_clause
+    for dashboard and play paths. Kept for any non-play callers that still need it."""
     if user.get('role') == 'super_admin':
         return 'TRUE', []
     clauses = [f'{alias}.user_id = %s']
@@ -88,9 +87,22 @@ def family_access_clause(user, alias='ag'):
         params.append(player_id)
     return '(' + ' OR '.join(clauses) + ')', params
 
+
+def play_family_clause(user, alias='ag'):
+    """Strict play-path access: only games hosted by the user's home family.
+    No super_admin bypass, alliances, or seated-elsewhere access."""
+    family_id = user.get('family_id') if user else None
+    if family_id is not None:
+        return f'{alias}.family_id = %s', [family_id]
+    user_id = user.get('id') if user else None
+    if user_id is not None:
+        return f'{alias}.user_id = %s', [user_id]
+    return 'FALSE', []
+
+
 def fetch_accessible_game(conn, game_id, user, extra_where='', extra_params=None):
-    """Load an active_games row if the user may access it (family-shared)."""
-    clause, params = family_access_clause(user, 'ag')
+    """Load an active_games row if the user may access it on play paths."""
+    clause, params = play_family_clause(user, 'ag')
     sql = f'SELECT ag.* FROM active_games ag WHERE ag.id = %s AND {clause}'
     all_params = [game_id] + list(params)
     if extra_where:
@@ -99,15 +111,290 @@ def fetch_accessible_game(conn, game_id, user, extra_where='', extra_params=None
             all_params.extend(extra_params)
     return execute_query_one(conn, sql, tuple(all_params))
 
+
 def user_can_access_active_game(user, game):
     if not user or not game:
         return False
-    if user.get('role') == 'super_admin':
-        return True
-    if game.get('user_id') == user.get('id'):
-        return True
     fam = user.get('family_id')
-    return fam is not None and game.get('family_id') == fam
+    if fam is not None:
+        return game.get('family_id') == fam
+    return game.get('user_id') == user.get('id')
+
+
+# Hall of Fame / Shame: first name + last initial only (site-wide bragging card).
+_HOF_PRIVACY_NAME = (
+    "TRIM(p.first_name) || ' ' || "
+    "UPPER(LEFT(COALESCE(NULLIF(TRIM(p.last_name), ''), '?'), 1)) || '.'"
+)
+
+
+def build_hof_slides(conn):
+    """Site-wide bragging/roasting slides for the dashboard carousel."""
+    slides = []
+    pname = _HOF_PRIVACY_NAME
+
+    last = execute_query_one(conn, '''
+        SELECT ag.id,
+               COALESCE(ag.custom_game_name, g.name) AS game_name,
+               g.slug,
+               COALESCE(ag.scoring_direction, g.scoring_direction) AS scoring_direction,
+               ag.completion_time
+        FROM active_games ag
+        JOIN games g ON g.id = ag.game_id
+        WHERE ag.is_complete = TRUE
+        ORDER BY ag.completion_time DESC NULLS LAST, ag.id DESC
+        LIMIT 1
+    ''')
+    if last:
+        low_wins = last['scoring_direction'] == 'low_wins'
+        order = 'ASC' if low_wins else 'DESC'
+        standings = execute_query(conn, f'''
+            SELECT {pname} AS privacy_name,
+                   COALESCE(SUM(gs.score), 0)::int AS total_score
+            FROM active_game_players agp
+            JOIN players p ON p.id = agp.player_id
+            LEFT JOIN game_scores gs
+              ON gs.active_game_id = agp.active_game_id AND gs.player_id = p.id
+            WHERE agp.active_game_id = %s
+            GROUP BY p.id, p.first_name, p.last_name
+            ORDER BY total_score {order}, privacy_name
+        ''', (last['id'],))
+        winners = execute_query(conn, f'''
+            SELECT {pname} AS privacy_name
+            FROM game_stats gst
+            JOIN players p ON p.id = gst.winner_id
+            WHERE gst.game_id = %s
+            ORDER BY privacy_name
+        ''', (last['id'],))
+        winner_label = ', '.join(w['privacy_name'] for w in winners) if winners else (
+            standings[0]['privacy_name'] if standings else 'Unknown'
+        )
+        lines = [f"{s['privacy_name']} — {s['total_score']}" for s in standings]
+        slides.append({
+            'type': 'last_game',
+            'title': 'Last Game',
+            'subtitle': f"{last['game_name']} — {winner_label} won",
+            'lines': lines,
+            'game_name': last['game_name'],
+        })
+
+    beat = execute_query_one(conn, f'''
+        WITH player_totals AS (
+            SELECT ag.id AS active_game_id,
+                   COALESCE(ag.custom_game_name, g.name) AS game_name,
+                   COALESCE(ag.scoring_direction, g.scoring_direction) AS dir,
+                   {pname} AS pname,
+                   COALESCE(SUM(gs.score), 0)::int AS total_score
+            FROM active_games ag
+            JOIN games g ON g.id = ag.game_id
+            JOIN active_game_players agp ON agp.active_game_id = ag.id
+            JOIN players p ON p.id = agp.player_id
+            LEFT JOIN game_scores gs
+              ON gs.active_game_id = ag.id AND gs.player_id = p.id
+            WHERE ag.is_complete = TRUE
+              AND COALESCE(ag.scoring_direction, g.scoring_direction) IN ('low_wins', 'high_wins')
+            GROUP BY ag.id, ag.custom_game_name, g.name, ag.scoring_direction,
+                     g.scoring_direction, p.id, p.first_name, p.last_name
+        ),
+        agg AS (
+            SELECT active_game_id, game_name, dir,
+                   COUNT(*)::int AS n,
+                   MAX(total_score)::int AS max_s,
+                   MIN(total_score)::int AS min_s
+            FROM player_totals
+            GROUP BY active_game_id, game_name, dir
+            HAVING COUNT(*) >= 2
+        ),
+        with_spread AS (
+            SELECT a.*,
+                   (a.max_s - a.min_s) AS spread,
+                   CASE WHEN a.dir = 'low_wins' THEN a.min_s ELSE a.max_s END AS winner_score,
+                   CASE WHEN a.dir = 'low_wins' THEN a.max_s ELSE a.min_s END AS loser_score
+            FROM agg a
+            WHERE (a.max_s - a.min_s) > 0
+        )
+        SELECT ws.game_name, ws.spread, ws.winner_score, ws.loser_score,
+               (SELECT pt.pname FROM player_totals pt
+                WHERE pt.active_game_id = ws.active_game_id
+                  AND pt.total_score = ws.winner_score
+                ORDER BY pt.pname LIMIT 1) AS winner_name,
+               (SELECT pt.pname FROM player_totals pt
+                WHERE pt.active_game_id = ws.active_game_id
+                  AND pt.total_score = ws.loser_score
+                ORDER BY pt.pname LIMIT 1) AS loser_name
+        FROM with_spread ws
+        ORDER BY ws.spread DESC, ws.active_game_id DESC
+        LIMIT 1
+    ''')
+    if beat and beat.get('spread'):
+        slides.append({
+            'type': 'beat_down',
+            'title': 'Biggest Beat-Down',
+            'subtitle': beat['game_name'],
+            'lines': [
+                f"{beat['winner_name']} {beat['winner_score']} vs {beat['loser_name']} {beat['loser_score']}",
+                f"Spread: {beat['spread']} points",
+            ],
+            'game_name': beat['game_name'],
+        })
+
+    worst_round = execute_query_one(conn, f'''
+        WITH fc_scores AS (
+            SELECT gs.score, gs.round_number, gs.player_id, gs.active_game_id
+            FROM game_scores gs
+            JOIN active_games ag ON ag.id = gs.active_game_id
+            WHERE ag.game_id = 1 AND ag.is_complete = TRUE
+            UNION ALL
+            SELECT fcs.score, fcs.round_number, fcs.player_id, fcs.active_game_id
+            FROM five_crowns_scores fcs
+            JOIN active_games ag ON ag.id = fcs.active_game_id
+            WHERE ag.game_id = 1 AND ag.is_complete = TRUE
+              AND NOT EXISTS (
+                  SELECT 1 FROM game_scores gs2 WHERE gs2.active_game_id = fcs.active_game_id
+              )
+        )
+        SELECT {pname} AS privacy_name, fc.score, fc.round_number
+        FROM fc_scores fc
+        JOIN players p ON p.id = fc.player_id
+        ORDER BY fc.score DESC, fc.round_number DESC
+        LIMIT 1
+    ''')
+    if worst_round:
+        slides.append({
+            'type': 'worst_round',
+            'title': 'Worst Five Crowns Round',
+            'subtitle': f"Round {worst_round['round_number']}",
+            'lines': [f"{worst_round['privacy_name']} — {worst_round['score']} points"],
+            'game_name': 'Five Crowns',
+        })
+
+    win_leaders = execute_query(conn, f'''
+        WITH win_counts AS (
+            SELECT g.id AS game_type_id, g.name AS game_name, g.slug,
+                   p.id AS player_id, {pname} AS privacy_name,
+                   COUNT(*)::int AS wins,
+                   CASE WHEN g.slug = 'five-crowns' THEN 0 ELSE 1 END AS sort_game
+            FROM game_stats gst
+            JOIN active_games ag ON ag.id = gst.game_id
+            JOIN games g ON g.id = ag.game_id
+            JOIN players p ON p.id = gst.winner_id
+            WHERE ag.is_complete = TRUE AND gst.winner_id IS NOT NULL
+            GROUP BY g.id, g.name, g.slug, p.id, p.first_name, p.last_name
+        ),
+        ranked AS (
+            SELECT *,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY game_type_id
+                       ORDER BY wins DESC, privacy_name
+                   ) AS rn
+            FROM win_counts
+        )
+        SELECT game_name, privacy_name, wins
+        FROM ranked
+        WHERE rn = 1 AND wins >= 1
+        ORDER BY sort_game, wins DESC, game_name
+        LIMIT 4
+    ''')
+    for wl in win_leaders:
+        slides.append({
+            'type': 'win_leader',
+            'title': f"All-Time {wl['game_name']} Wins",
+            'subtitle': 'Win leader',
+            'lines': [f"{wl['privacy_name']} — {wl['wins']} win{'s' if wl['wins'] != 1 else ''}"],
+            'game_name': wl['game_name'],
+        })
+
+    extremes = execute_query(conn, f'''
+        WITH player_totals AS (
+            SELECT g.id AS game_type_id, g.name AS game_name, g.slug,
+                   COALESCE(ag.scoring_direction, g.scoring_direction) AS dir,
+                   {pname} AS privacy_name,
+                   COALESCE(SUM(gs.score), 0)::int AS total_score,
+                   ag.id AS active_game_id,
+                   CASE WHEN g.slug = 'five-crowns' THEN 0 ELSE 1 END AS sort_game
+            FROM active_games ag
+            JOIN games g ON g.id = ag.game_id
+            JOIN active_game_players agp ON agp.active_game_id = ag.id
+            JOIN players p ON p.id = agp.player_id
+            LEFT JOIN game_scores gs
+              ON gs.active_game_id = ag.id AND gs.player_id = p.id
+            WHERE ag.is_complete = TRUE
+              AND COALESCE(ag.scoring_direction, g.scoring_direction) IN ('low_wins', 'high_wins')
+              AND g.slug NOT IN ('trouble')
+            GROUP BY g.id, g.name, g.slug, ag.id, ag.scoring_direction, g.scoring_direction,
+                     p.id, p.first_name, p.last_name
+        ),
+        with_pc AS (
+            SELECT pt.*,
+                   COUNT(*) OVER (PARTITION BY pt.active_game_id) AS player_count
+            FROM player_totals pt
+        ),
+        eligible AS (
+            SELECT * FROM with_pc WHERE player_count >= 2
+        ),
+        worst AS (
+            SELECT DISTINCT ON (game_type_id)
+                   game_type_id, game_name, privacy_name, total_score, sort_game, 'worst' AS kind
+            FROM eligible
+            ORDER BY game_type_id,
+                     CASE WHEN dir = 'low_wins' THEN total_score ELSE -total_score END DESC,
+                     privacy_name
+        ),
+        best AS (
+            SELECT DISTINCT ON (game_type_id)
+                   game_type_id, game_name, privacy_name, total_score, sort_game, 'best' AS kind
+            FROM eligible
+            ORDER BY game_type_id,
+                     CASE WHEN dir = 'low_wins' THEN total_score ELSE -total_score END ASC,
+                     privacy_name
+        )
+        SELECT * FROM (
+            SELECT * FROM worst
+            UNION ALL
+            SELECT * FROM best
+        ) x
+        ORDER BY sort_game, game_name, kind DESC
+        LIMIT 4
+    ''')
+    for ex in extremes:
+        if ex['kind'] == 'worst':
+            slides.append({
+                'type': 'worst_score',
+                'title': f"Biggest Loser — {ex['game_name']}",
+                'subtitle': 'Worst final score',
+                'lines': [f"{ex['privacy_name']} — {ex['total_score']}"],
+                'game_name': ex['game_name'],
+            })
+        else:
+            slides.append({
+                'type': 'best_score',
+                'title': f"Best Score — {ex['game_name']}",
+                'subtitle': 'Best final score',
+                'lines': [f"{ex['privacy_name']} — {ex['total_score']}"],
+                'game_name': ex['game_name'],
+            })
+
+    trouble = execute_query_one(conn, f'''
+        SELECT {pname} AS privacy_name, gst.winning_score
+        FROM game_stats gst
+        JOIN active_games ag ON ag.id = gst.game_id
+        JOIN games g ON g.id = ag.game_id
+        JOIN players p ON p.id = gst.winner_id
+        WHERE g.slug = 'trouble' AND ag.is_complete = TRUE AND gst.winner_id IS NOT NULL
+        ORDER BY gst.winning_score DESC, gst.completion_time DESC NULLS LAST
+        LIMIT 1
+    ''')
+    if trouble:
+        slides.append({
+            'type': 'trouble_sow',
+            'title': 'Strongest Trouble Win',
+            'subtitle': 'Highest Strength of Win',
+            'lines': [f"{trouble['privacy_name']} — {trouble['winning_score']} SOW"],
+            'game_name': 'Trouble',
+        })
+
+    return slides
+
 
 def set_player_home_family(conn, player_id, target_family_id):
     """Reassign a person's primary/home family via memberships (keeps the
@@ -238,7 +525,7 @@ def game_page(slug, game_id):
     
     specific_game_id = request.args.get('game_id')
     force_new = request.args.get('new') == '1'
-    access_sql, access_params = family_access_clause(user, 'ag')
+    access_sql, access_params = play_family_clause(user, 'ag')
     
     active_game = None
     if specific_game_id and not force_new:
@@ -347,7 +634,7 @@ def dashboard():
     user = get_current_user()
     conn = get_db_connection()
     try:
-        access_sql, access_params = family_access_clause(user, 'ag')
+        access_sql, access_params = play_family_clause(user, 'ag')
         active_games = execute_query(conn, f'''
             SELECT ag.id, ag.start_time, ag.is_paused, ag.game_id, ag.scoring_direction, ag.target_score,
                 COALESCE(ag.custom_game_name, g.name) as game_name, g.slug,
@@ -362,7 +649,9 @@ def dashboard():
                 ag.custom_game_name, g.name, g.slug
             ORDER BY ag.is_paused ASC, ag.start_time DESC
         ''', tuple(access_params))
-        return render_template('dashboard.html', user=user, active_games=active_games)
+        hof_slides = build_hof_slides(conn)
+        return render_template(
+            'dashboard.html', user=user, active_games=active_games, hof_slides=hof_slides)
     finally:
         conn.close()
 
@@ -4768,7 +5057,7 @@ def game_landing(slug):
 
         rules = execute_query(conn, "SELECT * FROM game_details WHERE game_id = %s ORDER BY id", (game_def['id'],))
 
-        access_sql, access_params = family_access_clause(user, 'ag')
+        access_sql, access_params = play_family_clause(user, 'ag')
         active_games = execute_query(conn, f'''
             SELECT ag.id, ag.start_time, ag.is_paused,
                 string_agg(COALESCE(p.display_name, p.first_name), ', ' ORDER BY agp.id) as player_names,
@@ -5119,7 +5408,7 @@ def live_game_scores(game_id):
     conn = get_db_connection()
     user = get_current_user()
     try:
-        access_sql, access_params = family_access_clause(user, 'ag')
+        access_sql, access_params = play_family_clause(user, 'ag')
         game = execute_query_one(conn, f'''
             SELECT ag.id, ag.is_complete FROM active_games ag
             WHERE ag.id = %s AND {access_sql}
@@ -5160,7 +5449,7 @@ def update_score():
         # Single transaction so the FOR UPDATE row locks actually hold until commit.
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         try:
-            access_sql, access_params = family_access_clause(user, 'ag')
+            access_sql, access_params = play_family_clause(user, 'ag')
             cursor.execute(f'''
                 SELECT ag.id, ag.is_complete FROM active_games ag
                 WHERE ag.id = %s AND {access_sql}
@@ -5679,7 +5968,7 @@ def complete_five_crowns_game():
                 conn, specific_id, user,
                 extra_where='ag.game_id = 1 AND ag.is_complete = FALSE')
         else:
-            access_sql, access_params = family_access_clause(user, 'ag')
+            access_sql, access_params = play_family_clause(user, 'ag')
             game = execute_query_one(conn, f'''
                 SELECT ag.id FROM active_games ag
                 WHERE ag.game_id = 1 AND {access_sql}
@@ -5799,7 +6088,7 @@ def pause_five_crowns_game():
                 conn, specific_id, user,
                 extra_where='ag.game_id = 1 AND ag.is_complete = FALSE AND ag.is_paused = FALSE')
         else:
-            access_sql, access_params = family_access_clause(user, 'ag')
+            access_sql, access_params = play_family_clause(user, 'ag')
             game = execute_query_one(conn, f'''
                 SELECT ag.id FROM active_games ag
                 WHERE ag.game_id = 1 AND {access_sql}
@@ -6260,7 +6549,7 @@ def game_session_info(slug):
         if not game_def:
             return jsonify({'error': 'Game not found'}), 404
         
-        access_sql, access_params = family_access_clause(user, 'ag')
+        access_sql, access_params = play_family_clause(user, 'ag')
         active_games = list(execute_query(conn, f'''
             SELECT ag.id, ag.start_time, ag.is_paused,
                 string_agg(COALESCE(p.display_name, p.first_name), ', ' ORDER BY agp.id) as player_names,

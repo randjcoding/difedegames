@@ -13,6 +13,50 @@ endblock %} {% block content %}
     </div>
   </div>
 
+  <!-- Hall of Fame / Shame carousel -->
+  <div class="row mb-4" id="hofCarouselCard">
+    <div class="col-12">
+      <div class="card hof-card shadow-sm">
+        <div class="card-header hof-card-header d-flex justify-content-between align-items-center">
+          <span><i class="fas fa-trophy me-2"></i>Hall of Fame &amp; Shame</span>
+          {% if hof_slides and hof_slides|length > 1 %}
+          <span class="hof-counter" id="hofCounter">1 / {{ hof_slides|length }}</span>
+          {% endif %}
+        </div>
+        <div class="card-body hof-card-body" id="hofCarousel" data-hof-count="{{ hof_slides|length if hof_slides else 0 }}">
+          {% if hof_slides %}
+            {% for slide in hof_slides %}
+            <div class="hof-slide{% if loop.first %} is-active{% endif %}" data-hof-index="{{ loop.index0 }}">
+              <div class="hof-kicker">{{ slide.subtitle }}</div>
+              <h2 class="hof-title">{{ slide.title }}</h2>
+              {% if slide.game_name %}
+              <div class="hof-game">{{ slide.game_name }}</div>
+              {% endif %}
+              <ul class="hof-lines">
+                {% for line in slide.lines %}
+                <li>{{ line }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endfor %}
+            {% if hof_slides|length > 1 %}
+            <div class="hof-dots" id="hofDots" aria-hidden="true">
+              {% for slide in hof_slides %}
+              <button type="button" class="hof-dot{% if loop.first %} is-active{% endif %}" data-hof-goto="{{ loop.index0 }}" aria-label="Slide {{ loop.index }}"></button>
+              {% endfor %}
+            </div>
+            {% endif %}
+          {% else %}
+            <div class="hof-slide is-active">
+              <h2 class="hof-title">Hall of Fame &amp; Shame</h2>
+              <p class="hof-empty mb-0">Finish a game night to start filling the board with bragging rights and roast material.</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Live Games Section (Accordion) -->
   {% if active_games %}
   <div class="accordion mb-4" id="liveGamesAccordion">
@@ -399,18 +443,161 @@ endblock %} {% block content %}
     background: linear-gradient(135deg, #e08a3a 0%, #e0b83c 100%);
     box-shadow: 0 4px 12px rgba(242, 153, 74, 0.4);
   }
+
+  .hof-card {
+    border: none;
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--df-card-header);
+    border-bottom: 3px solid var(--df-accent);
+  }
+  .hof-card:hover { transform: none; }
+  .hof-card-header {
+    background: transparent;
+    color: var(--df-dt-header-text);
+    font-weight: 700;
+    font-size: 1.05rem;
+    border: none;
+    padding: 0.85rem 1.25rem 0.35rem;
+  }
+  .hof-counter {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--df-muted, #9aa0a6);
+  }
+  .hof-card-body {
+    position: relative;
+    min-height: 150px;
+    padding: 0.5rem 1.25rem 1.1rem;
+    color: var(--df-dt-header-text);
+  }
+  .hof-slide {
+    display: none;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+  .hof-slide.is-active {
+    display: block;
+    opacity: 1;
+  }
+  .hof-kicker {
+    font-size: 0.8rem;
+    color: var(--df-muted, #9aa0a6);
+    margin-bottom: 0.2rem;
+  }
+  .hof-title {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: var(--df-accent);
+    margin: 0 0 0.25rem;
+  }
+  .hof-game {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.55rem;
+    color: var(--df-dt-header-text);
+    opacity: 0.9;
+  }
+  .hof-lines {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .hof-lines li {
+    font-size: 1.05rem;
+    font-weight: 700;
+    padding: 0.15rem 0;
+    color: var(--df-dt-header-text);
+  }
+  .hof-empty {
+    color: var(--df-muted, #9aa0a6);
+    font-size: 0.95rem;
+  }
+  .hof-dots {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.85rem;
+    flex-wrap: wrap;
+  }
+  .hof-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: none;
+    padding: 0;
+    background: var(--df-border, #555);
+    opacity: 0.55;
+    cursor: pointer;
+  }
+  .hof-dot.is-active {
+    background: var(--df-accent);
+    opacity: 1;
+  }
+  @media (max-width: 576px) {
+    .hof-title { font-size: 1.15rem; }
+    .hof-lines li { font-size: 0.98rem; }
+    .hof-card-body { min-height: 140px; }
+  }
 </style>
 {% endblock %} {% block scripts %}
 <script>
   let players = [];
 
   document.addEventListener("DOMContentLoaded", function () {
+    initHofCarousel();
     loadPlayers();
     loadRecentActivity();
     formatGameTimes();
     loadAlliances();
     initGameSearch();
   });
+
+  function initHofCarousel() {
+    var root = document.getElementById("hofCarousel");
+    if (!root) return;
+    var slides = root.querySelectorAll(".hof-slide");
+    if (slides.length < 2) return;
+    var dots = root.querySelectorAll(".hof-dot");
+    var counter = document.getElementById("hofCounter");
+    var idx = 0;
+    var timer = null;
+    var paused = false;
+
+    function show(i) {
+      idx = (i + slides.length) % slides.length;
+      slides.forEach(function (el, n) {
+        el.classList.toggle("is-active", n === idx);
+      });
+      dots.forEach(function (el, n) {
+        el.classList.toggle("is-active", n === idx);
+      });
+      if (counter) counter.textContent = (idx + 1) + " / " + slides.length;
+    }
+
+    function next() {
+      if (!paused) show(idx + 1);
+    }
+
+    function start() {
+      if (timer) clearInterval(timer);
+      timer = setInterval(next, 7000);
+    }
+
+    dots.forEach(function (dot) {
+      dot.addEventListener("click", function () {
+        var goto = parseInt(dot.getAttribute("data-hof-goto"), 10);
+        if (!isNaN(goto)) show(goto);
+        start();
+      });
+    });
+
+    root.addEventListener("mouseenter", function () { paused = true; });
+    root.addEventListener("mouseleave", function () { paused = false; });
+    root.addEventListener("touchstart", function () { paused = true; }, { passive: true });
+    root.addEventListener("touchend", function () { paused = false; }, { passive: true });
+
+    start();
+  }
 
   function formatGameTimes() {
     document.querySelectorAll('.game-time').forEach(function(el) {

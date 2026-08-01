@@ -467,6 +467,56 @@ def main():
             check(f'{label} score cells are bold',
                   'font-weight: 700' in page_html or 'font-weight:700' in page_html)
 
+        dash_a = client_a.get('/dashboard').get_data(as_text=True)
+        check('dashboard shows hall of fame carousel card',
+              'hofCarouselCard' in dash_a and 'Hall of Fame' in dash_a)
+        check('dashboard hof carousel script is present',
+              'initHofCarousel' in dash_a)
+        check('family A dashboard lists its own live game',
+              ag_id is not None and (f'data-game-id="{ag_id}"' in dash_a
+                                     or f'/five-crowns?game_id={ag_id}' in dash_a
+                                     or f'game_id={ag_id}' in dash_a
+                                     or str(ag_id) in dash_a))
+        dash_b = client_b.get('/dashboard').get_data(as_text=True)
+        check('family B dashboard does not list family A live game',
+              ag_id is not None and f'game_id={ag_id}' not in dash_b
+              and f'data-game-id="{ag_id}"' not in dash_b)
+
+        # Super-admin play path stays family-scoped (admin console is separate).
+        run(conn, "UPDATE users SET role = 'super_admin' WHERE id = %s", (user_a['id'],))
+        conn.commit()
+        r = client_b.post('/api/games/new', json={
+            'game_id': game_def['id'],
+            'player_ids': [
+                q1(conn, "SELECT player_id FROM users WHERE email = 'zztest.beta@example.com'")['player_id']
+            ],
+        })
+        b_game = r.get_json() or {}
+        b_ag = b_game.get('id')
+        check('family B can start its own live game', r.status_code == 200 and b_ag,
+              str(b_game))
+        dash_sa = client_a.get('/dashboard').get_data(as_text=True)
+        check('super_admin dashboard still hides other family live games',
+              b_ag is not None and f'game_id={b_ag}' not in dash_sa
+              and f'data-game-id="{b_ag}"' not in dash_sa)
+        r = client_a.get(f'/api/games/{b_ag}/live-scores')
+        check('super_admin cannot poll live scores for other family game',
+              r.status_code in (403, 404), str(r.get_json()))
+        if b_ag:
+            run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (b_ag,))
+            conn.commit()
+        run(conn, "UPDATE users SET role = 'user' WHERE id = %s", (user_a['id'],))
+        # Alpha is family lead for later sections.
+        run(conn, "UPDATE users SET role = 'family_lead' WHERE id = %s", (user_a['id'],))
+        conn.commit()
+
+        # Privacy: HOF uses First L. — completed site games should not dump a full last name
+        # from the zztest adult onto the dashboard carousel lines.
+        adult_row = q1(conn, 'SELECT first_name, last_name FROM players WHERE id = %s', (adult_id,))
+        if adult_row and adult_row.get('last_name') and len(adult_row['last_name']) > 1:
+            full = f"{adult_row['first_name']} {adult_row['last_name']}"
+            check('hof card does not show full last names', full not in dash_a)
+
         cur = conn.cursor()
         blocked = False
         try:
