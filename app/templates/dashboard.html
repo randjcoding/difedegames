@@ -16,42 +16,91 @@ endblock %} {% block content %}
   <!-- Hall of Fame / Shame carousel -->
   <div class="row mb-4" id="hofCarouselCard">
     <div class="col-12">
-      <div class="card hof-card shadow-sm">
-        <div class="card-header hof-card-header d-flex justify-content-between align-items-center">
-          <span><i class="fas fa-trophy me-2"></i>Hall of Fame &amp; Shame</span>
-          {% if hof_slides and hof_slides|length > 1 %}
-          <span class="hof-counter" id="hofCounter">1 / {{ hof_slides|length }}</span>
-          {% endif %}
-        </div>
-        <div class="card-body hof-card-body" id="hofCarousel" data-hof-count="{{ hof_slides|length if hof_slides else 0 }}">
-          {% if hof_slides %}
-            {% for slide in hof_slides %}
-            <div class="hof-slide{% if loop.first %} is-active{% endif %}" data-hof-index="{{ loop.index0 }}">
-              <div class="hof-kicker">{{ slide.subtitle }}</div>
-              <h2 class="hof-title">{{ slide.title }}</h2>
-              {% if slide.game_name %}
-              <div class="hof-game">{{ slide.game_name }}</div>
+      <div class="accordion" id="hofAccordion">
+        <div class="accordion-item hof-accordion-item">
+          <h2 class="accordion-header">
+            <button class="accordion-button hof-accordion-btn" type="button"
+              data-bs-toggle="collapse" data-bs-target="#hofBody"
+              aria-expanded="true" aria-controls="hofBody" id="hofToggleBtn">
+              <span><i class="fas fa-trophy me-2"></i>Hall of Fame &amp; Shame</span>
+              {% if hof_slides and hof_slides|length > 1 %}
+              <span class="hof-counter ms-auto me-2" id="hofCounter">1 / {{ hof_slides|length }}</span>
               {% endif %}
-              <ul class="hof-lines">
-                {% for line in slide.lines %}
-                <li>{{ line }}</li>
-                {% endfor %}
-              </ul>
+            </button>
+          </h2>
+          <div id="hofBody" class="accordion-collapse collapse show">
+            <div class="accordion-body p-0">
+              <div class="hof-card">
+                <div class="hof-card-body" id="hofCarousel" data-hof-count="{{ hof_slides|length if hof_slides else 0 }}">
+                  {% if hof_slides and hof_slides|length > 1 %}
+                  <button type="button" class="hof-nav hof-nav-prev" id="hofPrev" aria-label="Previous slide">
+                    <i class="fas fa-chevron-left"></i>
+                  </button>
+                  <button type="button" class="hof-nav hof-nav-next" id="hofNext" aria-label="Next slide">
+                    <i class="fas fa-chevron-right"></i>
+                  </button>
+                  {% endif %}
+                  {% if hof_slides %}
+                    {% for slide in hof_slides %}
+                    <div class="hof-slide{% if loop.first %} is-active{% endif %}"
+                         data-hof-index="{{ loop.index0 }}"
+                         data-game-id="{{ slide.game_id or '' }}"
+                         data-occurred="{{ slide.occurred_at or '' }}">
+                      <div class="hof-kicker">{{ slide.subtitle }}</div>
+                      <h2 class="hof-title">{{ slide.title }}</h2>
+                      {% if slide.game_name %}
+                      <div class="hof-game">{{ slide.game_name }}</div>
+                      {% endif %}
+                      <ul class="hof-lines">
+                        {% for line in slide.lines %}
+                        <li>{{ line }}</li>
+                        {% endfor %}
+                      </ul>
+                      <div class="hof-meta">
+                        {% if slide.occurred_at %}
+                        <span class="hof-date" data-utc="{{ slide.occurred_at }}"></span>
+                        {% endif %}
+                        {% if slide.game_id %}
+                        <span class="hof-game-id">Game ID {{ slide.game_id }}{% if slide.game_number %} (Game #{{ slide.game_number }}){% endif %}</span>
+                        <button type="button" class="btn btn-sm hof-details-btn" data-hof-details="{{ slide.game_id }}">Details</button>
+                        {% endif %}
+                      </div>
+                    </div>
+                    {% endfor %}
+                    {% if hof_slides|length > 1 %}
+                    <div class="hof-dots" id="hofDots" aria-hidden="true">
+                      {% for slide in hof_slides %}
+                      <button type="button" class="hof-dot{% if loop.first %} is-active{% endif %}" data-hof-goto="{{ loop.index0 }}" aria-label="Slide {{ loop.index }}"></button>
+                      {% endfor %}
+                    </div>
+                    {% endif %}
+                  {% else %}
+                    <div class="hof-slide is-active">
+                      <h2 class="hof-title">Hall of Fame &amp; Shame</h2>
+                      <p class="hof-empty mb-0">Finish a game night to start filling the board with bragging rights and roast material.</p>
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
             </div>
-            {% endfor %}
-            {% if hof_slides|length > 1 %}
-            <div class="hof-dots" id="hofDots" aria-hidden="true">
-              {% for slide in hof_slides %}
-              <button type="button" class="hof-dot{% if loop.first %} is-active{% endif %}" data-hof-goto="{{ loop.index0 }}" aria-label="Slide {{ loop.index }}"></button>
-              {% endfor %}
-            </div>
-            {% endif %}
-          {% else %}
-            <div class="hof-slide is-active">
-              <h2 class="hof-title">Hall of Fame &amp; Shame</h2>
-              <p class="hof-empty mb-0">Finish a game night to start filling the board with bragging rights and roast material.</p>
-            </div>
-          {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="hofDetailsModal" tabindex="-1" aria-labelledby="hofDetailsTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content" style="background:white;color:#212529;">
+        <div class="modal-header">
+          <h5 class="modal-title" id="hofDetailsTitle" style="color:#212529;">Game details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="hofDetailsBody" style="color:#212529;">
+          <p class="mb-0 text-muted">Loading...</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>
@@ -444,33 +493,67 @@ endblock %} {% block content %}
     box-shadow: 0 4px 12px rgba(242, 153, 74, 0.4);
   }
 
-  .hof-card {
-    border: none;
-    border-radius: 12px;
-    overflow: hidden;
-    background: var(--df-card-header);
-    border-bottom: 3px solid var(--df-accent);
-  }
-  .hof-card:hover { transform: none; }
-  .hof-card-header {
+  .hof-accordion-item {
     background: transparent;
-    color: var(--df-dt-header-text);
-    font-weight: 700;
-    font-size: 1.05rem;
     border: none;
-    padding: 0.85rem 1.25rem 0.35rem;
+  }
+  .hof-accordion-btn {
+    background: var(--df-card-header) !important;
+    color: var(--df-dt-header-text) !important;
+    font-weight: 700;
+    font-size: 1.1rem;
+    border-bottom: 2px solid var(--df-accent);
+    border-radius: 10px 10px 0 0 !important;
+    padding: 0.75rem 1.25rem;
+    box-shadow: none !important;
+  }
+  .hof-accordion-btn:not(.collapsed) {
+    border-radius: 10px 10px 0 0 !important;
+  }
+  .hof-accordion-btn.collapsed {
+    border-radius: 10px !important;
   }
   .hof-counter {
     font-size: 0.75rem;
     font-weight: 600;
     color: var(--df-muted, #9aa0a6);
   }
+  .hof-card {
+    border: none;
+    border-radius: 0 0 12px 12px;
+    overflow: hidden;
+    background: var(--df-card-header);
+    border-bottom: 3px solid var(--df-accent);
+  }
+  .hof-card:hover { transform: none; }
   .hof-card-body {
     position: relative;
-    min-height: 150px;
-    padding: 0.5rem 1.25rem 1.1rem;
+    min-height: 180px;
+    padding: 0.75rem 2.75rem 1.1rem;
     color: var(--df-dt-header-text);
+    touch-action: pan-y;
+    user-select: none;
   }
+  .hof-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--df-border, #555);
+    background: var(--df-surface, rgba(0,0,0,0.35));
+    color: var(--df-text, #fff);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+  }
+  .hof-nav:hover { filter: brightness(1.15); }
+  .hof-nav-prev { left: 0.4rem; }
+  .hof-nav-next { right: 0.4rem; }
   .hof-slide {
     display: none;
     opacity: 0;
@@ -509,6 +592,27 @@ endblock %} {% block content %}
     padding: 0.15rem 0;
     color: var(--df-dt-header-text);
   }
+  .hof-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.85rem;
+    margin-top: 0.75rem;
+    font-size: 0.8rem;
+    color: var(--df-muted, #9aa0a6);
+  }
+  .hof-details-btn {
+    background: var(--df-accent);
+    color: var(--df-btn-primary-text, #fff);
+    border: none;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 0.2rem 0.65rem;
+  }
+  .hof-details-btn:hover {
+    filter: brightness(1.1);
+    color: var(--df-btn-primary-text, #fff);
+  }
   .hof-empty {
     color: var(--df-muted, #9aa0a6);
     font-size: 0.95rem;
@@ -518,6 +622,7 @@ endblock %} {% block content %}
     gap: 0.4rem;
     margin-top: 0.85rem;
     flex-wrap: wrap;
+    justify-content: center;
   }
   .hof-dot {
     width: 8px;
@@ -533,10 +638,12 @@ endblock %} {% block content %}
     background: var(--df-accent);
     opacity: 1;
   }
+  #hofDetailsModal .table { color: #212529; }
   @media (max-width: 576px) {
     .hof-title { font-size: 1.15rem; }
     .hof-lines li { font-size: 0.98rem; }
-    .hof-card-body { min-height: 140px; }
+    .hof-card-body { min-height: 160px; padding-left: 2.4rem; padding-right: 2.4rem; }
+    .hof-nav { width: 32px; height: 32px; }
   }
 </style>
 {% endblock %} {% block scripts %}
@@ -553,18 +660,55 @@ endblock %} {% block content %}
   });
 
   function initHofCarousel() {
+    var body = document.getElementById("hofBody");
+    var toggleBtn = document.getElementById("hofToggleBtn");
+    if (body && window.bootstrap) {
+      var collapsed = localStorage.getItem("hofCollapsed") === "1";
+      if (collapsed) {
+        body.classList.remove("show");
+        if (toggleBtn) {
+          toggleBtn.classList.add("collapsed");
+          toggleBtn.setAttribute("aria-expanded", "false");
+        }
+      }
+      body.addEventListener("hidden.bs.collapse", function () {
+        localStorage.setItem("hofCollapsed", "1");
+      });
+      body.addEventListener("shown.bs.collapse", function () {
+        localStorage.setItem("hofCollapsed", "0");
+      });
+    }
+
+    document.querySelectorAll(".hof-date[data-utc]").forEach(function (el) {
+      var raw = el.getAttribute("data-utc");
+      if (!raw) return;
+      var d = window.parseUtcDate ? window.parseUtcDate(raw) : new Date(raw);
+      if (!d || isNaN(d.getTime())) {
+        el.textContent = raw;
+        return;
+      }
+      try {
+        el.textContent = d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+      } catch (e) {
+        el.textContent = d.toLocaleString();
+      }
+    });
+
     var root = document.getElementById("hofCarousel");
     if (!root) return;
-    var slides = root.querySelectorAll(".hof-slide");
-    if (slides.length < 2) return;
+    var slides = Array.prototype.slice.call(root.querySelectorAll(".hof-slide"));
     var dots = root.querySelectorAll(".hof-dot");
     var counter = document.getElementById("hofCounter");
+    var prevBtn = document.getElementById("hofPrev");
+    var nextBtn = document.getElementById("hofNext");
     var idx = 0;
     var timer = null;
     var paused = false;
+    var touchStartX = null;
 
     function show(i) {
-      idx = (i + slides.length) % slides.length;
+      if (!slides.length) return;
+      idx = ((i % slides.length) + slides.length) % slides.length;
       slides.forEach(function (el, n) {
         el.classList.toggle("is-active", n === idx);
       });
@@ -574,14 +718,22 @@ endblock %} {% block content %}
       if (counter) counter.textContent = (idx + 1) + " / " + slides.length;
     }
 
-    function next() {
-      if (!paused) show(idx + 1);
+    function go(delta) {
+      show(idx + delta);
+      start();
+    }
+
+    function autoNext() {
+      if (!paused && slides.length > 1) show(idx + 1);
     }
 
     function start() {
       if (timer) clearInterval(timer);
-      timer = setInterval(next, 7000);
+      if (slides.length > 1) timer = setInterval(autoNext, 7000);
     }
+
+    if (prevBtn) prevBtn.addEventListener("click", function () { go(-1); });
+    if (nextBtn) nextBtn.addEventListener("click", function () { go(1); });
 
     dots.forEach(function (dot) {
       dot.addEventListener("click", function () {
@@ -593,10 +745,78 @@ endblock %} {% block content %}
 
     root.addEventListener("mouseenter", function () { paused = true; });
     root.addEventListener("mouseleave", function () { paused = false; });
-    root.addEventListener("touchstart", function () { paused = true; }, { passive: true });
-    root.addEventListener("touchend", function () { paused = false; }, { passive: true });
+
+    root.addEventListener("touchstart", function (e) {
+      if (!e.changedTouches || !e.changedTouches.length) return;
+      touchStartX = e.changedTouches[0].clientX;
+      paused = true;
+    }, { passive: true });
+
+    root.addEventListener("touchend", function (e) {
+      paused = false;
+      if (touchStartX == null || !e.changedTouches || !e.changedTouches.length) return;
+      var dx = e.changedTouches[0].clientX - touchStartX;
+      touchStartX = null;
+      if (Math.abs(dx) < 40) return;
+      go(dx < 0 ? 1 : -1);
+    }, { passive: true });
+
+    root.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-hof-details]");
+      if (!btn) return;
+      var gameId = btn.getAttribute("data-hof-details");
+      if (gameId) openHofDetails(gameId);
+    });
 
     start();
+  }
+
+  function openHofDetails(gameId) {
+    var modalEl = document.getElementById("hofDetailsModal");
+    var titleEl = document.getElementById("hofDetailsTitle");
+    var bodyEl = document.getElementById("hofDetailsBody");
+    if (!modalEl || !bodyEl) return;
+    titleEl.textContent = "Game details";
+    bodyEl.innerHTML = '<p class="mb-0 text-muted">Loading...</p>';
+    var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+
+    fetch("/api/hof/games/" + encodeURIComponent(gameId))
+      .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.data || !res.data.success) {
+          bodyEl.innerHTML = '<p class="mb-0 text-danger">Could not load game details.</p>';
+          return;
+        }
+        var g = res.data.game || {};
+        var winners = res.data.winners || [];
+        var standings = res.data.standings || [];
+        var when = "";
+        if (g.completion_time) {
+          var d = window.parseUtcDate ? window.parseUtcDate(g.completion_time) : new Date(g.completion_time);
+          if (d && !isNaN(d.getTime())) {
+            try { when = d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); }
+            catch (e) { when = d.toLocaleString(); }
+          }
+        }
+        var winnerLabel = winners.map(function (w) { return w.player_name; }).join(", ") || "Unknown";
+        var rows = standings.map(function (s) {
+          return "<tr><td>" + s.player_name + "</td><td>" + s.total_score + "</td></tr>";
+        }).join("");
+        titleEl.textContent = (g.game_name || "Game") + " — ID " + g.id;
+        bodyEl.innerHTML =
+          '<p class="mb-2"><strong>Date:</strong> ' + (when || "Unknown") + "</p>" +
+          '<p class="mb-2"><strong>Game ID:</strong> ' + g.id +
+          (g.game_number ? " (Game #" + g.game_number + ")" : "") + "</p>" +
+          '<p class="mb-3"><strong>Winner:</strong> ' + winnerLabel + "</p>" +
+          '<div class="table-responsive"><table class="table table-sm">' +
+          "<thead><tr><th>Player</th><th>Score</th></tr></thead><tbody>" +
+          (rows || '<tr><td colspan="2">No scores</td></tr>') +
+          "</tbody></table></div>";
+      })
+      .catch(function () {
+        bodyEl.innerHTML = '<p class="mb-0 text-danger">Could not load game details.</p>';
+      });
   }
 
   function formatGameTimes() {

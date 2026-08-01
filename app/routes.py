@@ -128,6 +128,29 @@ _HOF_PRIVACY_NAME = (
 )
 
 
+def _hof_iso(dt):
+    if not dt:
+        return None
+    try:
+        return dt.isoformat() + ('Z' if getattr(dt, 'tzinfo', None) is None else '')
+    except Exception:
+        return str(dt)
+
+
+def _hof_slide(slide_type, title, subtitle, lines, game_name=None,
+               game_id=None, occurred_at=None, game_number=None):
+    return {
+        'type': slide_type,
+        'title': title,
+        'subtitle': subtitle,
+        'lines': lines or [],
+        'game_name': game_name,
+        'game_id': game_id,
+        'occurred_at': _hof_iso(occurred_at) if not isinstance(occurred_at, str) else occurred_at,
+        'game_number': game_number,
+    }
+
+
 def build_hof_slides(conn):
     """Site-wide bragging/roasting slides for the dashboard carousel."""
     slides = []
@@ -138,9 +161,11 @@ def build_hof_slides(conn):
                COALESCE(ag.custom_game_name, g.name) AS game_name,
                g.slug,
                COALESCE(ag.scoring_direction, g.scoring_direction) AS scoring_direction,
-               ag.completion_time
+               ag.completion_time,
+               gsn.game_number
         FROM active_games ag
         JOIN games g ON g.id = ag.game_id
+        LEFT JOIN game_sessions_numbered gsn ON gsn.id = ag.id
         WHERE ag.is_complete = TRUE
         ORDER BY ag.completion_time DESC NULLS LAST, ag.id DESC
         LIMIT 1
@@ -170,19 +195,17 @@ def build_hof_slides(conn):
             standings[0]['privacy_name'] if standings else 'Unknown'
         )
         lines = [f"{s['privacy_name']} — {s['total_score']}" for s in standings]
-        slides.append({
-            'type': 'last_game',
-            'title': 'Last Game',
-            'subtitle': f"{last['game_name']} — {winner_label} won",
-            'lines': lines,
-            'game_name': last['game_name'],
-        })
+        slides.append(_hof_slide(
+            'last_game', 'Last Game',
+            f"{last['game_name']} — {winner_label} won",
+            lines, last['game_name'], last['id'], last['completion_time'], last.get('game_number')))
 
     beat = execute_query_one(conn, f'''
         WITH player_totals AS (
             SELECT ag.id AS active_game_id,
                    COALESCE(ag.custom_game_name, g.name) AS game_name,
                    COALESCE(ag.scoring_direction, g.scoring_direction) AS dir,
+                   ag.completion_time,
                    {pname} AS pname,
                    COALESCE(SUM(gs.score), 0)::int AS total_score
             FROM active_games ag
@@ -194,10 +217,10 @@ def build_hof_slides(conn):
             WHERE ag.is_complete = TRUE
               AND COALESCE(ag.scoring_direction, g.scoring_direction) IN ('low_wins', 'high_wins')
             GROUP BY ag.id, ag.custom_game_name, g.name, ag.scoring_direction,
-                     g.scoring_direction, p.id, p.first_name, p.last_name
+                     g.scoring_direction, ag.completion_time, p.id, p.first_name, p.last_name
         ),
         agg AS (
-            SELECT active_game_id, game_name, dir,
+            SELECT active_game_id, game_name, dir, MAX(completion_time) AS completion_time,
                    COUNT(*)::int AS n,
                    MAX(total_score)::int AS max_s,
                    MIN(total_score)::int AS min_s
@@ -213,7 +236,8 @@ def build_hof_slides(conn):
             FROM agg a
             WHERE (a.max_s - a.min_s) > 0
         )
-        SELECT ws.game_name, ws.spread, ws.winner_score, ws.loser_score,
+        SELECT ws.active_game_id, ws.game_name, ws.spread, ws.winner_score, ws.loser_score,
+               ws.completion_time, gsn.game_number,
                (SELECT pt.pname FROM player_totals pt
                 WHERE pt.active_game_id = ws.active_game_id
                   AND pt.total_score = ws.winner_score
@@ -223,20 +247,18 @@ def build_hof_slides(conn):
                   AND pt.total_score = ws.loser_score
                 ORDER BY pt.pname LIMIT 1) AS loser_name
         FROM with_spread ws
+        LEFT JOIN game_sessions_numbered gsn ON gsn.id = ws.active_game_id
         ORDER BY ws.spread DESC, ws.active_game_id DESC
         LIMIT 1
     ''')
     if beat and beat.get('spread'):
-        slides.append({
-            'type': 'beat_down',
-            'title': 'Biggest Beat-Down',
-            'subtitle': beat['game_name'],
-            'lines': [
+        slides.append(_hof_slide(
+            'beat_down', 'Biggest Beat-Down', beat['game_name'],
+            [
                 f"{beat['winner_name']} {beat['winner_score']} vs {beat['loser_name']} {beat['loser_score']}",
                 f"Spread: {beat['spread']} points",
             ],
-            'game_name': beat['game_name'],
-        })
+            beat['game_name'], beat['active_game_id'], beat['completion_time'], beat.get('game_number')))
 
     worst_round = execute_query_one(conn, f'''
         WITH fc_scores AS (
@@ -253,20 +275,22 @@ def build_hof_slides(conn):
                   SELECT 1 FROM game_scores gs2 WHERE gs2.active_game_id = fcs.active_game_id
               )
         )
-        SELECT {pname} AS privacy_name, fc.score, fc.round_number
+        SELECT {pname} AS privacy_name, fc.score, fc.round_number,
+               fc.active_game_id, ag.completion_time, gsn.game_number
         FROM fc_scores fc
         JOIN players p ON p.id = fc.player_id
+        JOIN active_games ag ON ag.id = fc.active_game_id
+        LEFT JOIN game_sessions_numbered gsn ON gsn.id = fc.active_game_id
         ORDER BY fc.score DESC, fc.round_number DESC
         LIMIT 1
     ''')
     if worst_round:
-        slides.append({
-            'type': 'worst_round',
-            'title': 'Worst Five Crowns Round',
-            'subtitle': f"Round {worst_round['round_number']}",
-            'lines': [f"{worst_round['privacy_name']} — {worst_round['score']} points"],
-            'game_name': 'Five Crowns',
-        })
+        slides.append(_hof_slide(
+            'worst_round', 'Worst Five Crowns Round',
+            f"Round {worst_round['round_number']}",
+            [f"{worst_round['privacy_name']} — {worst_round['score']} points"],
+            'Five Crowns', worst_round['active_game_id'],
+            worst_round['completion_time'], worst_round.get('game_number')))
 
     win_leaders = execute_query(conn, f'''
         WITH win_counts AS (
@@ -289,20 +313,29 @@ def build_hof_slides(conn):
                    ) AS rn
             FROM win_counts
         )
-        SELECT game_name, privacy_name, wins
-        FROM ranked
-        WHERE rn = 1 AND wins >= 1
-        ORDER BY sort_game, wins DESC, game_name
+        SELECT r.game_name, r.privacy_name, r.wins, r.player_id, r.game_type_id, r.sort_game,
+               feat.id AS featured_game_id, feat.completion_time, feat.game_number
+        FROM ranked r
+        LEFT JOIN LATERAL (
+            SELECT ag.id, ag.completion_time, gsn.game_number
+            FROM game_stats gst
+            JOIN active_games ag ON ag.id = gst.game_id
+            LEFT JOIN game_sessions_numbered gsn ON gsn.id = ag.id
+            WHERE gst.winner_id = r.player_id AND ag.game_id = r.game_type_id
+              AND ag.is_complete = TRUE
+            ORDER BY ag.completion_time DESC NULLS LAST, ag.id DESC
+            LIMIT 1
+        ) feat ON TRUE
+        WHERE r.rn = 1 AND r.wins >= 1
+        ORDER BY r.sort_game, r.wins DESC, r.game_name
         LIMIT 4
     ''')
     for wl in win_leaders:
-        slides.append({
-            'type': 'win_leader',
-            'title': f"All-Time {wl['game_name']} Wins",
-            'subtitle': 'Win leader',
-            'lines': [f"{wl['privacy_name']} — {wl['wins']} win{'s' if wl['wins'] != 1 else ''}"],
-            'game_name': wl['game_name'],
-        })
+        slides.append(_hof_slide(
+            'win_leader', f"All-Time {wl['game_name']} Wins", 'Win leader',
+            [f"{wl['privacy_name']} — {wl['wins']} win{'s' if wl['wins'] != 1 else ''}"],
+            wl['game_name'], wl.get('featured_game_id'),
+            wl.get('completion_time'), wl.get('game_number')))
 
     extremes = execute_query(conn, f'''
         WITH player_totals AS (
@@ -311,6 +344,7 @@ def build_hof_slides(conn):
                    {pname} AS privacy_name,
                    COALESCE(SUM(gs.score), 0)::int AS total_score,
                    ag.id AS active_game_id,
+                   ag.completion_time,
                    CASE WHEN g.slug = 'five-crowns' THEN 0 ELSE 1 END AS sort_game
             FROM active_games ag
             JOIN games g ON g.id = ag.game_id
@@ -322,7 +356,7 @@ def build_hof_slides(conn):
               AND COALESCE(ag.scoring_direction, g.scoring_direction) IN ('low_wins', 'high_wins')
               AND g.slug NOT IN ('trouble')
             GROUP BY g.id, g.name, g.slug, ag.id, ag.scoring_direction, g.scoring_direction,
-                     p.id, p.first_name, p.last_name
+                     ag.completion_time, p.id, p.first_name, p.last_name
         ),
         with_pc AS (
             SELECT pt.*,
@@ -334,7 +368,8 @@ def build_hof_slides(conn):
         ),
         worst AS (
             SELECT DISTINCT ON (game_type_id)
-                   game_type_id, game_name, privacy_name, total_score, sort_game, 'worst' AS kind
+                   game_type_id, game_name, privacy_name, total_score, sort_game,
+                   active_game_id, completion_time, 'worst' AS kind
             FROM eligible
             ORDER BY game_type_id,
                      CASE WHEN dir = 'low_wins' THEN total_score ELSE -total_score END DESC,
@@ -342,56 +377,54 @@ def build_hof_slides(conn):
         ),
         best AS (
             SELECT DISTINCT ON (game_type_id)
-                   game_type_id, game_name, privacy_name, total_score, sort_game, 'best' AS kind
+                   game_type_id, game_name, privacy_name, total_score, sort_game,
+                   active_game_id, completion_time, 'best' AS kind
             FROM eligible
             ORDER BY game_type_id,
                      CASE WHEN dir = 'low_wins' THEN total_score ELSE -total_score END ASC,
                      privacy_name
         )
-        SELECT * FROM (
+        SELECT x.*, gsn.game_number FROM (
             SELECT * FROM worst
             UNION ALL
             SELECT * FROM best
         ) x
+        LEFT JOIN game_sessions_numbered gsn ON gsn.id = x.active_game_id
         ORDER BY sort_game, game_name, kind DESC
         LIMIT 4
     ''')
     for ex in extremes:
         if ex['kind'] == 'worst':
-            slides.append({
-                'type': 'worst_score',
-                'title': f"Biggest Loser — {ex['game_name']}",
-                'subtitle': 'Worst final score',
-                'lines': [f"{ex['privacy_name']} — {ex['total_score']}"],
-                'game_name': ex['game_name'],
-            })
+            slides.append(_hof_slide(
+                'worst_score', f"Biggest Loser — {ex['game_name']}", 'Worst final score',
+                [f"{ex['privacy_name']} — {ex['total_score']}"],
+                ex['game_name'], ex['active_game_id'],
+                ex['completion_time'], ex.get('game_number')))
         else:
-            slides.append({
-                'type': 'best_score',
-                'title': f"Best Score — {ex['game_name']}",
-                'subtitle': 'Best final score',
-                'lines': [f"{ex['privacy_name']} — {ex['total_score']}"],
-                'game_name': ex['game_name'],
-            })
+            slides.append(_hof_slide(
+                'best_score', f"Best Score — {ex['game_name']}", 'Best final score',
+                [f"{ex['privacy_name']} — {ex['total_score']}"],
+                ex['game_name'], ex['active_game_id'],
+                ex['completion_time'], ex.get('game_number')))
 
     trouble = execute_query_one(conn, f'''
-        SELECT {pname} AS privacy_name, gst.winning_score
+        SELECT {pname} AS privacy_name, gst.winning_score,
+               ag.id AS active_game_id, ag.completion_time, gsn.game_number
         FROM game_stats gst
         JOIN active_games ag ON ag.id = gst.game_id
         JOIN games g ON g.id = ag.game_id
         JOIN players p ON p.id = gst.winner_id
+        LEFT JOIN game_sessions_numbered gsn ON gsn.id = ag.id
         WHERE g.slug = 'trouble' AND ag.is_complete = TRUE AND gst.winner_id IS NOT NULL
         ORDER BY gst.winning_score DESC, gst.completion_time DESC NULLS LAST
         LIMIT 1
     ''')
     if trouble:
-        slides.append({
-            'type': 'trouble_sow',
-            'title': 'Strongest Trouble Win',
-            'subtitle': 'Highest Strength of Win',
-            'lines': [f"{trouble['privacy_name']} — {trouble['winning_score']} SOW"],
-            'game_name': 'Trouble',
-        })
+        slides.append(_hof_slide(
+            'trouble_sow', 'Strongest Trouble Win', 'Highest Strength of Win',
+            [f"{trouble['privacy_name']} — {trouble['winning_score']} SOW"],
+            'Trouble', trouble['active_game_id'],
+            trouble['completion_time'], trouble.get('game_number')))
 
     return slides
 
@@ -7300,6 +7333,67 @@ def game_summary(game_id):
             totals=totals,
             winner=winner,
         )
+    finally:
+        conn.close()
+
+
+@main.route('/api/hof/games/<int:game_id>')
+@login_required
+def hof_game_details(game_id):
+    """Completed-game details for the Hall of Fame modal (site-wide, privacy names)."""
+    conn = get_db_connection()
+    pname = _HOF_PRIVACY_NAME
+    try:
+        meta = execute_query_one(conn, '''
+            SELECT ag.id, ag.start_time, ag.completion_time, ag.custom_game_name,
+                   ag.is_complete,
+                   COALESCE(ag.custom_game_name, g.name) AS game_name,
+                   g.slug,
+                   COALESCE(ag.scoring_direction, g.scoring_direction) AS scoring_direction,
+                   gsn.game_number
+            FROM active_games ag
+            JOIN games g ON g.id = ag.game_id
+            LEFT JOIN game_sessions_numbered gsn ON gsn.id = ag.id
+            WHERE ag.id = %s
+        ''', (game_id,))
+        if not meta or not meta.get('is_complete'):
+            return jsonify({'success': False, 'error': 'Game not found'}), 404
+
+        order = 'DESC' if meta.get('scoring_direction') == 'high_wins' else 'ASC'
+        standings = execute_query(conn, f'''
+            SELECT {pname} AS player_name,
+                   COALESCE(SUM(gs.score), 0)::int AS total_score
+            FROM active_game_players agp
+            JOIN players p ON p.id = agp.player_id
+            LEFT JOIN game_scores gs
+              ON gs.active_game_id = agp.active_game_id AND gs.player_id = p.id
+            WHERE agp.active_game_id = %s
+            GROUP BY p.id, p.first_name, p.last_name
+            ORDER BY total_score {order}, player_name
+        ''', (game_id,))
+        winners = execute_query(conn, f'''
+            SELECT {pname} AS player_name, gst.winning_score, gst.is_tie
+            FROM game_stats gst
+            JOIN players p ON p.id = gst.winner_id
+            WHERE gst.game_id = %s
+            ORDER BY player_name
+        ''', (game_id,))
+        return jsonify({
+            'success': True,
+            'game': {
+                'id': meta['id'],
+                'game_name': meta['game_name'],
+                'slug': meta['slug'],
+                'game_number': meta.get('game_number'),
+                'completion_time': _hof_iso(meta.get('completion_time')),
+                'start_time': _hof_iso(meta.get('start_time')),
+                'scoring_direction': meta.get('scoring_direction'),
+            },
+            'winners': [dict(w) for w in (winners or [])],
+            'standings': [dict(s) for s in (standings or [])],
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         conn.close()
 

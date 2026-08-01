@@ -472,6 +472,26 @@ def main():
               'hofCarouselCard' in dash_a and 'Hall of Fame' in dash_a)
         check('dashboard hof carousel script is present',
               'initHofCarousel' in dash_a)
+        check('hof card can collapse',
+              'hofBody' in dash_a and 'data-bs-toggle="collapse"' in dash_a)
+        check('hof card has prev/next navigation',
+              'hofPrev' in dash_a and 'hofNext' in dash_a)
+        check('hof slides expose game id and details',
+              'Game ID' in dash_a and 'data-hof-details' in dash_a and 'hofDetailsModal' in dash_a)
+        # Site-wide HOF details API (privacy names) for any completed game.
+        sample_done = q1(conn, '''
+            SELECT id FROM active_games WHERE is_complete = TRUE ORDER BY id DESC LIMIT 1
+        ''')
+        if sample_done:
+            r = client_a.get(f"/api/hof/games/{sample_done['id']}")
+            hof = r.get_json() or {}
+            check('hof details API returns completed game standings',
+                  r.status_code == 200 and hof.get('success')
+                  and isinstance(hof.get('standings'), list),
+                  str(hof)[:200])
+            names = ' '.join(s.get('player_name', '') for s in (hof.get('standings') or []))
+            check('hof details API uses privacy-style names',
+                  '.' in names or not names)
         check('family A dashboard lists its own live game',
               ag_id is not None and (f'data-game-id="{ag_id}"' in dash_a
                                      or f'/five-crowns?game_id={ag_id}' in dash_a
