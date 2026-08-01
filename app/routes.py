@@ -5111,6 +5111,40 @@ def players():
         family_id, include_crew=include_crew, for_player_id=user.get('player_id'))]
     return jsonify(result)
 
+@main.route('/api/games/<int:game_id>/live-scores', methods=['GET'])
+@login_required
+def live_game_scores(game_id):
+    """Current scores for an active game — used by live sync poll backup so
+    every open score sheet stays current even if a websocket drops."""
+    conn = get_db_connection()
+    user = get_current_user()
+    try:
+        access_sql, access_params = family_access_clause(user, 'ag')
+        game = execute_query_one(conn, f'''
+            SELECT ag.id, ag.is_complete FROM active_games ag
+            WHERE ag.id = %s AND {access_sql}
+        ''', tuple([game_id] + list(access_params)))
+        if not game:
+            return jsonify({'error': 'Game not found or access denied'}), 404
+        rows = execute_query(conn, '''
+            SELECT player_id, round_number, score
+            FROM game_scores
+            WHERE active_game_id = %s
+            ORDER BY round_number, player_id
+        ''', (game_id,))
+        return jsonify({
+            'game_id': game_id,
+            'is_complete': bool(game['is_complete']),
+            'scores': [{
+                'player_id': r['player_id'],
+                'round_number': r['round_number'],
+                'score': r['score'],
+            } for r in rows],
+        })
+    finally:
+        conn.close()
+
+
 @main.route('/api/scores', methods=['POST'])
 @login_required
 def update_score():
@@ -6375,14 +6409,6 @@ def clear_completed_games():
         return jsonify({'success': True})
     finally:
         conn.close()
-
-@socketio.on('connect')
-def handle_connect():
-    print('Client connected')
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print('Client disconnected')
 
 def _viewer_circle_player_ids(conn, user):
     """Home family + accepted alliance families + personal crew."""

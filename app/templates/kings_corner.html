@@ -499,14 +499,19 @@ $(document).ready(function(){
   $("#refPanelPin").click(function(){refPinned=!refPinned;$(this).css("opacity",refPinned?"1":"0.6");});
   $(document).click(function(e){if(!refPinned&&!$(e.target).closest("#refPanel,#refPanelToggle").length)$("#refPanel").removeClass("open");});
 
-  // SocketIO
+  // Live score sync (Socket.IO + poll backup)
   function initSock(){
-    if(typeof io==="undefined"){setTimeout(initSock,100);return;}
-    var sock=io({transports:["websocket"],cors:{origin:"*"}});
-    sock.on("connect",function(){ {% if active_game %}sock.emit('join_game',{game_id:{{ active_game.id }}});{% endif %} });
-    window.addEventListener('beforeunload',function(){ {% if active_game %}sock.emit('leave_game',{game_id:{{ active_game.id }}});{% endif %} });
-    sock.on("score_update",function(d){var c=$(".score-cell[data-player='"+d.player_id+"'][data-round='"+d.round_number+"']");if(!c.hasClass("editing")){c.text(d.score===null||d.score===""?"":d.score);updateTotals();}});
-    sock.on("game_completed",function(d){AppModal.show({title:"Game Complete",body:'<pre style="white-space:pre-wrap;font-family:inherit;">'+d.summary+'</pre>',type:"success"});var m=document.getElementById("appModal");$(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});});
+    {% if active_game %}
+    if(!window.DiFedeLiveGame){setTimeout(initSock,100);return;}
+    DiFedeLiveGame.connect({{ active_game.id }}, {
+      afterApply: function(){ updateTotals(); },
+      onCompleted: function(d){
+        AppModal.show({title:"Game Complete",body:'<pre style="white-space:pre-wrap;font-family:inherit;">'+d.summary+'</pre>',type:"success"});
+        var m=document.getElementById("appModal");
+        $(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});
+      }
+    });
+    {% endif %}
   }
   initSock();
 

@@ -1612,110 +1612,75 @@ content %}
 
     // ===================== SOCKETIO =====================
 
-    function initializeSocket() {
-      if (typeof io === "undefined") {
-        setTimeout(initializeSocket, 100);
-        return;
-      }
-
-      var socket = io({
-        transports: ["websocket"],
-        cors: { origin: "*" },
-      });
-
-      socket.on("connect", function () {
-        console.log("UNO: Connected to server");
-        {% if active_game %}
-        socket.emit('join_game', {game_id: {{ active_game.id }}});
-        {% endif %}
-      });
-      window.addEventListener('beforeunload', function() {
-        {% if active_game %}
-        socket.emit('leave_game', {game_id: {{ active_game.id }}});
-        {% endif %}
-      });
-
-      socket.on("score_update", function (data) {
-        var cell = $(
-          '.score-cell[data-player="' +
-            data.player_id +
-            '"][data-round="' +
-            data.round_number +
-            '"]'
-        );
-
-        // If the round doesn't exist yet, add it
-        if (!cell.length) {
-          var currentMax = getMaxRound();
-          if (data.round_number > currentMax) {
-            for (var r = currentMax + 1; r <= data.round_number; r++) {
-              addHandRow(r);
-            }
-          }
-          cell = $(
-            '.score-cell[data-player="' +
-              data.player_id +
-              '"][data-round="' +
-              data.round_number +
-              '"]'
-          );
+    function applyRemoteUnoScore(data) {
+      var cell = $(
+        '.score-cell[data-player="' + data.player_id + '"][data-round="' + data.round_number + '"]'
+      );
+      if (!cell.length) {
+        var currentMax = getMaxRound();
+        if (data.round_number > currentMax) {
+          for (var r = currentMax + 1; r <= data.round_number; r++) addHandRow(r);
         }
+        cell = $(
+          '.score-cell[data-player="' + data.player_id + '"][data-round="' + data.round_number + '"]'
+        );
+      }
+      if (cell.length && !cell.hasClass("editing")) {
+        cell.text(data.score === null || data.score === "" ? "" : data.score);
+        updateTotals();
+        updateLeader();
+        highlightDealer();
+        setTimeout(function () {
+          checkTargetScore(parseInt(data.round_number, 10));
+          ensureEmptyRow();
+        }, 0);
+      }
+    }
 
-        if (cell.length && !cell.hasClass("editing")) {
-          cell.text(
-            data.score === null || data.score === "" ? "" : data.score
-          );
+    function initializeSocket() {
+      {% if active_game %}
+      if (!window.DiFedeLiveGame) { setTimeout(initializeSocket, 100); return; }
+      DiFedeLiveGame.connect({{ active_game.id }}, {
+        onScore: applyRemoteUnoScore,
+        afterApply: function () {
           updateTotals();
           updateLeader();
           highlightDealer();
-          setTimeout(function () {
-            checkTargetScore(parseInt(data.round_number, 10));
-            ensureEmptyRow();
-          }, 0);
-        }
-      });
-
-      socket.on("game_completed", function (data) {
-        if (!gameCompletedByCurrentUser) {
+        },
+        onCompleted: function (data) {
+          if (!gameCompletedByCurrentUser) {
+            AppModal.show({
+              title: "Game Complete",
+              body: '<pre style="white-space: pre-wrap; font-family: inherit;">' + data.summary + "</pre>",
+              type: "success",
+            });
+            var modalEl = document.getElementById("appModal");
+            $(modalEl).on("hidden.bs.modal.reload", function () {
+              $(modalEl).off("hidden.bs.modal.reload");
+              window.location.reload();
+            });
+          } else {
+            gameCompletedByCurrentUser = false;
+          }
+        },
+        onPaused: function () {
           AppModal.show({
-            title: "Game Complete",
-            body:
-              '<pre style="white-space: pre-wrap; font-family: inherit;">' +
-              data.summary +
-              "</pre>",
+            title: "Game Paused",
+            body: "<p>Another player has paused this game. Redirecting...</p>",
+            type: "warning",
+          });
+          setTimeout(function () { window.redirectToUno(); }, 2000);
+        },
+        onResumed: function () {
+          AppModal.show({
+            title: "Game Resumed",
+            body: "<p>Another player has resumed the game. Loading...</p>",
             type: "success",
           });
-          var modalEl = document.getElementById("appModal");
-          $(modalEl).on("hidden.bs.modal.reload", function () {
-            $(modalEl).off("hidden.bs.modal.reload");
-            window.location.reload();
-          });
-        } else {
-          gameCompletedByCurrentUser = false;
+          setTimeout(function () { window.redirectToUno(); }, 2000);
         }
       });
-
-      socket.on("game_paused", function () {
-        AppModal.show({
-          title: "Game Paused",
-          body: "<p>Another player has paused this game. Redirecting...</p>",
-          type: "warning",
-        });
-        setTimeout(function () {
-          window.redirectToUno();
-        }, 2000);
-      });
-
-      socket.on("game_resumed", function () {
-        AppModal.show({
-          title: "Game Resumed",
-          body: "<p>Another player has resumed the game. Loading...</p>",
-          type: "success",
-        });
-        setTimeout(function () {
-          window.redirectToUno();
-        }, 2000);
-      });
+      {% endif %}
     }
 
     initializeSocket();

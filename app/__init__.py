@@ -9,13 +9,17 @@ from .database import get_db_connection
 # Redis message queue lets SocketIO work across scaled web replicas.
 _redis_url = os.environ.get("REDIS_URL") or None
 
-# Initialize SocketIO with cors_allowed_origins to allow all origins
+# Initialize SocketIO with cors_allowed_origins to allow all origins.
+# Longer ping window helps Cloudflare Tunnel / mobile networks keep the
+# live score channel alive during quiet stretches of a game.
 socketio = SocketIO(
     cors_allowed_origins="*",
     async_mode="eventlet",
     logger=True,
     engineio_logger=True,
     message_queue=_redis_url,
+    ping_timeout=60,
+    ping_interval=25,
 )
 
 def init_db():

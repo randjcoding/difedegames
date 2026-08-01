@@ -814,39 +814,26 @@ $(document).ready(function () {
   // ===================== SOCKETIO =====================
 
   function initializeSocket() {
-    if (typeof io === "undefined") { setTimeout(initializeSocket, 100); return; }
-    var socket = io({ transports: ["websocket"], cors: { origin: "*" } });
-    socket.on("connect", function () {
-      {% if active_game %}
-      socket.emit('join_game', {game_id: {{ active_game.id }}});
-      {% endif %}
-    });
     {% if active_game %}
-    window.addEventListener('beforeunload', function() {
-      socket.emit('leave_game', {game_id: {{ active_game.id }}});
-    });
-    {% endif %}
-
-    socket.on("score_updated", function (data) {
-      var cell = $(".score-cell[data-player='" + data.player_id + "'][data-round='" + data.round_number + "']");
-      if (cell.length && !cell.hasClass("editing")) {
-        cell.text(data.score === null || data.score === "" ? "" : data.score);
-        recalcTotals();
+    if (!window.DiFedeLiveGame) { setTimeout(initializeSocket, 100); return; }
+    DiFedeLiveGame.connect({{ active_game.id }}, {
+      afterApply: function () { recalcTotals(); },
+      afterScore: function (data) {
         setTimeout(function () {
           checkTargetScore(parseInt(data.round_number, 10));
           autoAddRound();
         }, 0);
+      },
+      onCompleted: function (data) {
+        AppModal.show({ title: "Game Complete!", body: '<pre style="white-space:pre-wrap;font-family:inherit;">' + data.summary + '</pre>', type: "success" });
+        var modalEl = document.getElementById("appModal");
+        $(modalEl).on("hidden.bs.modal.reload", function () {
+          $(modalEl).off("hidden.bs.modal.reload");
+          window.location.reload();
+        });
       }
     });
-
-    socket.on("game_completed", function (data) {
-      AppModal.show({ title: "Game Complete!", body: '<pre style="white-space:pre-wrap;font-family:inherit;">' + data.summary + '</pre>', type: "success" });
-      var modalEl = document.getElementById("appModal");
-      $(modalEl).on("hidden.bs.modal.reload", function () {
-        $(modalEl).off("hidden.bs.modal.reload");
-        window.location.reload();
-      });
-    });
+    {% endif %}
   }
 
   initializeSocket();

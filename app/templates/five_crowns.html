@@ -1461,78 +1461,7 @@ content %}
 
     let gameCompletedByCurrentUser = false;
 
-    function initializeSocket() {
-      if (typeof io === "undefined") {
-        console.error("Socket.IO not loaded yet");
-        setTimeout(initializeSocket, 100);
-        return;
-      }
-
-      const socket = io({
-        transports: ["websocket"],
-        cors: {
-          origin: "*",
-        },
-      });
-
-      socket.on("connect", function () {
-        console.log("Connected to server");
-        {% if active_game %}
-        socket.emit('join_game', {game_id: {{ active_game.id }}});
-        {% endif %}
-      });
-      window.addEventListener('beforeunload', function() {
-        {% if active_game %}
-        socket.emit('leave_game', {game_id: {{ active_game.id }}});
-        {% endif %}
-      });
-
-      socket.on("score_update", function (data) {
-        const cell = $(
-          `.score-cell[data-player="${data.player_id}"][data-round="${data.round_number}"]`
-        );
-        if (!cell.hasClass("editing")) {
-          cell.text(data.score === null || data.score === "" ? "" : data.score);
-          updateTotals();
-          highlightDealer();
-        }
-        updateTableLayout();
-      });
-
-      socket.on("game_completed", function (data) {
-        if (!gameCompletedByCurrentUser) {
-          const summaryModal = `
-            <div class="modal fade" id="gameSummaryModalRemote" data-bs-backdrop="static">
-              <div class="modal-dialog">
-                <div class="modal-content">
-                  <div class="modal-header bg-success text-white">
-                    <h5 class="modal-title">Game Complete</h5>
-                  </div>
-                  <div class="modal-body">
-                    <pre style="white-space: pre-wrap; font-family: inherit;">${data.summary}</pre>
-                  </div>
-                  <div class="modal-footer">
-                    <button type="button" class="btn btn-primary" onclick="window.location.reload()">Close</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          `;
-          $("body").append(summaryModal);
-          const modal = new bootstrap.Modal(
-            document.getElementById("gameSummaryModalRemote")
-          );
-          modal.show();
-        } else {
-          gameCompletedByCurrentUser = false;
-        }
-      });
-
-      socket.on("game_paused", function (data) {
-        showOtherUserPausedModal();
-      });
-
-      function showOtherUserPausedModal() {
+    function showOtherUserPausedModal() {
         const modalHtml = `
           <div class="modal fade" id="otherUserPausedModal" data-bs-backdrop="static" data-bs-keyboard="false">
             <div class="modal-dialog modal-dialog-centered">
@@ -1580,11 +1509,7 @@ content %}
         }, 1000);
       }
 
-      socket.on("game_resumed", function (data) {
-        showOtherUserResumedModal();
-      });
-
-      function showOtherUserResumedModal() {
+    function showOtherUserResumedModal() {
         var boardId = $(".game-board").data("game-id");
         const modalHtml = `
           <div class="modal fade" id="otherUserResumedModal" data-bs-backdrop="static" data-bs-keyboard="false">
@@ -1631,6 +1556,51 @@ content %}
           }
         }, 1000);
       }
+
+    function initializeSocket() {
+      {% if active_game %}
+      if (!window.DiFedeLiveGame) {
+        setTimeout(initializeSocket, 100);
+        return;
+      }
+      DiFedeLiveGame.connect({{ active_game.id }}, {
+        afterApply: function () {
+          updateTotals();
+          highlightDealer();
+          updateTableLayout();
+        },
+        onCompleted: function (data) {
+          if (!gameCompletedByCurrentUser) {
+            const summaryModal = `
+              <div class="modal fade" id="gameSummaryModalRemote" data-bs-backdrop="static">
+                <div class="modal-dialog">
+                  <div class="modal-content">
+                    <div class="modal-header bg-success text-white">
+                      <h5 class="modal-title">Game Complete</h5>
+                    </div>
+                    <div class="modal-body">
+                      <pre style="white-space: pre-wrap; font-family: inherit;">${data.summary}</pre>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-primary" onclick="window.location.reload()">Close</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+            $("body").append(summaryModal);
+            const modal = new bootstrap.Modal(
+              document.getElementById("gameSummaryModalRemote")
+            );
+            modal.show();
+          } else {
+            gameCompletedByCurrentUser = false;
+          }
+        },
+        onPaused: function () { showOtherUserPausedModal(); },
+        onResumed: function () { showOtherUserResumedModal(); }
+      });
+      {% endif %}
     }
 
     initializeSocket();

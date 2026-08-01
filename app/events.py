@@ -1,7 +1,8 @@
 from flask import Blueprint
-from flask_socketio import emit, join_room, leave_room
-from app import socketio, get_db_connection
+from flask_socketio import join_room, leave_room
+from app import socketio
 
+# Blueprint kept for create_app registration; SocketIO handlers bind to socketio.
 events = Blueprint('events', __name__)
 
 @socketio.on('connect')
@@ -14,7 +15,7 @@ def handle_disconnect():
 
 @socketio.on('join_game')
 def handle_join_game(data):
-    game_id = data.get('game_id')
+    game_id = (data or {}).get('game_id')
     if game_id:
         room = f'game_{game_id}'
         join_room(room)
@@ -22,19 +23,25 @@ def handle_join_game(data):
 
 @socketio.on('leave_game')
 def handle_leave_game(data):
-    game_id = data.get('game_id')
+    game_id = (data or {}).get('game_id')
     if game_id:
         room = f'game_{game_id}'
         leave_room(room)
         print(f'Client left room {room}')
 
 def broadcast_score_update(game_id, player_id, round_number, score):
-    socketio.emit('score_update', {
+    """Push a score change to every client watching this game (all web workers
+    via Redis message queue)."""
+    payload = {
         'game_id': game_id,
         'player_id': player_id,
         'round_number': round_number,
-        'score': score
-    }, namespace='/', to=f'game_{game_id}')
+        'score': score,
+    }
+    # Emit on both room= and to= for python-socketio version compatibility.
+    socketio.emit('score_update', payload, namespace='/', to=f'game_{game_id}')
+    # Also emit the legacy alias some older templates listened for.
+    socketio.emit('score_updated', payload, namespace='/', to=f'game_{game_id}')
 
 def broadcast_game_completed(game_id, summary):
     socketio.emit('game_completed', {

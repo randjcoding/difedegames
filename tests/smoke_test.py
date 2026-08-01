@@ -449,6 +449,15 @@ def main():
                 'game_id': ag_id, 'player_id': adult_id, 'round_number': rnd, 'score': 10 * rnd})
             check(f'score saves for round {rnd}', r.status_code == 200)
 
+        r = client_a.get(f'/api/games/{ag_id}/live-scores')
+        live = r.get_json() or {}
+        check('live-scores API returns saved scores for open game',
+              r.status_code == 200 and len(live.get('scores') or []) >= 2,
+              str(live))
+        page = client_a.get('/five-crowns').get_data(as_text=True)
+        check('game pages load live_game.js sync helper',
+              'live_game.js' in page or 'DiFedeLiveGame' in page)
+
         cur = conn.cursor()
         blocked = False
         try:

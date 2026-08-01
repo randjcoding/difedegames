@@ -860,31 +860,26 @@ content %}
     // ===================== SOCKETIO =====================
 
     function initializeSocket() {
-      if (typeof io === "undefined") { setTimeout(initializeSocket, 100); return; }
-      var socket = io({ transports: ["websocket"], cors: { origin: "*" } });
-      socket.on("connect", function () {
-        {% if active_game %}
-        socket.emit('join_game', {game_id: {{ active_game.id }}});
-        {% endif %}
+      {% if active_game %}
+      if (!window.DiFedeLiveGame) { setTimeout(initializeSocket, 100); return; }
+      DiFedeLiveGame.connect({{ active_game.id }}, {
+        afterApply: function () {
+          if (typeof updateTotals === 'function') updateTotals();
+        },
+        onCompleted: function (data) {
+          AppModal.show({
+            title: "Game Complete",
+            body: '<pre style="white-space: pre-wrap; font-family: inherit;">' + data.summary + "</pre>",
+            type: "success",
+          });
+          var modalEl = document.getElementById("appModal");
+          $(modalEl).on("hidden.bs.modal.reload", function () {
+            $(modalEl).off("hidden.bs.modal.reload");
+            window.location.reload();
+          });
+        }
       });
-      window.addEventListener('beforeunload', function() {
-        {% if active_game %}
-        socket.emit('leave_game', {game_id: {{ active_game.id }}});
-        {% endif %}
-      });
-
-      socket.on("game_completed", function (data) {
-        AppModal.show({
-          title: "Game Complete",
-          body: '<pre style="white-space: pre-wrap; font-family: inherit;">' + data.summary + "</pre>",
-          type: "success",
-        });
-        var modalEl = document.getElementById("appModal");
-        $(modalEl).on("hidden.bs.modal.reload", function () {
-          $(modalEl).off("hidden.bs.modal.reload");
-          window.location.reload();
-        });
-      });
+      {% endif %}
     }
 
     initializeSocket();
