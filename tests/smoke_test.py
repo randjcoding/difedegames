@@ -1174,9 +1174,16 @@ def main():
                   r.status_code == 200 and extract_link('reset-password') is not None,
                   str(r.get_json()))
 
-        # People Hub: My Team / Entire Site.
+        # People Hub: My Team / Entire Site + DataTable + administer modal.
         page = client_a.get('/admin/people').get_data(as_text=True)
         check('people hub page loads', 'People & Accounts' in page or 'Entire Site' in page)
+        check('people hub uses DataTable',
+              'peopleTable' in page and 'DataTable(' in page)
+        check('people hub has administer modal',
+              'adminPersonModal' in page and 'apSave' in page and 'Remove login' in page)
+        check('people hub has merge-two toolbar and wizard',
+              'mergeTwoBtn' in page and 'mergeWizardModal' in page
+              and 'adopt_login_from' in page)
         check('admin dashboard points to people hub',
               '/admin/people' in client_a.get('/admin').get_data(as_text=True)
               and 'Use when:' in client_a.get('/admin').get_data(as_text=True))
@@ -1313,6 +1320,161 @@ def main():
                   'Zztestiso' not in lb_a)
             check('all-time stats includes isolated family player',
                   'Zztestiso' in at_a)
+
+        print('\n== Section 17: clear email + Grandpa/Seibert merge adopt login ==')
+        run(conn, "UPDATE users SET role = 'super_admin' WHERE id = %s", (user_a['id'],))
+        conn.commit()
+
+        # Clear players.email via team edit (was broken: empty kept old value).
+        r = client_a.post('/api/team/players', json={
+            'first_name': 'Zztestmail', 'last_name': 'Clearme',
+            'display_name': 'Zztestmail', 'email': 'zztest.mailclear@example.com'})
+        mail_pid = (r.get_json() or {}).get('id')
+        ids['players'].add(mail_pid)
+        r = client_a.put(f'/api/team/players/{mail_pid}', json={
+            'first_name': 'Zztestmail', 'last_name': 'Clearme',
+            'display_name': 'Zztestmail', 'email': ''})
+        check('team edit can clear player email', r.status_code == 200, str(r.get_json()))
+        row = q1(conn, 'SELECT email FROM players WHERE id = %s', (mail_pid,))
+        check('cleared player email is NULL in database', row and row['email'] is None, str(row))
+
+        # Admin people save can set email, then clear it.
+        r = client_a.put(f'/api/admin/player/{mail_pid}', json={
+            'first_name': 'Zztestmail', 'last_name': 'Clearme',
+            'display_name': 'Zztestmail', 'email': 'zztest.mailclear@example.com'})
+        check('admin people save can set player email', r.status_code == 200, str(r.get_json()))
+        r = client_a.put(f'/api/admin/player/{mail_pid}', json={
+            'first_name': 'Zztestmail', 'last_name': 'Clearme',
+            'display_name': 'Zztestmail', 'email': ''})
+        check('admin people save can clear player email', r.status_code == 200, str(r.get_json()))
+        row = q1(conn, 'SELECT email FROM players WHERE id = %s', (mail_pid,))
+        check('admin-cleared email is NULL', row and row['email'] is None, str(row))
+
+        # Grandpa (history, no login) + Seibert (email+login, fewer/more games irrelevant).
+        r = client_a.post('/api/team/players', json={
+            'first_name': 'Zztestgrandpa', 'last_name': 'Keep', 'display_name': 'Zztest Grandpa'})
+        grandpa_id = (r.get_json() or {}).get('id')
+        r = client_a.post('/api/team/players', json={
+            'first_name': 'Zztestseibert', 'last_name': 'Email', 'display_name': 'Zztest Seibert',
+            'email': 'zztest.seibert@example.com'})
+        seibert_id = (r.get_json() or {}).get('id')
+        ids['players'].update({p for p in (grandpa_id, seibert_id) if p})
+        game_def = q1(conn, 'SELECT id FROM games ORDER BY id LIMIT 1')
+        if grandpa_id and seibert_id and game_def:
+            # Give Grandpa history; Seibert gets the login + email only.
+            r = client_a.post('/api/games/new', json={
+                'game_id': game_def['id'],
+                'player_ids': [grandpa_id, user_a['player_id']]})
+            ag_g = (r.get_json() or {}).get('id')
+            client_a.post('/api/scores', json={
+                'game_id': ag_g, 'player_id': grandpa_id, 'round_number': 1, 'score': 9})
+            run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (ag_g,))
+            from werkzeug.security import generate_password_hash
+            run(conn, """
+                INSERT INTO users (email, password_hash, first_name, last_name, family_name,
+                                   role, is_verified, is_approved, is_active, family_id, player_id)
+                VALUES ('zztest.seibert@example.com', %s, 'Zztestseibert', 'Email', 'Zztest Alpha',
+                        'family_member', TRUE, TRUE, TRUE, %s, %s)
+            """, (generate_password_hash(PASSWORD), fam_a['id'], seibert_id))
+            conn.commit()
+            seibert_user = q1(conn, "SELECT id FROM users WHERE email = 'zztest.seibert@example.com'")
+            ids['users'].add(seibert_user['id'])
+
+            # Preview recommends keep grandpa (more games).
+            r = client_a.get('/api/admin/merge-preview', query_string={
+                'keep_id': grandpa_id, 'dup_id': seibert_id})
+            prev = r.get_json() or {}
+            check('merge preview recommends grandpa keep',
+                  r.status_code == 200 and prev.get('recommended_keep_id') == grandpa_id, str(prev))
+            check('merge preview recommends adopt login from seibert',
+                  prev.get('recommended_adopt_login_from') == 'dup', str(prev))
+
+            r = client_a.post('/api/admin/merge-players', json={
+                'keep_id': grandpa_id, 'dup_id': seibert_id, 'auto_keep': False,
+                'adopt_login_from': 'dup', 'prefer_email_from': 'dup'})
+            body = r.get_json() or {}
+            check('grandpa merge with adopt seibert login succeeds',
+                  r.status_code == 200 and body.get('success') is True, str(body))
+            check('seibert player row removed',
+                  q1(conn, 'SELECT id FROM players WHERE id = %s', (seibert_id,)) is None)
+            check('grandpa kept with seibert email',
+                  q1(conn, 'SELECT email FROM players WHERE id = %s', (grandpa_id,))['email']
+                  == 'zztest.seibert@example.com')
+            check('seibert login rebound to grandpa',
+                  q1(conn, "SELECT player_id FROM users WHERE email = 'zztest.seibert@example.com'")['player_id']
+                  == grandpa_id)
+            check('grandpa still owns game scores',
+                  q1(conn, 'SELECT COUNT(*) AS n FROM game_scores WHERE player_id = %s',
+                     (grandpa_id,))['n'] >= 1)
+            ids['players'].discard(seibert_id)
+
+            # Dual-login: adopt discard credentials onto keep (retire keep login).
+            r = client_a.post('/api/team/players', json={
+                'first_name': 'Zztestkeepprof', 'last_name': 'A', 'display_name': 'Zztest KeepProf'})
+            kp = (r.get_json() or {}).get('id')
+            r = client_a.post('/api/team/players', json={
+                'first_name': 'Zztestduplogin', 'last_name': 'B', 'display_name': 'Zztest DupLogin'})
+            dp = (r.get_json() or {}).get('id')
+            ids['players'].update({p for p in (kp, dp) if p})
+            run(conn, """
+                INSERT INTO users (email, password_hash, first_name, last_name, family_name,
+                                   role, is_verified, is_approved, is_active, family_id, player_id)
+                VALUES ('zztest.keepprof@example.com', %s, 'Zztestkeepprof', 'A', 'Zztest Alpha',
+                        'family_member', TRUE, TRUE, TRUE, %s, %s),
+                       ('zztest.duplogin@example.com', %s, 'Zztestduplogin', 'B', 'Zztest Alpha',
+                        'family_member', TRUE, TRUE, TRUE, %s, %s)
+            """, (generate_password_hash(PASSWORD), fam_a['id'], kp,
+                  generate_password_hash(PASSWORD), fam_a['id'], dp))
+            conn.commit()
+            ku = q1(conn, "SELECT id FROM users WHERE email = 'zztest.keepprof@example.com'")
+            du = q1(conn, "SELECT id FROM users WHERE email = 'zztest.duplogin@example.com'")
+            ids['users'].update({ku['id'], du['id']})
+            r = client_a.post('/api/admin/merge-players', json={
+                'keep_id': kp, 'dup_id': dp, 'auto_keep': False,
+                'adopt_login_from': 'dup', 'prefer_email_from': 'dup'})
+            check('dual-login adopt-from-dup succeeds',
+                  r.status_code == 200, str(r.get_json()))
+            check('keep profile survives dual adopt',
+                  q1(conn, 'SELECT id FROM players WHERE id = %s', (kp,)) is not None)
+            check('discard profile removed after dual adopt',
+                  q1(conn, 'SELECT id FROM players WHERE id = %s', (dp,)) is None)
+            check('adopted login email is on keep profile',
+                  q1(conn, 'SELECT email FROM players WHERE id = %s', (kp,))['email']
+                  == 'zztest.duplogin@example.com')
+            check('discard login survived on keep player',
+                  q1(conn, "SELECT player_id FROM users WHERE email = 'zztest.duplogin@example.com'")['player_id']
+                  == kp)
+            check('old keep login was retired',
+                  q1(conn, "SELECT id FROM users WHERE email = 'zztest.keepprof@example.com'") is None)
+            ids['users'].discard(ku['id'])
+            ids['players'].discard(dp)
+
+            # Remove login frees email on player row.
+            r = client_a.post('/api/team/players', json={
+                'first_name': 'Zztestfreemail', 'last_name': 'X', 'display_name': 'Zztest FreeMail'})
+            free_pid = (r.get_json() or {}).get('id')
+            ids['players'].add(free_pid)
+            run(conn, """
+                INSERT INTO users (email, password_hash, first_name, last_name, family_name,
+                                   role, is_verified, is_approved, is_active, family_id, player_id)
+                VALUES ('zztest.freemail@example.com', %s, 'Zztestfreemail', 'X', 'Zztest Alpha',
+                        'family_member', TRUE, TRUE, TRUE, %s, %s)
+            """, (generate_password_hash(PASSWORD), fam_a['id'], free_pid))
+            run(conn, "UPDATE players SET email = 'zztest.freemail@example.com' WHERE id = %s", (free_pid,))
+            conn.commit()
+            fu = q1(conn, "SELECT id FROM users WHERE email = 'zztest.freemail@example.com'")
+            ids['users'].add(fu['id'])
+            r = client_a.post(f"/auth/admin/users/{fu['id']}/delete")
+            check('remove login succeeds', r.status_code == 200, str(r.get_json()))
+            check('remove login clears matching player email',
+                  q1(conn, 'SELECT email FROM players WHERE id = %s', (free_pid,))['email'] is None)
+            ids['users'].discard(fu['id'])
+            # Freed email can be assigned to another player via admin save.
+            r = client_a.put(f'/api/admin/player/{mail_pid}', json={
+                'first_name': 'Zztestmail', 'last_name': 'Clearme',
+                'display_name': 'Zztestmail', 'email': 'zztest.freemail@example.com'})
+            check('freed email can be assigned to another player',
+                  r.status_code == 200, str(r.get_json()))
 
     finally:
         print('\n== Cleanup: removing all Zztest data ==')

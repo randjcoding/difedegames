@@ -440,6 +440,8 @@ def admin_people_api():
                 f.name AS family_name, f.lead_user_id,
                 u.id AS user_id, u.email AS login_email, u.role AS user_role,
                 u.is_verified, u.is_approved, u.is_active, u.last_login,
+                u.created_at AS user_created_at,
+                u.phone_number,
                 u.archived_at AS user_archived_at,
                 (SELECT COUNT(DISTINCT agp.active_game_id)
                    FROM active_game_players agp
@@ -462,6 +464,26 @@ def admin_people_api():
             d['losses'] = max(games - wins, 0)
             d['is_lead'] = bool(d.get('user_id') and d.get('lead_user_id')
                                 and d['user_id'] == d['lead_user_id'])
+            if d.get('user_id'):
+                if d.get('user_archived_at') or not d.get('is_active'):
+                    d['login_status'] = 'Inactive'
+                elif not d.get('is_verified') or not d.get('is_approved'):
+                    d['login_status'] = 'Pending'
+                else:
+                    d['login_status'] = 'Active'
+            else:
+                d['login_status'] = 'None'
+            if d['is_lead']:
+                d['role_label'] = 'Team Lead'
+            elif d.get('user_id'):
+                d['role_label'] = 'Member'
+            else:
+                d['role_label'] = 'No login'
+            d['email'] = d.get('login_email') or d.get('player_email') or ''
+            created = d.get('user_created_at')
+            d['joined_at'] = created.isoformat() if created else None
+            if d.get('last_login'):
+                d['last_login'] = d['last_login'].isoformat()
             out.append(d)
         return jsonify({'people': out, 'scope': scope})
     finally:
@@ -499,9 +521,29 @@ def admin_create_family_for_player():
             email = (data.get('email') or player.get('email') or '').strip().lower()
             if not email:
                 return jsonify({'error': 'This person has no login. Provide an email to create one.'}), 400
-            existing = execute_query_one(conn, 'SELECT id FROM users WHERE lower(email) = %s', (email,))
+            taken_player = execute_query_one(conn, '''
+                SELECT id, COALESCE(display_name, first_name) AS display_name
+                FROM players
+                WHERE lower(email) = %s AND id <> %s
+                  AND email IS NOT NULL AND email <> ''
+            ''', (email, player_id))
+            if taken_player:
+                return jsonify({
+                    'error': f'That email is already on {taken_player["display_name"]}. '
+                             'Merge those two people first, then create the team.',
+                    'conflict_player_id': taken_player['id'],
+                    'suggest_merge': True,
+                }), 409
+            existing = execute_query_one(conn, '''
+                SELECT id, player_id FROM users WHERE lower(email) = %s
+            ''', (email,))
             if existing:
-                return jsonify({'error': 'That email already has a login. Merge or link it first.'}), 400
+                return jsonify({
+                    'error': 'That email already has a login. Merge or remove that login first.',
+                    'conflict_user_id': existing['id'],
+                    'conflict_player_id': existing.get('player_id'),
+                    'suggest_merge': bool(existing.get('player_id')),
+                }), 409
             from werkzeug.security import generate_password_hash
             import secrets as _secrets
             temp = data.get('temp_password') or (_secrets.token_urlsafe(10) + 'Aa1!')
@@ -1268,14 +1310,27 @@ def team_edit_player(player_id):
         if not member:
             return jsonify({'error': 'Player not found in your family'}), 404
 
-        data = request.json
+        data = request.json or {}
+        # Empty string must clear email (NULL). Never fall back to the old value.
+        if 'email' in data:
+            email = (data.get('email') or '').strip().lower() or None
+        else:
+            email = member.get('email')
+        if email:
+            taken = execute_query_one(conn, '''
+                SELECT id FROM players
+                WHERE lower(email) = %s AND id <> %s
+                  AND email IS NOT NULL AND email <> ''
+            ''', (email, player_id))
+            if taken:
+                return jsonify({'error': 'That email is already on another player profile'}), 409
         execute_modify(conn, '''
             UPDATE players SET first_name = %s, last_name = %s, display_name = %s,
                 email = %s WHERE id = %s
         ''', (data.get('first_name', member['first_name']),
               data.get('last_name', member['last_name']),
               data.get('display_name', member.get('display_name')),
-              data.get('email') or member.get('email'),
+              email,
               player_id))
         conn.commit()
         return jsonify({'message': 'Player updated'})
@@ -2868,9 +2923,15 @@ def _retire_login_account(conn, actor_user_id, user_id):
     execute_modify(conn, 'DELETE FROM users WHERE id = %s', (user_id,))
 
 
-def _merge_players_core(conn, keep_id, dup_id, actor_user_id):
+def _merge_players_core(conn, keep_id, dup_id, actor_user_id,
+                        adopt_login_from='keep', prefer_email_from='keep'):
     """Repoint all history from dup -> keep, resolve dual logins, delete dup player.
-    Caller commits and audits."""
+    adopt_login_from / prefer_email_from: 'keep' or 'dup'. Caller commits and audits."""
+    if adopt_login_from not in ('keep', 'dup'):
+        adopt_login_from = 'keep'
+    if prefer_email_from not in ('keep', 'dup'):
+        prefer_email_from = 'keep'
+
     keep = execute_query_one(conn, 'SELECT id, family_id, email FROM players WHERE id = %s', (keep_id,))
     dup = execute_query_one(conn, '''
         SELECT id, first_name, last_name, family_id, email FROM players WHERE id = %s
@@ -2946,25 +3007,56 @@ def _merge_players_core(conn, keep_id, dup_id, actor_user_id):
             VALUES (%s, %s, %s, %s, %s)
         ''', (lo, hi, link.get('status') or 'accepted', req, resp))
 
-    if keep.get('email') is None and dup.get('email'):
-        execute_modify(conn, 'UPDATE players SET email = %s WHERE id = %s', (dup['email'], keep_id))
+    # Capture emails before freeing uniqueness on the discard row.
+    # Prefer players.email; fall back to the linked login email.
+    keep_email = keep.get('email') or (keep_user.get('email') if keep_user else None)
+    dup_email = dup.get('email') or (dup_user.get('email') if dup_user else None)
+    preferred_email = keep_email if prefer_email_from == 'keep' else dup_email
+    if not preferred_email:
+        preferred_email = dup_email if prefer_email_from == 'keep' else keep_email
+    execute_modify(conn, 'UPDATE players SET email = NULL WHERE id = %s', (dup_id,))
+    if preferred_email:
+        execute_modify(conn, 'UPDATE players SET email = %s WHERE id = %s',
+                       (preferred_email, keep_id))
+    else:
+        execute_modify(conn, 'UPDATE players SET email = NULL WHERE id = %s', (keep_id,))
 
     retired_login = None
+    surviving_user_id = None
     if keep_user and dup_user:
-        # Keep the login on the kept player; retire the duplicate login.
-        execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE id = %s', (dup_user['id'],))
-        _retire_login_account(conn, actor_user_id, dup_user['id'])
-        retired_login = dup_user.get('email')
-        execute_modify(conn, '''
-            UPDATE users SET family_id = COALESCE(family_id, %s) WHERE id = %s
-        ''', (keep.get('family_id'), keep_user['id']))
+        if adopt_login_from == 'dup':
+            # Adopt discard login onto keep; retire keep's old login.
+            execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE id = %s', (keep_user['id'],))
+            execute_modify(conn, '''
+                UPDATE users SET player_id = %s, family_id = COALESCE(family_id, %s)
+                WHERE id = %s
+            ''', (keep_id, keep.get('family_id'), dup_user['id']))
+            _retire_login_account(conn, actor_user_id, keep_user['id'])
+            retired_login = keep_user.get('email')
+            surviving_user_id = dup_user['id']
+        else:
+            execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE id = %s', (dup_user['id'],))
+            _retire_login_account(conn, actor_user_id, dup_user['id'])
+            retired_login = dup_user.get('email')
+            execute_modify(conn, '''
+                UPDATE users SET family_id = COALESCE(family_id, %s) WHERE id = %s
+            ''', (keep.get('family_id'), keep_user['id']))
+            surviving_user_id = keep_user['id']
     elif dup_user and not keep_user:
         execute_modify(conn, '''
             UPDATE users SET player_id = %s, family_id = COALESCE(family_id, %s)
             WHERE id = %s
         ''', (keep_id, keep.get('family_id'), dup_user['id']))
+        surviving_user_id = dup_user['id']
+    elif keep_user:
+        surviving_user_id = keep_user['id']
+        execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (dup_id,))
     else:
         execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE player_id = %s', (dup_id,))
+
+    if surviving_user_id and preferred_email:
+        execute_modify(conn, 'UPDATE users SET email = %s WHERE id = %s',
+                       (preferred_email, surviving_user_id))
 
     execute_modify(conn, 'UPDATE invitations SET player_id = %s WHERE player_id = %s', (keep_id, dup_id))
     execute_modify(conn, 'DELETE FROM players WHERE id = %s', (dup_id,))
@@ -2977,6 +3069,9 @@ def _merge_players_core(conn, keep_id, dup_id, actor_user_id):
         'duplicate_id': dup_id,
         'duplicate_name': f"{dup.get('first_name', '')} {dup.get('last_name', '')}".strip(),
         'retired_login': retired_login,
+        'adopt_login_from': adopt_login_from,
+        'prefer_email_from': prefer_email_from,
+        'email': preferred_email,
     }
 
 
@@ -2995,7 +3090,8 @@ def merge_preview():
         def info(pid):
             p = execute_query_one(conn, '''
                 SELECT p.id, COALESCE(p.display_name, p.first_name) AS display_name,
-                    p.first_name, p.last_name, f.name AS family_name,
+                    p.first_name, p.last_name, p.email AS player_email,
+                    f.name AS family_name,
                     u.id AS user_id, u.email AS login_email
                 FROM players p
                 LEFT JOIN families f ON f.id = p.family_id
@@ -3006,6 +3102,7 @@ def merge_preview():
                 return None
             d = dict(p)
             d['history'] = _player_history_counts(conn, pid)
+            d['email'] = d.get('login_email') or d.get('player_email')
             return d
         a, b = info(keep_id), info(dup_id)
         if not a or not b:
@@ -3016,11 +3113,24 @@ def merge_preview():
                 conn, keep_id, dup_id, allow_dual_accounts=allow_dual)
         except ValueError as e:
             return jsonify({'error': str(e), 'keep': a, 'dup': b}), 400
+        # Default credential side: prefer whoever already has a login/email.
+        if a.get('user_id') and not b.get('user_id'):
+            rec_login_from = 'keep'
+        elif b.get('user_id') and not a.get('user_id'):
+            rec_login_from = 'dup'
+        elif a.get('email') and not b.get('email'):
+            rec_login_from = 'keep'
+        elif b.get('email') and not a.get('email'):
+            rec_login_from = 'dup'
+        else:
+            rec_login_from = 'keep' if rec_keep == keep_id else 'dup'
         return jsonify({
             'keep': a, 'dup': b,
             'recommended_keep_id': rec_keep,
             'recommended_dup_id': rec_dup,
             'recommended_reason': why,
+            'recommended_adopt_login_from': rec_login_from,
+            'recommended_prefer_email_from': rec_login_from,
         })
     finally:
         conn.close()
@@ -3048,28 +3158,56 @@ def merge_players():
 
         allow_dual = user.get('role') == 'super_admin'
         why = 'manual selection'
+        adopt_login_from = (data.get('adopt_login_from') or 'keep').strip().lower()
+        prefer_email_from = (data.get('prefer_email_from') or 'keep').strip().lower()
+        if adopt_login_from not in ('keep', 'dup'):
+            adopt_login_from = 'keep'
+        if prefer_email_from not in ('keep', 'dup'):
+            prefer_email_from = 'keep'
+
         if data.get('auto_keep'):
             keep_id, dup_id, why, _rows = _choose_keep_player(
                 conn, keep_id, dup_id, allow_dual_accounts=allow_dual)
+            # After auto flip, map adopt/prefer relative to the original labels
+            # only when caller did not send explicit survivor rules.
+            if not data.get('adopt_login_from') and not data.get('prefer_email_from'):
+                adopt_login_from = 'keep'
+                prefer_email_from = 'keep'
         else:
             # Still block non-admins from dual-login merges.
             _choose_keep_player(conn, keep_id, dup_id, allow_dual_accounts=allow_dual)
 
-        result = _merge_players_core(conn, keep_id, dup_id, user['id'])
+        # Non-admins cannot adopt the discard login over the keep login.
+        if not allow_dual and adopt_login_from == 'dup':
+            keep_u = execute_query_one(conn, 'SELECT id FROM users WHERE player_id = %s', (keep_id,))
+            dup_u = execute_query_one(conn, 'SELECT id FROM users WHERE player_id = %s', (dup_id,))
+            if keep_u and dup_u:
+                return jsonify({'error': 'Only a super admin can choose which login survives a dual-login merge'}), 403
+
+        result = _merge_players_core(
+            conn, keep_id, dup_id, user['id'],
+            adopt_login_from=adopt_login_from,
+            prefer_email_from=prefer_email_from,
+        )
         audit(conn, user['id'], 'players_merged', 'players', keep_id,
               old={'duplicate_id': result['duplicate_id'],
                    'duplicate_name': result['duplicate_name'],
                    'retired_login': result.get('retired_login'),
-                   'reason': why},
+                   'reason': why,
+                   'adopt_login_from': adopt_login_from,
+                   'prefer_email_from': prefer_email_from},
               new={'kept_id': keep_id})
         conn.commit()
         msg = 'Players merged. All game history is on the kept profile.'
         if result.get('retired_login'):
             msg += f" Login {result['retired_login']} was removed."
+        if result.get('email'):
+            msg += f" Email on kept profile: {result['email']}."
         if data.get('auto_keep'):
             msg += f' Kept the profile with {why}.'
         return jsonify({'success': True, 'message': msg, 'kept_id': keep_id,
-                        'retired_login': result.get('retired_login')})
+                        'retired_login': result.get('retired_login'),
+                        'email': result.get('email')})
     except ValueError as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 400
@@ -3318,12 +3456,21 @@ def send_password_invite(player_id):
             return jsonify({'error': 'A valid email address is required'}), 400
         taken_user = execute_query_one(conn, 'SELECT id, player_id FROM users WHERE lower(email) = %s', (email,))
         if taken_user and taken_user.get('player_id') and taken_user['player_id'] != player_id:
-            return jsonify({'error': 'That email already belongs to another account'}), 409
+            return jsonify({
+                'error': 'That email already belongs to another account. Merge those people first.',
+                'conflict_player_id': taken_user['player_id'],
+                'suggest_merge': True,
+            }), 409
         taken_player = execute_query_one(conn, '''
-            SELECT id FROM players WHERE lower(email) = %s AND id <> %s AND purged_at IS NULL
+            SELECT id, COALESCE(display_name, first_name) AS display_name
+            FROM players WHERE lower(email) = %s AND id <> %s AND purged_at IS NULL
         ''', (email, player_id))
         if taken_player:
-            return jsonify({'error': 'That email is already on another player profile'}), 409
+            return jsonify({
+                'error': f'That email is already on {taken_player["display_name"]}. Merge those people first.',
+                'conflict_player_id': taken_player['id'],
+                'suggest_merge': True,
+            }), 409
 
         execute_modify(conn, 'UPDATE players SET email = %s, email_verified = FALSE WHERE id = %s',
                        (email, player_id))
@@ -3395,23 +3542,48 @@ def admin_player_details(player_id):
 def admin_update_player(player_id):
     conn = get_db_connection()
     try:
-        data = request.json
+        data = request.json or {}
         player = execute_query_one(conn, 'SELECT * FROM players WHERE id = %s', (player_id,))
         if not player:
             return jsonify({'error': 'Player not found'}), 404
-        
+
         display_name = data.get('display_name') or data.get('first_name', player['first_name'])
+        # Always allow set/clear of players.email from admin people save.
+        email_provided = 'email' in data or 'player_email' in data
+        if email_provided:
+            raw = data.get('email') if 'email' in data else data.get('player_email')
+            player_email = (raw or '').strip().lower() or None
+        else:
+            player_email = player.get('email')
+
+        if player_email:
+            taken_p = execute_query_one(conn, '''
+                SELECT id, COALESCE(display_name, first_name) AS display_name
+                FROM players
+                WHERE lower(email) = %s AND id <> %s
+                  AND email IS NOT NULL AND email <> ''
+            ''', (player_email, player_id))
+            if taken_p:
+                return jsonify({
+                    'error': f'That email is already on another player ({taken_p["display_name"]}). Merge them or clear it there first.',
+                    'conflict_player_id': taken_p['id'],
+                }), 409
+
         execute_modify(conn, '''
-            UPDATE players SET first_name = %s, last_name = %s, display_name = %s
+            UPDATE players SET first_name = %s, last_name = %s, display_name = %s, email = %s
             WHERE id = %s
         ''', (data.get('first_name', player['first_name']),
               data.get('last_name', player['last_name']),
               display_name,
+              player_email,
               player_id))
+
         new_family_id = data.get('family_id')
         if new_family_id and int(new_family_id) != player['family_id']:
             set_player_home_family(conn, player_id, int(new_family_id))
-        
+
+        linked_user = execute_query_one(conn, 'SELECT id, email FROM users WHERE player_id = %s', (player_id,))
+
         if data.get('create_account') and data.get('email'):
             from werkzeug.security import generate_password_hash
             temp_password = data.get('password', 'TempPass123!')
@@ -3430,37 +3602,65 @@ def admin_update_player(player_id):
                   data.get('city', ''),
                   data.get('state', ''),
                   data.get('zipcode', ''),
-                  # super_admin can never be granted here; only the site owner
-                  # can change roles, via /auth/admin/users/<id>/set-role.
                   'family_admin',
                   data.get('family_id', player['family_id'])))
-            # users.player_id is the identity link; created_by_user_id is provenance.
             execute_modify(conn, 'UPDATE users SET player_id = %s WHERE id = %s', (player_id, new_user['id']))
             execute_modify(conn, 'UPDATE players SET created_by_user_id = %s, email = %s WHERE id = %s',
                            (new_user['id'], data['email'], player_id))
+            linked_user = {'id': new_user['id'], 'email': data['email']}
 
-        elif data.get('update_user'):
-            linked_user = execute_query_one(conn, 'SELECT id FROM users WHERE player_id = %s', (player_id,))
+        elif data.get('update_user') or (linked_user and email_provided):
+            if not linked_user:
+                linked_user = execute_query_one(conn, 'SELECT id, email FROM users WHERE player_id = %s', (player_id,))
+            user_data = dict(data.get('user_data') or {})
+            # Sync login email when admin changed the profile email field.
+            if email_provided and linked_user:
+                if player_email is None:
+                    return jsonify({
+                        'error': 'This person has a login. Clear the email by using Remove login (frees email), '
+                                 'or change the email to a different address.',
+                    }), 400
+                taken_u = execute_query_one(conn, '''
+                    SELECT id FROM users WHERE lower(email) = %s AND id <> %s
+                ''', (player_email, linked_user['id']))
+                if taken_u:
+                    return jsonify({'error': 'That email already belongs to another login account'}), 409
+                user_data['email'] = player_email
+
             user_updates = []
             user_params = []
-            
             for field in ['email', 'first_name', 'last_name', 'phone_number', 'address', 'city', 'state', 'zipcode', 'role']:
-                if field in data.get('user_data', {}):
-                    user_updates.append(f'{field} = %s')
-                    user_params.append(data['user_data'][field])
-            
-            if 'is_active' in data.get('user_data', {}):
+                if field in user_data:
+                    if field == 'email':
+                        new_e = (user_data.get('email') or '').strip().lower()
+                        if not new_e:
+                            return jsonify({
+                                'error': 'Login email cannot be blank. Use Remove login to free the address.',
+                            }), 400
+                        user_updates.append('email = %s')
+                        user_params.append(new_e)
+                    else:
+                        user_updates.append(f'{field} = %s')
+                        user_params.append(user_data[field])
+
+            if 'is_active' in user_data:
                 user_updates.append('is_active = %s')
-                user_params.append(data['user_data']['is_active'])
-            
-            if 'is_approved' in data.get('user_data', {}):
+                user_params.append(user_data['is_active'])
+            if 'is_approved' in user_data:
                 user_updates.append('is_approved = %s')
-                user_params.append(data['user_data']['is_approved'])
-            
+                user_params.append(user_data['is_approved'])
+            if 'is_verified' in user_data:
+                user_updates.append('is_verified = %s')
+                user_params.append(user_data['is_verified'])
+
             if user_updates and linked_user:
                 user_params.append(linked_user['id'])
                 execute_modify(conn, f"UPDATE users SET {', '.join(user_updates)} WHERE id = %s", user_params)
-        
+                # Keep players.email in sync when login email changes via user_data only.
+                if 'email' in user_data and not email_provided:
+                    execute_modify(conn, 'UPDATE players SET email = %s WHERE id = %s',
+                                   (user_data['email'], player_id))
+
         conn.commit()
         return jsonify({'success': True})
     except Exception as e:

@@ -1114,7 +1114,7 @@ def admin_delete_user(user_id):
         import psycopg2.extras
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            'SELECT id, email, role, first_name, last_name FROM users WHERE id = %s',
+            'SELECT id, email, role, first_name, last_name, player_id FROM users WHERE id = %s',
             (user_id,))
         target = cursor.fetchone()
         if not target:
@@ -1137,17 +1137,25 @@ def admin_delete_user(user_id):
         cursor.execute(
             'UPDATE player_release_requests SET decided_by_user_id = NULL WHERE decided_by_user_id = %s',
             (user_id,))
+        # Free the address on the player profile so it can be moved to another person.
+        if target.get('player_id') and target.get('email'):
+            cursor.execute('''
+                UPDATE players SET email = NULL
+                WHERE id = %s AND lower(COALESCE(email, '')) = lower(%s)
+            ''', (target['player_id'], target['email']))
         cursor.execute('DELETE FROM user_sessions WHERE user_id = %s', (user_id,))
         cursor.execute('DELETE FROM users WHERE id = %s', (user_id,))
         audit(conn, current_user['id'], 'account_deleted', 'users', user_id,
-              old={'email': target['email'], 'role': target['role']})
+              old={'email': target['email'], 'role': target['role'],
+                   'player_id': target.get('player_id')})
         conn.commit()
         cursor.close()
         name = f"{target['first_name']} {target['last_name']}".strip()
         return jsonify({
             'success': True,
             'message': f'{name or target["email"]} login removed. '
-                       'Their player profile and game history were kept.',
+                       'Their player profile and game history were kept. '
+                       'The email address is free to use on another person.',
         })
     except Exception as e:
         conn.rollback()

@@ -3,22 +3,61 @@
 
 {% block styles %}
 <style>
-  .aph { max-width: 1100px; }
-  .aph-card {
-    background: #fff; color: #212529; border-radius: 12px;
-    border: 1px solid var(--df-border, #dee2e6); padding: 0.85rem 1rem;
-    margin-bottom: 0.65rem;
-  }
-  .aph-name { font-weight: 700; font-size: 1.05rem; }
-  .aph-meta { font-size: 0.8rem; color: #6c757d; margin: 0.25rem 0 0.5rem; word-break: break-word; }
-  .aph-badges { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.5rem; }
-  .aph-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-  .aph-actions .btn { font-size: 0.78rem; }
-  .aph-toolbar .btn { white-space: nowrap; }
+  .aph { max-width: 1200px; }
   .aph-help {
     background: var(--df-card, #fff); color: var(--df-text-card, #212529);
     border-radius: 10px; padding: 0.75rem 1rem; margin-bottom: 1rem;
     border-left: 4px solid var(--df-accent);
+  }
+  .aph-panel {
+    background: #fff; color: #212529;
+    border: 1px solid var(--df-border, #dee2e6);
+    border-radius: 12px; padding: 0.75rem 1rem 1rem;
+  }
+  .aph-panel .dataTables_wrapper,
+  .aph-panel .dataTables_wrapper .dataTables_length,
+  .aph-panel .dataTables_wrapper .dataTables_info,
+  .aph-panel .dataTables_wrapper .dataTables_paginate,
+  .aph-panel .dataTables_wrapper label,
+  .aph-panel .dataTables_wrapper select,
+  .aph-panel table.dataTable tbody td {
+    color: #212529 !important;
+  }
+  .aph-panel table.dataTable thead th {
+    background: #343a40 !important;
+    color: #fff !important;
+    border-bottom: 2px solid var(--df-accent, #0d6efd) !important;
+  }
+  .aph-panel table.dataTable tbody tr:nth-child(odd) { background: #fff !important; }
+  .aph-panel table.dataTable tbody tr:nth-child(even) { background: #f8f9fa !important; }
+  .aph-panel table.dataTable tbody tr.aph-selected { background: #e7f1ff !important; }
+  .aph-panel table.dataTable tbody tr { cursor: pointer; }
+  .aph-panel table.dataTable tbody tr td:first-child { cursor: default; }
+  .aph-toolbar .btn { white-space: nowrap; }
+  #mergeTwoBtn:disabled { opacity: 0.55; }
+  .aph-section {
+    border: 1px solid #dee2e6; border-radius: 10px;
+    padding: 0.85rem 1rem; margin-bottom: 0.85rem;
+    background: #fff; color: #212529;
+  }
+  .aph-section h6 {
+    font-weight: 700; margin-bottom: 0.65rem; color: #212529;
+    font-size: 0.95rem;
+  }
+  .aph-section .form-label { color: #333; }
+  .aph-section .form-control,
+  .aph-section .form-select {
+    background: #fff; color: #212529;
+  }
+  .aph-modal-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .aph-merge-card {
+    border: 1px solid #dee2e6; border-radius: 10px;
+    padding: 0.75rem; background: #f8f9fa; color: #212529; height: 100%;
+  }
+  .aph-merge-card.chosen { border-color: var(--df-accent, #0d6efd); box-shadow: 0 0 0 2px rgba(13,110,253,0.2); }
+  @media (max-width: 767.98px) {
+    .aph-panel { padding: 0.5rem; }
+    .aph-panel table.dataTable { font-size: 0.8rem; }
   }
 </style>
 {% endblock %}
@@ -28,14 +67,18 @@
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
       <h2 class="page-heading mb-1"><i class="fas fa-users me-2"></i>People &amp; Accounts</h2>
-      <p class="mb-0" style="color:var(--df-muted);font-size:0.9rem;">Find anyone, merge duplicates, move teams, create logins.</p>
+      <p class="mb-0" style="color:var(--df-muted);font-size:0.9rem;">
+        Super-admin hub: edit anyone, free emails, merge same-person duplicates.
+      </p>
     </div>
     <a href="{{ url_for('main.admin') }}" class="btn btn-outline-secondary btn-sm">Back to Admin</a>
   </div>
 
   <div class="aph-help">
-    <strong>Use this when</strong> someone signed up twice, needs a new team, needs a password email, or you need to move people for them.
-    Historical game scores stay attributed to the family they played with.
+    <strong>Use this when</strong> someone signed up twice, needs a team, needs a password email, or you need to move people.
+    Click a row to administer them. Select exactly two rows to merge as the same person
+    (pick which profile and which login/email to keep). Prefer inviting a password on an existing
+    roster person instead of letting them self-register a second profile.
   </div>
 
   <div class="aph-toolbar d-flex flex-wrap gap-2 align-items-center mb-3">
@@ -43,13 +86,135 @@
       <button type="button" class="btn btn-sm btn-primary" id="scopeMine">My Team</button>
       <button type="button" class="btn btn-sm btn-outline-primary" id="scopeSite">Entire Site</button>
     </div>
-    <input type="search" id="peopleSearch" class="form-control form-control-sm" style="max-width:280px;background:#fff;color:#212529;"
-           placeholder="Search name, email, family...">
+    <input type="search" id="peopleSearch" class="form-control form-control-sm"
+           style="max-width:280px;background:#fff;color:#212529;"
+           placeholder="Filter name, email, family...">
     <button type="button" class="btn btn-sm btn-success" id="btnReload">Refresh</button>
+    <button type="button" class="btn btn-sm btn-danger" id="mergeTwoBtn" disabled>
+      Merge as same person
+    </button>
   </div>
 
   <div id="peopleStatus" class="text-muted mb-2" style="font-size:0.85rem;">Loading...</div>
-  <div id="peopleList"></div>
+
+  <div class="aph-panel">
+    <div class="table-responsive">
+      <table id="peopleTable" class="table table-striped table-hover w-100" style="color:#212529;">
+        <thead>
+          <tr>
+            <th style="width:2.2rem;"></th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Family</th>
+            <th>Role</th>
+            <th>Joined</th>
+            <th>Games</th>
+            <th>W/L</th>
+            <th>Login</th>
+            <th>Last login</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Administer person modal -->
+<div class="modal fade" id="adminPersonModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
+    <div class="modal-content" style="color:#212529;">
+      <div class="modal-header">
+        <h5 class="modal-title" id="apTitle">Administer Person</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="apId">
+        <input type="hidden" id="apUserId">
+
+        <div class="aph-section">
+          <h6>Profile</h6>
+          <div class="row g-2">
+            <div class="col-md-4">
+              <label class="form-label">First name</label>
+              <input type="text" class="form-control" id="apFirst">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Last name</label>
+              <input type="text" class="form-control" id="apLast">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Display name</label>
+              <input type="text" class="form-control" id="apDisplay">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-control" id="apEmail" placeholder="Clear to remove from profile (no login)">
+              <div class="form-text" id="apEmailHint">Clearing works when there is no login. With a login, change the address or use Remove login.</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Home family</label>
+              <select class="form-select" id="apFamily">
+                {% for f in families %}
+                <option value="{{ f.id }}">{{ f.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="mt-3">
+            <button type="button" class="btn btn-primary" id="apSave">Save changes</button>
+            <a class="btn btn-outline-info" id="apProfileLink" href="#" target="_blank">Open profile</a>
+          </div>
+        </div>
+
+        <div class="aph-section">
+          <h6>Family tools</h6>
+          <p class="small text-muted mb-2">
+            Historical scores stay with the family they played under. Home family changes going forward.
+          </p>
+          <div class="aph-modal-actions">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="apMove">Move to family</button>
+            <button type="button" class="btn btn-outline-success btn-sm" id="apCreateTeam">Create team + make lead</button>
+          </div>
+        </div>
+
+        <div class="aph-section">
+          <h6>Login &amp; password</h6>
+          <div id="apLoginNone" style="display:none;">
+            <p class="small mb-2">No login yet. Add an email above (or here), then send a password setup invite on this existing person — do not have them self-register a second profile.</p>
+            <div class="aph-modal-actions">
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="apInvite">Send password invite</button>
+            </div>
+          </div>
+          <div id="apLoginYes" style="display:none;">
+            <p class="small mb-2" id="apLoginMeta"></p>
+            <div class="aph-modal-actions">
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="apResetEmail">Email password reset</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="apForcePwd">Force set password</button>
+              <button type="button" class="btn btn-outline-success btn-sm" id="apApprove">Approve login</button>
+              <button type="button" class="btn btn-outline-success btn-sm" id="apVerify">Mark verified</button>
+              <button type="button" class="btn btn-outline-warning btn-sm" id="apDeactivate">Deactivate login</button>
+              <button type="button" class="btn btn-outline-warning btn-sm" id="apReactivate">Reactivate login</button>
+              <button type="button" class="btn btn-outline-danger btn-sm" id="apRemoveLogin">Remove login (frees email)</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="aph-section mb-0">
+          <h6>Same person / merge</h6>
+          <p class="small text-muted mb-2">
+            If this person also exists as another row, select both in the table and use Merge, or pick the other person here.
+          </p>
+          <div class="aph-modal-actions">
+            <button type="button" class="btn btn-outline-danger btn-sm" id="apMergePick">Merge with another person</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Move modal -->
@@ -61,7 +226,7 @@
       <div class="modal-body">
         <p class="mb-2" id="moveWho"></p>
         <label class="form-label">Target family</label>
-        <select class="form-select" id="moveFamily">
+        <select class="form-select" id="moveFamily" style="background:#fff;color:#212529;">
           {% for f in families %}
           <option value="{{ f.id }}">{{ f.name }}</option>
           {% endfor %}
@@ -83,12 +248,13 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <p class="mb-2" id="createWho"></p>
+        <p class="small text-muted">Creates a new team, makes this person the lead, and optionally emails a password setup link on this same profile (never a second person).</p>
         <div class="mb-3">
           <label class="form-label">New team name</label>
           <input type="text" class="form-control" id="createFamName" style="background:#fff;color:#212529;">
         </div>
-        <div class="mb-3" id="createEmailWrap" style="display:none;">
-          <label class="form-label">Email for new login</label>
+        <div class="mb-3" id="createEmailWrap">
+          <label class="form-label">Email for login (required if they have no login)</label>
           <input type="email" class="form-control" id="createEmail" style="background:#fff;color:#212529;">
         </div>
         <div class="form-check mb-2">
@@ -96,7 +262,7 @@
           <label class="form-check-label" for="createInvite">Email them a password setup link</label>
         </div>
         <label class="form-label">Also move these people onto the new team</label>
-        <div id="createMoveList" style="max-height:180px;overflow:auto;border:1px solid #dee2e6;border-radius:8px;padding:0.5rem;"></div>
+        <div id="createMoveList" style="max-height:180px;overflow:auto;border:1px solid #dee2e6;border-radius:8px;padding:0.5rem;color:#212529;"></div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -106,21 +272,71 @@
   </div>
 </div>
 
-<!-- Merge modal -->
-<div class="modal fade" id="mergePickModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
+<!-- Merge wizard -->
+<div class="modal fade" id="mergeWizardModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
     <div class="modal-content" style="color:#212529;">
-      <div class="modal-header"><h5 class="modal-title">Merge Same Person</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header">
+        <h5 class="modal-title">Merge as same person</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
       <div class="modal-body">
-        <p id="mergeKeepLabel" class="mb-2"></p>
-        <label class="form-label">Merge this duplicate into them</label>
-        <select class="form-select" id="mergeDupSelect"></select>
-        <p class="small text-muted mt-2 mb-0">The profile with more games played is kept automatically. The other login (if any) is removed. All scores stay.</p>
+        <p class="small text-muted">
+          Keep one profile (all game history). Separately choose which login/email survives on that profile.
+          Example: keep Grandpa&apos;s history, keep Michael&apos;s email/login.
+        </p>
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="aph-merge-card" id="mwCardA">
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="radio" name="mwKeep" id="mwKeepA" value="a">
+                <label class="form-check-label fw-bold" for="mwKeepA">Keep this profile</label>
+              </div>
+              <div id="mwInfoA"></div>
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="radio" name="mwCred" id="mwCredA" value="a">
+                <label class="form-check-label" for="mwCredA">Keep this login/email</label>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="aph-merge-card" id="mwCardB">
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="radio" name="mwKeep" id="mwKeepB" value="b">
+                <label class="form-check-label fw-bold" for="mwKeepB">Keep this profile</label>
+              </div>
+              <div id="mwInfoB"></div>
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="radio" name="mwCred" id="mwCredB" value="b">
+                <label class="form-check-label" for="mwCredB">Keep this login/email</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="mwPreview" class="small text-muted"></div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-danger" id="mergeConfirm">Merge</button>
+        <button type="button" class="btn btn-danger" id="mwConfirm">Merge now</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pick second person for merge from modal -->
+<div class="modal fade" id="mergePickModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="color:#212529;">
+      <div class="modal-header"><h5 class="modal-title">Pick the other person</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <p id="mergeKeepLabel" class="mb-2"></p>
+        <label class="form-label">Other profile</label>
+        <select class="form-select" id="mergeDupSelect" style="background:#fff;color:#212529;"></select>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="mergePickContinue">Continue</button>
       </div>
     </div>
   </div>
@@ -132,12 +348,47 @@
 (function() {
   var scope = 'mine';
   var people = [];
+  var peopleById = {};
+  var selected = new Set();
+  var peopleTable = null;
   var currentId = null;
+  var currentPerson = null;
+  var mwA = null;
+  var mwB = null;
   var MY_FAMILY_ID = {{ my_family_id|tojson }};
 
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return '';
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso).slice(0, 10);
+      return d.toLocaleDateString();
+    } catch (e) { return ''; }
+  }
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body || {})
+    }).then(function(r) {
+      return r.json().then(function(j) { return {ok: r.ok, status: r.status, j: j}; });
+    });
+  }
+
+  function putJson(url, body) {
+    return fetch(url, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body || {})
+    }).then(function(r) {
+      return r.json().then(function(j) { return {ok: r.ok, status: r.status, j: j}; });
+    });
   }
 
   function setScope(next) {
@@ -147,150 +398,419 @@
     loadPeople();
   }
 
+  function updateMergeBtn() {
+    document.getElementById('mergeTwoBtn').disabled = selected.size !== 2;
+  }
+
+  function syncRowHighlight() {
+    if (!peopleTable) return;
+    peopleTable.rows().every(function() {
+      var d = this.data();
+      var id = d && d._id;
+      $(this.node()).toggleClass('aph-selected', selected.has(id));
+      var cb = $(this.node()).find('.aph-check');
+      if (cb.length) cb.prop('checked', selected.has(id));
+    });
+    updateMergeBtn();
+  }
+
   function loadPeople() {
-    var q = document.getElementById('peopleSearch').value.trim();
     var url = '/api/admin/people?scope=' + encodeURIComponent(scope);
-    if (q) url += '&q=' + encodeURIComponent(q);
     document.getElementById('peopleStatus').textContent = 'Loading...';
     fetch(url).then(function(r) { return r.json(); }).then(function(data) {
       people = data.people || [];
-      document.getElementById('peopleStatus').textContent = people.length + ' people (' + (scope === 'mine' ? 'My Team' : 'Entire Site') + ')';
-      render();
+      peopleById = {};
+      people.forEach(function(p) { peopleById[p.id] = p; });
+      selected.clear();
+      updateMergeBtn();
+      document.getElementById('peopleStatus').textContent =
+        people.length + ' people (' + (scope === 'mine' ? 'My Team' : 'Entire Site') + ')';
+      renderTable();
     }).catch(function() {
       document.getElementById('peopleStatus').textContent = 'Failed to load people.';
     });
   }
 
-  function render() {
-    var root = document.getElementById('peopleList');
-    if (!people.length) {
-      root.innerHTML = '<div class="text-muted py-4 text-center">No people match this view.</div>';
-      return;
-    }
-    var html = '';
-    people.forEach(function(p) {
-      var login = p.login_email
-        ? ('Login: ' + p.login_email + (p.is_approved ? '' : ' (needs approval)'))
-        : 'No login yet';
-      html += '<div class="aph-card">'
-        + '<div class="aph-name">' + esc(p.display_name) + ' <span class="text-muted" style="font-weight:400;">' + esc(p.first_name) + ' ' + esc(p.last_name) + '</span></div>'
-        + '<div class="aph-meta">' + esc(p.family_name || 'No family') + ' · ' + esc(login)
-        + ' · ' + (p.games || 0) + ' games · ' + (p.wins || 0) + 'W / ' + (p.losses || 0) + 'L</div>'
-        + '<div class="aph-badges">'
-        + (p.is_lead ? '<span class="badge bg-dark">Team Lead</span>' : '')
-        + (p.user_role === 'super_admin' ? '<span class="badge bg-danger">Super Admin</span>' : '')
-        + (!p.user_id ? '<span class="badge bg-secondary">No account</span>' : '')
-        + (p.user_id && !p.is_active ? '<span class="badge bg-warning text-dark">Inactive login</span>' : '')
-        + '</div>'
-        + '<div class="aph-actions">'
-        + '<a class="btn btn-outline-info btn-sm" href="/player/' + p.id + '">Profile</a>'
-        + '<button type="button" class="btn btn-outline-primary btn-sm" data-act="move" data-id="' + p.id + '">Move Family</button>'
-        + '<button type="button" class="btn btn-outline-success btn-sm" data-act="create-fam" data-id="' + p.id + '">Create Team + Lead</button>'
-        + '<button type="button" class="btn btn-outline-danger btn-sm" data-act="merge" data-id="' + p.id + '">Merge Duplicate</button>'
-        + (p.user_id
-            ? '<button type="button" class="btn btn-outline-secondary btn-sm" data-act="reset" data-uid="' + p.user_id + '">Email Password Reset</button>'
-              + '<button type="button" class="btn btn-outline-secondary btn-sm" data-act="force-pwd" data-uid="' + p.user_id + '">Force Password</button>'
-            : '<button type="button" class="btn btn-outline-secondary btn-sm" data-act="invite" data-id="' + p.id + '">Send Password Invite</button>')
-        + '</div></div>';
-    });
-    root.innerHTML = html;
+  function rowData(p) {
+    return {
+      _id: p.id,
+      _raw: p,
+      check: '',
+      name: p.display_name || '',
+      legal: ((p.first_name || '') + ' ' + (p.last_name || '')).trim(),
+      email: p.email || '',
+      family: p.family_name || 'No family',
+      role: p.role_label || '',
+      joined: fmtDate(p.joined_at),
+      games: p.games || 0,
+      wl: (p.wins || 0) + ' / ' + (p.losses || 0),
+      login: p.login_status || 'None',
+      last: fmtDate(p.last_login)
+    };
   }
 
-  function personById(id) {
-    id = parseInt(id, 10);
-    for (var i = 0; i < people.length; i++) if (people[i].id === id) return people[i];
-    return null;
+  function renderTable() {
+    var rows = people.map(rowData);
+    if (peopleTable) {
+      peopleTable.clear();
+      peopleTable.rows.add(rows);
+      peopleTable.draw(false);
+      syncRowHighlight();
+      var q = document.getElementById('peopleSearch').value;
+      peopleTable.search(q).draw();
+      return;
+    }
+    peopleTable = $('#peopleTable').DataTable({
+      data: rows,
+      columns: [
+        {
+          data: 'check',
+          orderable: false,
+          searchable: false,
+          className: 'text-center',
+          render: function(_d, _t, row) {
+            return '<input type="checkbox" class="form-check-input aph-check" data-id="' + row._id + '"'
+              + (selected.has(row._id) ? ' checked' : '') + '>';
+          }
+        },
+        {
+          data: 'name',
+          render: function(d, _t, row) {
+            return '<div style="font-weight:600;">' + esc(d) + '</div>'
+              + '<div class="small text-muted">' + esc(row.legal) + '</div>';
+          }
+        },
+        { data: 'email', defaultContent: '' },
+        { data: 'family' },
+        { data: 'role' },
+        { data: 'joined' },
+        { data: 'games' },
+        { data: 'wl' },
+        { data: 'login' },
+        { data: 'last' }
+      ],
+      order: [[1, 'asc']],
+      pageLength: 25,
+      lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
+      dom: 'lrtip',
+      autoWidth: false,
+      language: { emptyTable: 'No people match this view.' }
+    });
+
+    $('#peopleTable tbody').on('click', 'tr', function(e) {
+      if ($(e.target).closest('.aph-check').length) return;
+      var d = peopleTable.row(this).data();
+      if (!d) return;
+      openAdminModal(d._id);
+    });
+
+    $('#peopleTable tbody').on('click', '.aph-check', function(e) {
+      e.stopPropagation();
+      var id = parseInt(this.getAttribute('data-id'), 10);
+      if (this.checked) selected.add(id);
+      else selected.delete(id);
+      syncRowHighlight();
+    });
   }
+
+  function openAdminModal(id) {
+    var p = peopleById[id];
+    if (!p) return;
+    currentId = id;
+    currentPerson = p;
+    document.getElementById('apId').value = String(id);
+    document.getElementById('apUserId').value = p.user_id ? String(p.user_id) : '';
+    document.getElementById('apTitle').textContent = 'Administer: ' + (p.display_name || 'Person');
+    document.getElementById('apFirst').value = p.first_name || '';
+    document.getElementById('apLast').value = p.last_name || '';
+    document.getElementById('apDisplay').value = p.display_name || '';
+    document.getElementById('apEmail').value = p.login_email || p.player_email || '';
+    if (p.family_id) document.getElementById('apFamily').value = String(p.family_id);
+    document.getElementById('apProfileLink').href = '/player/' + id;
+
+    var hasLogin = !!p.user_id;
+    document.getElementById('apLoginNone').style.display = hasLogin ? 'none' : '';
+    document.getElementById('apLoginYes').style.display = hasLogin ? '' : 'none';
+    document.getElementById('apEmailHint').textContent = hasLogin
+      ? 'This email is their login. Change it and Save, or use Remove login to free the address.'
+      : 'Clear and Save to remove the email from this profile so it can be used elsewhere.';
+
+    if (hasLogin) {
+      document.getElementById('apLoginMeta').textContent =
+        (p.login_email || '') + ' · ' + (p.role_label || '') + ' · ' + (p.login_status || '')
+        + (p.user_role === 'super_admin' ? ' · Super Admin' : '');
+      document.getElementById('apApprove').style.display = p.is_approved ? 'none' : '';
+      document.getElementById('apVerify').style.display = p.is_verified ? 'none' : '';
+      var inactive = !p.is_active || !!p.user_archived_at;
+      document.getElementById('apDeactivate').style.display = inactive ? 'none' : '';
+      document.getElementById('apReactivate').style.display = inactive ? '' : 'none';
+    }
+
+    new bootstrap.Modal(document.getElementById('adminPersonModal')).show();
+  }
+
+  function handleConflict(res, otherHintId) {
+    if (res.status === 409 && res.j && res.j.suggest_merge && res.j.conflict_player_id) {
+      AppModal.confirm(
+        'Email already in use',
+        (res.j.error || 'That email belongs to another person.') + ' Open the merge wizard for these two?',
+        function() {
+          openMergeWizard(currentId || otherHintId, res.j.conflict_player_id);
+        },
+        { confirmText: 'Open Merge', cancelText: 'Not now' }
+      );
+      return true;
+    }
+    return false;
+  }
+
+  function openMergeWizard(idA, idB) {
+    mwA = peopleById[idA];
+    mwB = peopleById[idB];
+    if (!mwA || !mwB) {
+      AppModal.error('Error', 'Both people must be visible in the current list. Switch to Entire Site and try again.');
+      return;
+    }
+    function fill(el, p) {
+      el.innerHTML =
+        '<div class="fw-bold">' + esc(p.display_name) + '</div>'
+        + '<div class="small">' + esc(p.first_name) + ' ' + esc(p.last_name) + '</div>'
+        + '<div class="small mt-1">Family: ' + esc(p.family_name || 'none') + '</div>'
+        + '<div class="small">Email: ' + esc(p.email || '(none)') + '</div>'
+        + '<div class="small">Login: ' + esc(p.login_status || 'None')
+        + (p.login_email ? ' (' + esc(p.login_email) + ')' : '') + '</div>'
+        + '<div class="small">' + (p.games || 0) + ' games · ' + (p.wins || 0) + 'W / ' + (p.losses || 0) + 'L</div>';
+    }
+    fill(document.getElementById('mwInfoA'), mwA);
+    fill(document.getElementById('mwInfoB'), mwB);
+
+    fetch('/api/admin/merge-preview?keep_id=' + mwA.id + '&dup_id=' + mwB.id)
+      .then(function(r) { return r.json(); })
+      .then(function(prev) {
+        var recKeep = prev.recommended_keep_id;
+        var recCred = prev.recommended_adopt_login_from || 'keep';
+        document.getElementById('mwKeepA').checked = recKeep === mwA.id;
+        document.getElementById('mwKeepB').checked = recKeep === mwB.id;
+        // recCred is relative to keep_id=A, dup_id=B in the preview call.
+        if (recCred === 'keep') {
+          document.getElementById('mwCredA').checked = true;
+        } else {
+          document.getElementById('mwCredB').checked = true;
+        }
+        document.getElementById('mwPreview').textContent =
+          'Suggested: keep profile with ' + (prev.recommended_reason || 'more games')
+          + '. You can override both choices below.';
+        highlightMergeCards();
+      }).catch(function() {
+        document.getElementById('mwKeepA').checked = (mwA.games || 0) >= (mwB.games || 0);
+        document.getElementById('mwKeepB').checked = !document.getElementById('mwKeepA').checked;
+        var preferB = !!(mwB.login_email || mwB.player_email) && !(mwA.login_email || mwA.player_email);
+        document.getElementById('mwCredA').checked = !preferB;
+        document.getElementById('mwCredB').checked = preferB;
+        highlightMergeCards();
+      });
+
+    var adminEl = document.getElementById('adminPersonModal');
+    var adminModal = bootstrap.Modal.getInstance(adminEl);
+    if (adminModal) adminModal.hide();
+    var pickEl = document.getElementById('mergePickModal');
+    var pickModal = bootstrap.Modal.getInstance(pickEl);
+    if (pickModal) pickModal.hide();
+    new bootstrap.Modal(document.getElementById('mergeWizardModal')).show();
+  }
+
+  function highlightMergeCards() {
+    document.getElementById('mwCardA').classList.toggle('chosen', document.getElementById('mwKeepA').checked);
+    document.getElementById('mwCardB').classList.toggle('chosen', document.getElementById('mwKeepB').checked);
+  }
+
+  document.querySelectorAll('input[name="mwKeep"]').forEach(function(r) {
+    r.addEventListener('change', highlightMergeCards);
+  });
 
   document.getElementById('scopeMine').onclick = function() { setScope('mine'); };
   document.getElementById('scopeSite').onclick = function() { setScope('site'); };
   document.getElementById('btnReload').onclick = loadPeople;
-  var searchTimer = null;
   document.getElementById('peopleSearch').addEventListener('input', function() {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(loadPeople, 250);
+    if (peopleTable) peopleTable.search(this.value).draw();
   });
 
-  document.getElementById('peopleList').addEventListener('click', function(e) {
-    var btn = e.target.closest('[data-act]');
-    if (!btn) return;
-    var act = btn.getAttribute('data-act');
-    var id = btn.getAttribute('data-id');
-    var uid = btn.getAttribute('data-uid');
-    var p = id ? personById(id) : null;
+  document.getElementById('mergeTwoBtn').onclick = function() {
+    if (selected.size !== 2) return;
+    var ids = Array.from(selected);
+    openMergeWizard(ids[0], ids[1]);
+  };
 
-    if (act === 'move' && p) {
-      currentId = p.id;
-      document.getElementById('moveWho').textContent = 'Move ' + p.display_name + ' to:';
-      if (p.family_id) document.getElementById('moveFamily').value = String(p.family_id);
-      new bootstrap.Modal(document.getElementById('moveModal')).show();
-    } else if (act === 'create-fam' && p) {
-      currentId = p.id;
-      document.getElementById('createWho').textContent = 'Create a team led by ' + p.display_name + '.';
-      document.getElementById('createFamName').value = (p.last_name || p.display_name || '') + ' Family';
-      document.getElementById('createEmailWrap').style.display = p.user_id ? 'none' : '';
-      document.getElementById('createEmail').value = p.player_email || p.login_email || '';
-      var list = document.getElementById('createMoveList');
-      list.innerHTML = people.filter(function(x) { return x.id !== p.id; }).map(function(x) {
-        return '<div class="form-check"><input class="form-check-input" type="checkbox" value="' + x.id + '" id="mv' + x.id + '">'
-          + '<label class="form-check-label" for="mv' + x.id + '">' + esc(x.display_name)
-          + ' <span class="text-muted">(' + esc(x.family_name || 'none') + ')</span></label></div>';
-      }).join('') || '<div class="text-muted small">No other people loaded in this view.</div>';
-      new bootstrap.Modal(document.getElementById('createFamModal')).show();
-    } else if (act === 'merge' && p) {
-      currentId = p.id;
-      document.getElementById('mergeKeepLabel').textContent = 'Keeping candidate: ' + p.display_name + ' (auto-picks whoever has more games).';
-      var sel = document.getElementById('mergeDupSelect');
-      sel.innerHTML = people.filter(function(x) { return x.id !== p.id; }).map(function(x) {
-        return '<option value="' + x.id + '">' + esc(x.display_name) + ' — ' + esc(x.family_name || 'no family')
-          + ' (' + (x.games || 0) + ' games)</option>';
-      }).join('');
-      new bootstrap.Modal(document.getElementById('mergePickModal')).show();
-    } else if (act === 'reset' && uid) {
-      AppModal.confirm('Email Reset', 'Send a 1-hour password reset email?', function() {
-        fetch('/auth/admin/users/' + uid + '/set-password', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ mode: 'email' })
-        }).then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
-          .then(function(res) {
-            if (res.ok) AppModal.success('Sent', res.j.message || 'Email sent.');
-            else AppModal.error('Error', res.j.error || 'Failed');
-          });
-      }, { confirmText: 'Send Email' });
-    } else if (act === 'force-pwd' && uid) {
-      var pwd = window.prompt('Emergency password (8+ chars, upper, lower, number, special):');
-      if (!pwd) return;
-      fetch('/auth/admin/users/' + uid + '/set-password', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ mode: 'set', password: pwd })
-      }).then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
-        .then(function(res) {
-          if (res.ok) AppModal.success('Updated', res.j.message || 'Password set.');
-          else AppModal.error('Error', res.j.error || 'Failed');
+  document.getElementById('apSave').onclick = function() {
+    var id = parseInt(document.getElementById('apId').value, 10);
+    var body = {
+      first_name: document.getElementById('apFirst').value.trim(),
+      last_name: document.getElementById('apLast').value.trim(),
+      display_name: document.getElementById('apDisplay').value.trim(),
+      email: document.getElementById('apEmail').value.trim(),
+      family_id: parseInt(document.getElementById('apFamily').value, 10) || null
+    };
+    putJson('/api/admin/player/' + id, body).then(function(res) {
+      if (handleConflict(res, id)) return;
+      if (res.ok) {
+        AppModal.success('Saved', 'Profile updates saved.');
+        loadPeople();
+        bootstrap.Modal.getInstance(document.getElementById('adminPersonModal')).hide();
+      } else {
+        AppModal.error('Error', res.j.error || 'Save failed');
+      }
+    });
+  };
+
+  document.getElementById('apMove').onclick = function() {
+    var p = currentPerson;
+    if (!p) return;
+    document.getElementById('moveWho').textContent = 'Move ' + p.display_name + ' to:';
+    if (p.family_id) document.getElementById('moveFamily').value = String(p.family_id);
+    new bootstrap.Modal(document.getElementById('moveModal')).show();
+  };
+
+  document.getElementById('apCreateTeam').onclick = function() {
+    var p = currentPerson;
+    if (!p) return;
+    document.getElementById('createWho').textContent = 'Create a team led by ' + p.display_name + '.';
+    document.getElementById('createFamName').value = (p.last_name || p.display_name || '') + ' Family';
+    document.getElementById('createEmailWrap').style.display = p.user_id ? 'none' : '';
+    document.getElementById('createEmail').value = p.login_email || p.player_email || document.getElementById('apEmail').value || '';
+    var list = document.getElementById('createMoveList');
+    list.innerHTML = people.filter(function(x) { return x.id !== p.id; }).map(function(x) {
+      return '<div class="form-check"><input class="form-check-input" type="checkbox" value="' + x.id + '" id="mv' + x.id + '">'
+        + '<label class="form-check-label" for="mv' + x.id + '">' + esc(x.display_name)
+        + ' <span class="text-muted">(' + esc(x.family_name || 'none') + ')</span></label></div>';
+    }).join('') || '<div class="text-muted small">No other people loaded in this view.</div>';
+    new bootstrap.Modal(document.getElementById('createFamModal')).show();
+  };
+
+  document.getElementById('apInvite').onclick = function() {
+    var p = currentPerson;
+    if (!p) return;
+    var email = document.getElementById('apEmail').value.trim();
+    AppModal.confirm('Password Invite', 'Email a set-password link to ' + (email || 'their saved email') + '?', function() {
+      postJson('/api/players/' + p.id + '/password-invite', { email: email }).then(function(res) {
+        if (handleConflict(res, p.id)) return;
+        if (res.ok) { AppModal.success('Invite Sent', res.j.message || 'Email sent.'); loadPeople(); }
+        else AppModal.error('Error', res.j.error || 'Failed');
+      });
+    }, { confirmText: 'Send Invite' });
+  };
+
+  document.getElementById('apResetEmail').onclick = function() {
+    var uid = document.getElementById('apUserId').value;
+    if (!uid) return;
+    AppModal.confirm('Email Reset', 'Send a 1-hour password reset email?', function() {
+      postJson('/auth/admin/users/' + uid + '/set-password', { mode: 'email' }).then(function(res) {
+        if (res.ok) AppModal.success('Sent', res.j.message || 'Email sent.');
+        else AppModal.error('Error', res.j.error || 'Failed');
+      });
+    }, { confirmText: 'Send Email' });
+  };
+
+  document.getElementById('apForcePwd').onclick = function() {
+    var uid = document.getElementById('apUserId').value;
+    if (!uid) return;
+    var pwd = window.prompt('Emergency password (8+ chars, upper, lower, number, special):');
+    if (!pwd) return;
+    postJson('/auth/admin/users/' + uid + '/set-password', { mode: 'set', password: pwd }).then(function(res) {
+      if (res.ok) AppModal.success('Updated', res.j.message || 'Password set.');
+      else AppModal.error('Error', res.j.error || 'Failed');
+    });
+  };
+
+  document.getElementById('apApprove').onclick = function() {
+    var uid = document.getElementById('apUserId').value;
+    if (!uid) return;
+    postJson('/auth/admin/approve-user/' + uid, {}).then(function(res) {
+      if (res.ok) { AppModal.success('Approved', 'Login approved.'); loadPeople(); openAdminModal(currentId); }
+      else AppModal.error('Error', res.j.error || 'Failed');
+    });
+  };
+
+  document.getElementById('apVerify').onclick = function() {
+    var id = currentId;
+    putJson('/api/admin/player/' + id, {
+      update_user: true,
+      user_data: { is_verified: true }
+    }).then(function(res) {
+      if (res.ok) { AppModal.success('Verified', 'Marked verified.'); loadPeople(); }
+      else AppModal.error('Error', res.j.error || 'Failed');
+    });
+  };
+
+  document.getElementById('apDeactivate').onclick = function() {
+    var uid = document.getElementById('apUserId').value;
+    if (!uid) return;
+    AppModal.confirm('Deactivate', 'Deactivate this login? They will not be able to sign in.', function() {
+      postJson('/api/users/' + uid + '/archive', {}).then(function(res) {
+        if (res.ok) { AppModal.success('Deactivated', 'Login deactivated.'); loadPeople(); }
+        else AppModal.error('Error', res.j.error || 'Failed');
+      });
+    }, { confirmText: 'Deactivate' });
+  };
+
+  document.getElementById('apReactivate').onclick = function() {
+    var uid = document.getElementById('apUserId').value;
+    if (!uid) return;
+    postJson('/api/users/' + uid + '/reinstate', {}).then(function(res) {
+      if (res.ok) { AppModal.success('Reactivated', 'Login active again.'); loadPeople(); }
+      else AppModal.error('Error', res.j.error || 'Failed');
+    });
+  };
+
+  document.getElementById('apRemoveLogin').onclick = function() {
+    var uid = document.getElementById('apUserId').value;
+    var p = currentPerson;
+    if (!uid || !p) return;
+    AppModal.confirm(
+      'Remove Login',
+      'Delete the login for ' + p.display_name + '? Game history stays. This frees the email address so you can attach it to another person.',
+      function() {
+        postJson('/auth/admin/users/' + uid + '/delete', {}).then(function(res) {
+          if (res.ok) {
+            AppModal.success('Login removed', res.j.message || 'Email is free to attach to another person.');
+            bootstrap.Modal.getInstance(document.getElementById('adminPersonModal')).hide();
+            loadPeople();
+          } else {
+            AppModal.error('Error', res.j.error || 'Failed');
+          }
         });
-    } else if (act === 'invite' && p) {
-      AppModal.confirm('Password Invite', 'Email a set-password link for ' + p.display_name + '?', function() {
-        fetch('/api/players/' + p.id + '/password-invite', { method: 'POST' })
-          .then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
-          .then(function(res) {
-            if (res.ok) AppModal.success('Invite Sent', res.j.message || 'Email sent.');
-            else AppModal.error('Error', res.j.error || 'Failed');
-          });
-      }, { confirmText: 'Send Invite' });
-    }
-  });
+      },
+      { confirmText: 'Remove Login' }
+    );
+  };
+
+  document.getElementById('apMergePick').onclick = function() {
+    var p = currentPerson;
+    if (!p) return;
+    document.getElementById('mergeKeepLabel').textContent = 'Merging with: ' + p.display_name;
+    var sel = document.getElementById('mergeDupSelect');
+    sel.innerHTML = people.filter(function(x) { return x.id !== p.id; }).map(function(x) {
+      return '<option value="' + x.id + '">' + esc(x.display_name) + ' — ' + esc(x.family_name || 'no family')
+        + ' (' + (x.games || 0) + ' games · ' + esc(x.email || 'no email') + ')</option>';
+    }).join('');
+    new bootstrap.Modal(document.getElementById('mergePickModal')).show();
+  };
+
+  document.getElementById('mergePickContinue').onclick = function() {
+    var other = parseInt(document.getElementById('mergeDupSelect').value, 10);
+    bootstrap.Modal.getInstance(document.getElementById('mergePickModal')).hide();
+    openMergeWizard(currentId, other);
+  };
 
   document.getElementById('moveConfirm').onclick = function() {
     var fam = document.getElementById('moveFamily').value;
-    fetch('/api/admin/move-player', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ player_id: currentId, target_family_id: parseInt(fam, 10) })
-    }).then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
-      .then(function(res) {
-        bootstrap.Modal.getInstance(document.getElementById('moveModal')).hide();
-        if (res.ok) { AppModal.success('Moved', 'Player moved to the selected family.'); loadPeople(); }
-        else AppModal.error('Error', res.j.error || 'Move failed');
-      });
+    postJson('/api/admin/move-player', {
+      player_id: currentId,
+      target_family_id: parseInt(fam, 10)
+    }).then(function(res) {
+      bootstrap.Modal.getInstance(document.getElementById('moveModal')).hide();
+      if (res.ok) { AppModal.success('Moved', 'Player moved.'); loadPeople(); }
+      else AppModal.error('Error', res.j.error || 'Move failed');
+    });
   };
 
   document.getElementById('createFamConfirm').onclick = function() {
@@ -306,28 +826,55 @@
       send_password_invite: document.getElementById('createInvite').checked,
       email: document.getElementById('createEmail').value.trim()
     };
-    fetch('/api/admin/create-family-for-player', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)
-    }).then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
-      .then(function(res) {
-        bootstrap.Modal.getInstance(document.getElementById('createFamModal')).hide();
-        if (res.ok) { AppModal.success('Team Created', res.j.message || 'Done.'); loadPeople(); }
-        else AppModal.error('Error', res.j.error || 'Failed');
-      });
+    postJson('/api/admin/create-family-for-player', body).then(function(res) {
+      if (handleConflict(res, currentId)) return;
+      bootstrap.Modal.getInstance(document.getElementById('createFamModal')).hide();
+      if (res.ok) { AppModal.success('Team Created', res.j.message || 'Done.'); loadPeople(); }
+      else AppModal.error('Error', res.j.error || 'Failed');
+    });
   };
 
-  document.getElementById('mergeConfirm').onclick = function() {
-    var dup = parseInt(document.getElementById('mergeDupSelect').value, 10);
-    fetch('/api/admin/merge-players', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ keep_id: currentId, dup_id: dup, auto_keep: true })
-    }).then(function(r) { return r.json().then(function(j) { return {ok:r.ok,j:j}; }); })
-      .then(function(res) {
-        bootstrap.Modal.getInstance(document.getElementById('mergePickModal')).hide();
-        if (res.ok) { AppModal.success('Merged', res.j.message || 'Merged.'); loadPeople(); }
-        else AppModal.error('Error', res.j.error || 'Merge failed');
-      });
+  document.getElementById('mwConfirm').onclick = function() {
+    if (!mwA || !mwB) return;
+    var keepIsA = document.getElementById('mwKeepA').checked;
+    var credIsA = document.getElementById('mwCredA').checked;
+    var keep_id = keepIsA ? mwA.id : mwB.id;
+    var dup_id = keepIsA ? mwB.id : mwA.id;
+    // adopt/prefer relative to keep/dup labels we send.
+    var adopt_login_from = 'keep';
+    var prefer_email_from = 'keep';
+    if (keepIsA) {
+      adopt_login_from = credIsA ? 'keep' : 'dup';
+      prefer_email_from = credIsA ? 'keep' : 'dup';
+    } else {
+      adopt_login_from = credIsA ? 'dup' : 'keep';
+      prefer_email_from = credIsA ? 'dup' : 'keep';
+    }
+    var keepName = keepIsA ? mwA.display_name : mwB.display_name;
+    var credName = credIsA ? (mwA.email || mwA.display_name) : (mwB.email || mwB.display_name);
+    AppModal.confirm(
+      'Confirm merge',
+      'Keep profile: ' + keepName + '. Keep login/email from: ' + credName + '. The other profile row will be removed. Continue?',
+      function() {
+        postJson('/api/admin/merge-players', {
+          keep_id: keep_id,
+          dup_id: dup_id,
+          auto_keep: false,
+          adopt_login_from: adopt_login_from,
+          prefer_email_from: prefer_email_from
+        }).then(function(res) {
+          bootstrap.Modal.getInstance(document.getElementById('mergeWizardModal')).hide();
+          if (res.ok) {
+            AppModal.success('Merged', res.j.message || 'Merged.');
+            selected.clear();
+            loadPeople();
+          } else {
+            AppModal.error('Error', res.j.error || 'Merge failed');
+          }
+        });
+      },
+      { confirmText: 'Merge now' }
+    );
   };
 
   setScope(MY_FAMILY_ID ? 'mine' : 'site');
