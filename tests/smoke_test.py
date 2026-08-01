@@ -457,6 +457,9 @@ def main():
         page = client_a.get('/five-crowns').get_data(as_text=True)
         check('game pages load live_game.js sync helper',
               'live_game.js' in page or 'DiFedeLiveGame' in page)
+        fc_tpl = client_a.get('/five-crowns').get_data(as_text=True)
+        check('five crowns score cells are bold',
+              'font-weight: 700' in fc_tpl or 'font-weight:700' in fc_tpl)
 
         cur = conn.cursor()
         blocked = False
