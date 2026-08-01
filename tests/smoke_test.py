@@ -1501,7 +1501,7 @@ def main():
         """, (user_a['id'], fam_a['id'], stuck_pid))
         conn.commit()
         r = client_a.post(f'/api/admin/player/{stuck_pid}/clear-email',
-                          json={'remove_login': True})
+                          json={'remove_login': False})
         check('clear-email frees stuck profile email',
               r.status_code == 200, str(r.get_json()))
         check('clear-email nulls players.email',
@@ -1511,6 +1511,40 @@ def main():
                   SELECT COUNT(*) AS n FROM invitations
                   WHERE lower(email) = 'zztest.stuckmail@example.com' AND status = 'accepted'
               """)['n'] == 0)
+
+        # Mismatched profile vs login email must surface and clear without killing login.
+        r = client_a.post('/api/team/players', json={
+            'first_name': 'Zztestmismatch', 'last_name': 'Mail',
+            'display_name': 'Zztestmismatch'})
+        mm_pid = (r.get_json() or {}).get('id')
+        ids['players'].add(mm_pid)
+        from werkzeug.security import generate_password_hash as _gph
+        run(conn, """
+            INSERT INTO users (email, password_hash, first_name, last_name, family_name,
+                               role, is_verified, is_approved, is_active, family_id, player_id)
+            VALUES ('zztest.mmlogin@example.com', %s, 'Zztestmismatch', 'Mail', 'Zztest Alpha',
+                    'family_member', TRUE, TRUE, TRUE, %s, %s)
+        """, (_gph(PASSWORD), fam_a['id'], mm_pid))
+        run(conn, "UPDATE players SET email = 'zztest.mmprofile@example.com' WHERE id = %s", (mm_pid,))
+        conn.commit()
+        mm_user = q1(conn, "SELECT id FROM users WHERE email = 'zztest.mmlogin@example.com'")
+        ids['users'].add(mm_user['id'])
+        r = client_a.get('/api/admin/people', query_string={'scope': 'site'})
+        mm_row = next((p for p in (r.get_json() or {}).get('people', []) if p['id'] == mm_pid), None)
+        check('people API flags mismatched profile vs login email',
+              mm_row and mm_row.get('email_mismatch') is True
+              and 'zztest.mmprofile@example.com' in (mm_row.get('email_display') or ''),
+              str(mm_row))
+        r = client_a.post(f'/api/admin/player/{mm_pid}/clear-email',
+                          json={'remove_login': False, 'sync_to_login': True})
+        check('sync_to_login keeps login and fixes profile email',
+              r.status_code == 200, str(r.get_json()))
+        check('login still exists after sync_to_login',
+              q1(conn, "SELECT player_id FROM users WHERE email = 'zztest.mmlogin@example.com'")['player_id']
+              == mm_pid)
+        check('profile email synced to login address',
+              q1(conn, 'SELECT email FROM players WHERE id = %s', (mm_pid,))['email']
+              == 'zztest.mmlogin@example.com')
 
         r = client_a.get('/api/admin/people', query_string={
             'scope': 'site', 'include_archived': '1'})

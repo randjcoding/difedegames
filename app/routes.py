@@ -490,9 +490,18 @@ def admin_people_api():
                 d['role_label'] = 'Member'
             else:
                 d['role_label'] = 'No login'
-            # Prefer login email, then profile email, then latest invite email.
-            d['email'] = (d.get('login_email') or d.get('player_email')
-                          or d.get('invite_email') or '')
+            login_e = (d.get('login_email') or '').strip()
+            profile_e = (d.get('player_email') or '').strip()
+            invite_e = (d.get('invite_email') or '').strip()
+            # Never hide a mismatched profile email behind the login email.
+            if login_e and profile_e and login_e.lower() != profile_e.lower():
+                d['email'] = login_e
+                d['email_mismatch'] = True
+                d['email_display'] = f'login: {login_e} | profile: {profile_e}'
+            else:
+                d['email'] = login_e or profile_e or invite_e or ''
+                d['email_mismatch'] = False
+                d['email_display'] = d['email']
             created = d.get('user_created_at')
             d['joined_at'] = created.isoformat() if created else None
             if d.get('last_login'):
@@ -510,13 +519,18 @@ def admin_people_api():
 @main.route('/api/admin/player/<int:player_id>/clear-email', methods=['POST'])
 @admin_required
 def admin_clear_player_email(player_id):
-    """Fully free an email: clear players.email, revoke invites, optionally
-    remove the linked login. Use this when an address is stuck on a profile."""
+    """Clear stuck profile email(s) without touching the login by default.
+
+    Always nulls players.email and revokes invites for that profile address.
+    Pass remove_login=true to also delete the linked login (frees login email).
+    Pass sync_to_login=true to set players.email = users.email instead of null
+    (useful when profile email drifted from the real login)."""
     conn = get_db_connection()
     admin = get_current_user()
     try:
         data = request.get_json(silent=True) or {}
-        remove_login = bool(data.get('remove_login', True))
+        remove_login = bool(data.get('remove_login', False))
+        sync_to_login = bool(data.get('sync_to_login', False))
         player = execute_query_one(conn, '''
             SELECT * FROM players WHERE id = %s AND purged_at IS NULL
         ''', (player_id,))
@@ -524,51 +538,73 @@ def admin_clear_player_email(player_id):
             return jsonify({'error': 'Player not found'}), 404
 
         linked = execute_query_one(conn, 'SELECT id, email FROM users WHERE player_id = %s', (player_id,))
+        old_profile = (player.get('email') or '').strip().lower() or None
+        login_email = (linked.get('email') or '').strip().lower() if linked else None
+
+        # Emails we are freeing from the profile / invite side (not the login
+        # unless remove_login is set).
         emails = set()
-        if player.get('email'):
-            emails.add(player['email'].strip().lower())
-        if linked and linked.get('email'):
-            emails.add(linked['email'].strip().lower())
-        for e in list(emails):
-            inv = execute_query(conn, '''
-                SELECT email FROM invitations WHERE player_id = %s OR lower(email) = %s
-            ''', (player_id, e))
-            for row in inv or []:
-                if row.get('email'):
-                    emails.add(row['email'].strip().lower())
+        if old_profile:
+            emails.add(old_profile)
+        inv_rows = execute_query(conn, '''
+            SELECT email FROM invitations
+            WHERE player_id = %s AND status IN ('sent', 'accepted')
+        ''', (player_id,))
+        for row in inv_rows or []:
+            if row.get('email'):
+                emails.add(row['email'].strip().lower())
 
         if linked and remove_login:
             if linked['id'] == admin['id']:
                 return jsonify({'error': 'You cannot remove your own login from here'}), 400
+            if login_email:
+                emails.add(login_email)
             execute_modify(conn, 'UPDATE users SET player_id = NULL WHERE id = %s', (linked['id'],))
             _retire_login_account(conn, admin['id'], linked['id'])
-        elif linked and not remove_login:
-            return jsonify({
-                'error': 'This person still has a login. Pass remove_login=true, or use Remove login first.',
-            }), 400
+            linked = None
+            login_email = None
 
-        execute_modify(conn, '''
-            UPDATE players SET email = NULL, email_verified = FALSE WHERE id = %s
-        ''', (player_id,))
-        for e in emails:
+        if sync_to_login and login_email and not remove_login:
+            execute_modify(conn, '''
+                UPDATE players SET email = %s, email_verified = TRUE WHERE id = %s
+            ''', (login_email, player_id))
+            # Still revoke invites for the OLD mismatched profile email.
+            for e in emails:
+                if e != login_email:
+                    execute_modify(conn, '''
+                        UPDATE invitations SET status = 'revoked'
+                        WHERE lower(email) = %s AND status IN ('sent', 'accepted')
+                    ''', (e,))
+            msg = (f'Profile email was {old_profile or "(none)"}; synced to login '
+                   f'{login_email}. Old address is free.')
+        else:
+            execute_modify(conn, '''
+                UPDATE players SET email = NULL, email_verified = FALSE WHERE id = %s
+            ''', (player_id,))
+            for e in emails:
+                execute_modify(conn, '''
+                    UPDATE invitations SET status = 'revoked'
+                    WHERE lower(email) = %s AND status IN ('sent', 'accepted')
+                ''', (e,))
             execute_modify(conn, '''
                 UPDATE invitations SET status = 'revoked'
-                WHERE lower(email) = %s AND status IN ('sent', 'accepted')
-            ''', (e,))
-        execute_modify(conn, '''
-            UPDATE invitations SET status = 'revoked'
-            WHERE player_id = %s AND status IN ('sent', 'accepted')
-        ''', (player_id,))
+                WHERE player_id = %s AND status IN ('sent', 'accepted')
+            ''', (player_id,))
+            msg = 'Profile email cleared'
+            if remove_login:
+                msg += ' and login removed'
+            msg += '. Address is free to use elsewhere.'
 
         audit(conn, admin['id'], 'player_email_cleared', 'players', player_id,
-              old={'emails': sorted(emails), 'removed_login': bool(linked and remove_login)})
+              old={'profile_email': old_profile, 'login_email': login_email,
+                   'emails': sorted(emails), 'removed_login': remove_login,
+                   'sync_to_login': sync_to_login})
         conn.commit()
         return jsonify({
             'success': True,
-            'message': 'Email cleared from this person'
-                       + (' and login removed' if linked and remove_login else '')
-                       + '. Address is free to use elsewhere.',
+            'message': msg,
             'cleared_emails': sorted(emails),
+            'login_kept': bool(login_email) and not remove_login,
         })
     except Exception as e:
         conn.rollback()

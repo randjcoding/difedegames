@@ -74,7 +74,8 @@
   .aph-merge-card.chosen { border-color: var(--df-accent, #0d6efd); box-shadow: 0 0 0 2px rgba(13,110,253,0.2); }
   .aph-fullname-col { font-weight: 600; white-space: nowrap; }
   .aph-display-col { color: #495057; white-space: nowrap; }
-  .aph-email-col { word-break: break-all; }
+  .aph-email-col { word-break: break-word; max-width: 280px; }
+  .aph-email-mismatch { color: #9a3412; font-weight: 600; }
   @media (max-width: 767.98px) {
     .aph-panel { padding: 0.5rem; }
     .aph-panel table.dataTable { font-size: 0.8rem; }
@@ -189,7 +190,8 @@
           </div>
           <div class="mt-3 aph-modal-actions">
             <button type="button" class="btn btn-primary" id="apSave">Save changes</button>
-            <button type="button" class="btn btn-outline-warning" id="apClearEmail">Clear email from system</button>
+            <button type="button" class="btn btn-outline-warning" id="apClearEmail">Clear profile email</button>
+            <button type="button" class="btn btn-outline-secondary" id="apSyncEmail" style="display:none;">Sync profile email to login</button>
             <a class="btn btn-outline-info" id="apProfileLink" href="#" target="_blank">Open profile</a>
           </div>
         </div>
@@ -476,7 +478,13 @@
   }
 
   function personEmail(p) {
-    return p.login_email || p.player_email || p.invite_email || p.email || '';
+    return p.email_display || p.login_email || p.player_email || p.invite_email || p.email || '';
+  }
+
+  function emailsDiffer(p) {
+    var a = (p.login_email || '').toLowerCase();
+    var b = (p.player_email || '').toLowerCase();
+    return !!(a && b && a !== b);
   }
 
   function rowData(p) {
@@ -487,6 +495,7 @@
       full_name: ((p.first_name || '') + ' ' + (p.last_name || '')).trim(),
       display_name: p.display_name || '',
       email: personEmail(p),
+      email_mismatch: !!p.email_mismatch || emailsDiffer(p),
       family: p.family_name || 'No family',
       role: p.role_label || '',
       joined: fmtDate(p.joined_at),
@@ -540,8 +549,10 @@
           data: 'email',
           className: 'aph-email-col',
           defaultContent: '',
-          render: function(d) {
-            return d ? esc(d) : '<span class="text-muted">(none)</span>';
+          render: function(d, _t, row) {
+            if (!d) return '<span class="text-muted">(none)</span>';
+            var cls = row.email_mismatch ? 'aph-email-mismatch' : '';
+            return '<span class="' + cls + '">' + esc(d) + '</span>';
           }
         },
         { data: 'family' },
@@ -668,7 +679,8 @@
     document.getElementById('apFirst').value = p.first_name || '';
     document.getElementById('apLast').value = p.last_name || '';
     document.getElementById('apDisplay').value = p.display_name || '';
-    document.getElementById('apEmail').value = personEmail(p);
+    // Prefer editing the profile email field (can differ from login).
+    document.getElementById('apEmail').value = p.player_email || p.login_email || '';
     if (p.family_id) document.getElementById('apFamily').value = String(p.family_id);
     document.getElementById('apProfileLink').href = '/player/' + id;
 
@@ -676,14 +688,20 @@
     parts.push('Profile email: ' + (p.player_email || '(none)'));
     parts.push('Login email: ' + (p.login_email || '(no login)'));
     if (p.invite_email) parts.push('Invite email: ' + p.invite_email);
+    if (emailsDiffer(p)) {
+      parts.push('MISMATCH — profile email is hidden leftovers; clear or sync it');
+    }
     document.getElementById('apEmailBreakdown').textContent = parts.join(' · ');
 
     var hasLogin = !!p.user_id;
     document.getElementById('apLoginNone').style.display = hasLogin ? 'none' : '';
     document.getElementById('apLoginYes').style.display = hasLogin ? '' : 'none';
-    document.getElementById('apEmailHint').textContent = hasLogin
-      ? 'Change and Save, or use Clear email from system / Remove login to free the address.'
-      : 'Use Clear email from system to wipe profile email and any invites so the address is free.';
+    document.getElementById('apSyncEmail').style.display = emailsDiffer(p) ? '' : 'none';
+    document.getElementById('apEmailHint').textContent = emailsDiffer(p)
+      ? 'Profile email and login email are different. Clear profile email (keeps login) or Sync to login.'
+      : (hasLogin
+        ? 'Login email is the real sign-in address. Clear profile email if a leftover address is stuck.'
+        : 'Clear profile email to free the address for someone else.');
 
     document.getElementById('apReinstatePerson').style.display = p.is_archived ? '' : 'none';
     document.getElementById('apDeletePerson').style.display = p.is_archived ? 'none' : '';
@@ -795,17 +813,18 @@
   document.getElementById('apClearEmail').onclick = function() {
     var p = currentPerson;
     if (!p) return;
-    var shown = personEmail(p) || '(stored addresses on this person)';
+    var shown = p.player_email || p.invite_email || '(profile email)';
     AppModal.confirm(
-      'Clear email from system',
-      'Remove ' + shown + ' from this profile, revoke related invites'
-        + (p.user_id ? ', and remove their login' : '')
-        + '? The address will be free to assign elsewhere.',
+      'Clear profile email',
+      'Clear profile email ' + shown + ' and revoke related invites? '
+        + (p.login_email
+          ? 'Their login (' + p.login_email + ') stays active.'
+          : 'They have no login.'),
       function() {
-        postJson('/api/admin/player/' + p.id + '/clear-email', { remove_login: true })
+        postJson('/api/admin/player/' + p.id + '/clear-email', { remove_login: false })
           .then(function(res) {
             if (res.ok) {
-              AppModal.success('Cleared', res.j.message || 'Email cleared.');
+              AppModal.success('Cleared', res.j.message || 'Profile email cleared.');
               bootstrap.Modal.getInstance(document.getElementById('adminPersonModal')).hide();
               loadPeople();
             } else {
@@ -813,7 +832,32 @@
             }
           });
       },
-      { confirmText: 'Clear email' }
+      { confirmText: 'Clear profile email' }
+    );
+  };
+
+  document.getElementById('apSyncEmail').onclick = function() {
+    var p = currentPerson;
+    if (!p || !p.login_email) return;
+    AppModal.confirm(
+      'Sync profile email to login',
+      'Set profile email to ' + p.login_email + ' and free the old profile address '
+        + (p.player_email || '') + '?',
+      function() {
+        postJson('/api/admin/player/' + p.id + '/clear-email', {
+          remove_login: false,
+          sync_to_login: true
+        }).then(function(res) {
+          if (res.ok) {
+            AppModal.success('Synced', res.j.message || 'Profile email synced.');
+            bootstrap.Modal.getInstance(document.getElementById('adminPersonModal')).hide();
+            loadPeople();
+          } else {
+            AppModal.error('Error', res.j.error || 'Could not sync email.');
+          }
+        });
+      },
+      { confirmText: 'Sync to login' }
     );
   };
 
