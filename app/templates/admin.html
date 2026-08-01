@@ -36,13 +36,15 @@
     </div>
 
     <div class="col-md-6 col-lg-4">
-      <div class="admin-widget" onclick="openFamilyManagement()" role="button" tabindex="0">
-        <div class="widget-icon-wrap"><i class="fas fa-house-user"></i></div>
-        <div class="widget-stat" id="familyCountStat">{{ family_count }}</div>
-        <div class="widget-title">Families / Teams</div>
-        <div class="widget-desc"><strong>Use when:</strong> you need a family roster overview or bulk-move several people between existing teams.</div>
-        <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
-      </div>
+      <a href="{{ url_for('main.admin_teams') }}" class="text-decoration-none">
+        <div class="admin-widget">
+          <div class="widget-icon-wrap"><i class="fas fa-house-user"></i></div>
+          <div class="widget-stat" id="familyCountStat">{{ family_count }}</div>
+          <div class="widget-title">Teams &amp; Families</div>
+          <div class="widget-desc"><strong>Use when:</strong> you need who leads a team, the full roster, invites, crew alliances, or to archive/reinstate a team.</div>
+          <div class="widget-action">Open <i class="fas fa-arrow-right ms-1"></i></div>
+        </div>
+      </a>
     </div>
 
     <div class="col-md-6 col-lg-4">

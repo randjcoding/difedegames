@@ -409,6 +409,420 @@ def admin_people():
         conn.close()
 
 
+@main.route('/admin/teams')
+@admin_required
+def admin_teams():
+    """Super-admin Teams Hub: leads, rosters, invites, crew, archive."""
+    return render_template('admin_teams.html')
+
+
+@main.route('/api/admin/families')
+@admin_required
+def admin_families_api():
+    """List all teams with lead, roster counts, games, pending, and crew."""
+    conn = get_db_connection()
+    try:
+        include_archived = (request.args.get('include_archived') or '').lower() in (
+            '1', 'true', 'yes')
+        q = (request.args.get('q') or '').strip()
+        where = ['TRUE']
+        params = []
+        if not include_archived:
+            where.append('f.archived_at IS NULL')
+        if q:
+            where.append('''(
+                f.name ILIKE %s OR COALESCE(f.slug, '') ILIKE %s
+                OR COALESCE(lp.display_name, lp.first_name, '') ILIKE %s
+                OR COALESCE(lu.email, '') ILIKE %s
+            )''')
+            like = f'%{q}%'
+            params.extend([like, like, like, like])
+        rows = execute_query(conn, f'''
+            SELECT f.id, f.name, f.slug, f.lead_user_id, f.created_at,
+                f.archived_at, f.is_discoverable, f.show_roster,
+                lu.email AS lead_email,
+                COALESCE(lp.display_name, lp.first_name) AS lead_display_name,
+                lp.id AS lead_player_id,
+                (SELECT COUNT(*) FROM player_family_memberships m
+                   JOIN players p ON p.id = m.player_id
+                  WHERE m.family_id = f.id AND m.status = 'active'
+                    AND p.archived_at IS NULL AND p.purged_at IS NULL) AS member_count,
+                (SELECT COUNT(*) FROM player_family_memberships m
+                   JOIN players p ON p.id = m.player_id
+                  WHERE m.family_id = f.id AND m.status = 'active' AND m.is_primary
+                    AND p.archived_at IS NULL AND p.purged_at IS NULL) AS home_member_count,
+                (SELECT COUNT(*) FROM users u
+                  WHERE u.family_id = f.id AND u.archived_at IS NULL) AS login_count,
+                (SELECT COUNT(*) FROM active_games ag
+                  WHERE ag.family_id = f.id AND ag.is_complete = TRUE) AS games_complete,
+                (SELECT COUNT(*) FROM active_games ag
+                  WHERE ag.family_id = f.id AND ag.is_complete = FALSE) AS games_open,
+                (SELECT COUNT(*) FROM player_family_memberships m
+                  WHERE m.family_id = f.id AND m.status IN ('invited', 'requested')) AS pending_memberships,
+                (SELECT COUNT(*) FROM invitations i
+                  WHERE i.family_id = f.id AND i.status = 'sent') AS pending_invites,
+                (SELECT COUNT(*) FROM family_alliances fa
+                  WHERE fa.status = 'accepted'
+                    AND (fa.requesting_family_id = f.id OR fa.target_family_id = f.id)) AS crew_count
+            FROM families f
+            LEFT JOIN users lu ON lu.id = f.lead_user_id
+            LEFT JOIN players lp ON lp.id = lu.player_id
+            WHERE {' AND '.join(where)}
+            ORDER BY (f.archived_at IS NOT NULL), f.name
+            LIMIT 500
+        ''', tuple(params) if params else None)
+        out = []
+        for r in rows:
+            d = dict(r)
+            d['is_archived'] = bool(d.get('archived_at'))
+            d['has_lead'] = bool(d.get('lead_user_id'))
+            if d.get('created_at'):
+                d['created_at'] = d['created_at'].isoformat()
+            if d.get('archived_at'):
+                d['archived_at'] = d['archived_at'].isoformat()
+            out.append(d)
+        return jsonify({
+            'families': out,
+            'include_archived': include_archived,
+        })
+    finally:
+        conn.close()
+
+
+@main.route('/api/admin/families/<int:family_id>')
+@admin_required
+def admin_family_detail(family_id):
+    """Full team dossier for super admin: members, pending, invites, crew."""
+    conn = get_db_connection()
+    try:
+        family = execute_query_one(conn, '''
+            SELECT f.id, f.name, f.slug, f.lead_user_id, f.created_at, f.updated_at,
+                f.archived_at, f.is_discoverable, f.show_roster, f.created_by_user_id,
+                lu.email AS lead_email, lu.id AS lead_user_id_check,
+                COALESCE(lp.display_name, lp.first_name) AS lead_display_name,
+                lp.id AS lead_player_id,
+                cb.email AS created_by_email,
+                COALESCE(cbp.display_name, cb.first_name) AS created_by_name
+            FROM families f
+            LEFT JOIN users lu ON lu.id = f.lead_user_id
+            LEFT JOIN players lp ON lp.id = lu.player_id
+            LEFT JOIN users cb ON cb.id = f.created_by_user_id
+            LEFT JOIN players cbp ON cbp.id = cb.player_id
+            WHERE f.id = %s
+        ''', (family_id,))
+        if not family:
+            return jsonify({'error': 'Family not found'}), 404
+
+        members = list(execute_query(conn, '''
+            SELECT p.id, p.first_name, p.last_name,
+                COALESCE(p.display_name, p.first_name) AS display_name,
+                p.email AS player_email, p.is_minor,
+                p.archived_at AS player_archived_at,
+                m.is_primary AS is_home, m.role AS membership_role, m.status AS membership_status,
+                m.joined_at AS membership_joined_at,
+                hf.id AS home_family_id, hf.name AS home_family_name,
+                u.id AS user_id, u.email AS login_email, u.role AS user_role,
+                u.is_verified, u.is_approved, u.is_active, u.last_login,
+                (SELECT COUNT(DISTINCT agp.active_game_id)
+                   FROM active_game_players agp
+                   JOIN active_games ag ON ag.id = agp.active_game_id
+                  WHERE agp.player_id = p.id AND ag.is_complete = TRUE) AS games,
+                (SELECT COUNT(*) FROM game_stats gs WHERE gs.winner_id = p.id) AS wins
+            FROM player_family_memberships m
+            JOIN players p ON p.id = m.player_id
+            LEFT JOIN families hf ON hf.id = p.family_id
+            LEFT JOIN users u ON u.player_id = p.id
+            WHERE m.family_id = %s AND p.purged_at IS NULL
+              AND m.status = 'active'
+            ORDER BY (m.role = 'lead') DESC, m.is_primary DESC, p.first_name, p.last_name
+        ''', (family_id,)))
+
+        pending = list(execute_query(conn, '''
+            SELECT m.id AS membership_id, m.status, m.joined_at,
+                p.id AS player_id,
+                COALESCE(p.display_name, p.first_name) AS display_name,
+                p.email AS player_email,
+                hf.name AS home_family_name,
+                u.email AS login_email
+            FROM player_family_memberships m
+            JOIN players p ON p.id = m.player_id
+            LEFT JOIN families hf ON hf.id = p.family_id
+            LEFT JOIN users u ON u.player_id = p.id
+            WHERE m.family_id = %s AND m.status IN ('invited', 'requested')
+              AND p.purged_at IS NULL
+            ORDER BY m.joined_at DESC NULLS LAST
+        ''', (family_id,)))
+
+        invites = list(execute_query(conn, '''
+            SELECT i.id, i.email, i.invite_type, i.status, i.created_at, i.expires_at,
+                i.player_id,
+                COALESCE(p.display_name, p.first_name) AS player_display_name
+            FROM invitations i
+            LEFT JOIN players p ON p.id = i.player_id
+            WHERE i.family_id = %s AND i.status IN ('sent', 'accepted')
+            ORDER BY i.created_at DESC
+            LIMIT 50
+        ''', (family_id,)))
+
+        alliances = list(execute_query(conn, '''
+            SELECT fa.id, fa.status, fa.created_at,
+                CASE WHEN fa.requesting_family_id = %s THEN tf.name ELSE rf.name END AS ally_name,
+                CASE WHEN fa.requesting_family_id = %s THEN fa.target_family_id
+                     ELSE fa.requesting_family_id END AS ally_id,
+                CASE WHEN fa.requesting_family_id = %s THEN 'outgoing' ELSE 'incoming' END AS direction
+            FROM family_alliances fa
+            JOIN families rf ON fa.requesting_family_id = rf.id
+            JOIN families tf ON fa.target_family_id = tf.id
+            WHERE fa.requesting_family_id = %s OR fa.target_family_id = %s
+            ORDER BY (fa.status = 'accepted') DESC, fa.created_at DESC
+        ''', (family_id, family_id, family_id, family_id, family_id)))
+
+        games_complete = execute_query_one(conn, '''
+            SELECT COUNT(*) AS n FROM active_games
+            WHERE family_id = %s AND is_complete = TRUE
+        ''', (family_id,))['n']
+        games_open = execute_query_one(conn, '''
+            SELECT COUNT(*) AS n FROM active_games
+            WHERE family_id = %s AND is_complete = FALSE
+        ''', (family_id,))['n']
+
+        member_out = []
+        for r in members:
+            d = dict(r)
+            games = int(d.get('games') or 0)
+            wins = int(d.get('wins') or 0)
+            d['losses'] = max(games - wins, 0)
+            d['is_lead'] = bool(d.get('user_id') and family.get('lead_user_id')
+                                and d['user_id'] == family['lead_user_id'])
+            if d.get('user_id'):
+                if not d.get('is_active'):
+                    d['login_status'] = 'Inactive'
+                elif not d.get('is_verified') or not d.get('is_approved'):
+                    d['login_status'] = 'Pending'
+                else:
+                    d['login_status'] = 'Active'
+            else:
+                d['login_status'] = 'None'
+            if d['is_lead']:
+                d['role_label'] = 'Team Lead'
+            elif d.get('membership_role') == 'lead':
+                d['role_label'] = 'Lead (membership)'
+            elif d.get('is_home'):
+                d['role_label'] = 'Home member'
+            else:
+                d['role_label'] = 'Guest member'
+            login_e = (d.get('login_email') or '').strip()
+            profile_e = (d.get('player_email') or '').strip()
+            d['email'] = login_e or profile_e or ''
+            if d.get('last_login'):
+                d['last_login'] = d['last_login'].isoformat()
+            if d.get('membership_joined_at'):
+                d['membership_joined_at'] = d['membership_joined_at'].isoformat()
+            if d.get('player_archived_at'):
+                d['player_archived_at'] = d['player_archived_at'].isoformat()
+            member_out.append(d)
+
+        def _iso_rows(rows):
+            out = []
+            for r in rows:
+                d = dict(r)
+                for k, v in list(d.items()):
+                    if hasattr(v, 'isoformat'):
+                        d[k] = v.isoformat()
+                out.append(d)
+            return out
+
+        fam = dict(family)
+        for k in ('created_at', 'updated_at', 'archived_at'):
+            if fam.get(k) and hasattr(fam[k], 'isoformat'):
+                fam[k] = fam[k].isoformat()
+        fam['is_archived'] = bool(family.get('archived_at'))
+        fam['has_lead'] = bool(family.get('lead_user_id'))
+        fam['games_complete'] = games_complete
+        fam['games_open'] = games_open
+
+        # Other active teams for move dropdowns.
+        other_families = list(execute_query(conn, '''
+            SELECT id, name FROM families
+            WHERE archived_at IS NULL AND id <> %s
+            ORDER BY name
+        ''', (family_id,)))
+
+        return jsonify({
+            'family': fam,
+            'members': member_out,
+            'pending': _iso_rows(pending),
+            'invites': _iso_rows(invites),
+            'alliances': _iso_rows(alliances),
+            'other_families': [dict(f) for f in other_families],
+        })
+    finally:
+        conn.close()
+
+
+@main.route('/api/admin/families', methods=['POST'])
+@admin_required
+def admin_create_family():
+    """Create a team. Optional lead_player_id makes that person lead (creates login
+    from email if needed). Without a lead, creates an empty orphan team."""
+    conn = get_db_connection()
+    admin = get_current_user()
+    try:
+        from werkzeug.security import generate_password_hash
+        import secrets as _secrets
+        from app.auth import create_action_token
+        from app.email_utils import send_set_password_email
+
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify({'error': 'Team name is required'}), 400
+
+        lead_player_id = data.get('lead_player_id')
+        player = None
+        lead_user = None
+        new_login_email = None
+        if lead_player_id:
+            lead_player_id = int(lead_player_id)
+            player = execute_query_one(conn, '''
+                SELECT * FROM players WHERE id = %s AND purged_at IS NULL AND archived_at IS NULL
+            ''', (lead_player_id,))
+            if not player:
+                return jsonify({'error': 'Lead player not found'}), 404
+            lead_user = execute_query_one(conn, 'SELECT * FROM users WHERE player_id = %s',
+                                         (lead_player_id,))
+            if not lead_user:
+                new_login_email = (data.get('email') or player.get('email') or '').strip().lower()
+                if not new_login_email or '@' not in new_login_email:
+                    return jsonify({
+                        'error': 'Lead has no login. Provide an email to create one.',
+                    }), 400
+                taken = execute_query_one(conn, '''
+                    SELECT id FROM users WHERE lower(email) = %s
+                ''', (new_login_email,))
+                if taken:
+                    return jsonify({'error': 'That email already has a login.'}), 409
+
+        fam = execute_query_one(conn, '''
+            INSERT INTO families (name, slug, lead_user_id, created_by_user_id,
+                is_discoverable, show_roster)
+            VALUES (%s, %s, NULL, %s, %s, %s)
+            RETURNING id, name
+        ''', (name, unique_family_slug(conn, name), admin['id'],
+              bool(data.get('is_discoverable', True)),
+              bool(data.get('show_roster', True))))
+        family_id = fam['id']
+        created_login = False
+        invite_sent = False
+        lead_user_id = None
+
+        if lead_player_id and player:
+            set_player_home_family(conn, lead_player_id, family_id)
+            if not lead_user:
+                temp = _secrets.token_urlsafe(10) + 'Aa1!'
+                lead_user = execute_query_one(conn, '''
+                    INSERT INTO users (email, password_hash, first_name, last_name, family_name,
+                        role, is_verified, is_approved, is_active, family_id, player_id)
+                    VALUES (%s, %s, %s, %s, %s, 'family_admin', TRUE, TRUE, TRUE, %s, %s)
+                    RETURNING *
+                ''', (new_login_email, generate_password_hash(temp),
+                      player['first_name'], player['last_name'], name,
+                      family_id, lead_player_id))
+                created_login = True
+                execute_modify(conn, 'UPDATE players SET email = COALESCE(email, %s) WHERE id = %s',
+                               (new_login_email, lead_player_id))
+            execute_modify(conn, '''
+                UPDATE player_family_memberships SET role = 'lead', status = 'active'
+                WHERE player_id = %s AND family_id = %s
+            ''', (lead_player_id, family_id))
+            execute_modify(conn, 'UPDATE families SET lead_user_id = %s WHERE id = %s',
+                           (lead_user['id'], family_id))
+            execute_modify(conn, '''
+                UPDATE users SET family_id = %s,
+                    role = CASE WHEN role = 'super_admin' THEN role ELSE 'family_admin' END
+                WHERE id = %s
+            ''', (family_id, lead_user['id']))
+            lead_user_id = lead_user['id']
+            if data.get('send_password_invite') and created_login:
+                token = create_action_token(
+                    'set_password', player_id=lead_player_id, user_id=lead_user['id'],
+                    family_id=family_id, ttl_hours=168)
+                if token:
+                    invite_sent = send_set_password_email(
+                        lead_user['email'],
+                        player.get('display_name') or player['first_name'],
+                        name,
+                        f"{admin.get('first_name', '')} {admin.get('last_name', '')}".strip() or 'Admin',
+                        f"{APP_BASE_URL}/auth/set-password/{token}",
+                    )
+
+        audit(conn, admin['id'], 'family_created_admin', 'families', family_id,
+              new={'name': name, 'lead_player_id': lead_player_id,
+                   'lead_user_id': lead_user_id, 'created_login': created_login})
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'family_id': family_id,
+            'family_name': fam['name'],
+            'lead_user_id': lead_user_id,
+            'created_login': created_login,
+            'invite_sent': invite_sent,
+            'message': f'Created {fam["name"]}'
+                       + (' and assigned lead' if lead_user_id else ' (no lead yet)')
+                       + ('. Password email sent.' if invite_sent else '.'),
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@main.route('/api/admin/families/<int:family_id>', methods=['PUT'])
+@admin_required
+def admin_update_family(family_id):
+    """Update team name / discoverability / roster visibility."""
+    conn = get_db_connection()
+    admin = get_current_user()
+    try:
+        data = request.get_json(silent=True) or {}
+        family = execute_query_one(conn, 'SELECT * FROM families WHERE id = %s', (family_id,))
+        if not family:
+            return jsonify({'error': 'Family not found'}), 404
+        name = data.get('name')
+        updates = []
+        params = []
+        if name is not None:
+            name = name.strip()
+            if not name:
+                return jsonify({'error': 'Team name cannot be empty'}), 400
+            updates.append('name = %s')
+            params.append(name)
+        if 'is_discoverable' in data:
+            updates.append('is_discoverable = %s')
+            params.append(bool(data.get('is_discoverable')))
+        if 'show_roster' in data:
+            updates.append('show_roster = %s')
+            params.append(bool(data.get('show_roster')))
+        if not updates:
+            return jsonify({'error': 'No changes'}), 400
+        updates.append('updated_at = CURRENT_TIMESTAMP')
+        params.append(family_id)
+        execute_modify(conn, f'UPDATE families SET {", ".join(updates)} WHERE id = %s',
+                       tuple(params))
+        audit(conn, admin['id'], 'family_updated', 'families', family_id,
+              old={'name': family['name'], 'is_discoverable': family.get('is_discoverable'),
+                   'show_roster': family.get('show_roster')},
+              new=data)
+        conn.commit()
+        return jsonify({'success': True, 'message': 'Team updated.'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
 @main.route('/api/admin/people')
 @admin_required
 def admin_people_api():

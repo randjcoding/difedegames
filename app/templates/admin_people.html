@@ -1187,7 +1187,11 @@
     );
   };
 
-  setScope(MY_FAMILY_ID ? 'mine' : 'site');
+  var bootParams = new URLSearchParams(window.location.search);
+  var bootQ = (bootParams.get('q') || '').trim();
+  if (bootQ) document.getElementById('peopleSearch').value = bootQ;
+  // Deep links from Teams hub usually need the full site list.
+  setScope(bootQ || !MY_FAMILY_ID ? 'site' : 'mine');
 })();
 </script>
 {% endblock %}

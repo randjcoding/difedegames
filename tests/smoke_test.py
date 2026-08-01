@@ -1200,6 +1200,59 @@ def main():
         check('admin dashboard points to people hub',
               '/admin/people' in client_a.get('/admin').get_data(as_text=True)
               and 'Use when:' in client_a.get('/admin').get_data(as_text=True))
+        admin_page = client_a.get('/admin').get_data(as_text=True)
+        check('admin dashboard points to teams hub',
+              '/admin/teams' in admin_page and 'Teams' in admin_page)
+        teams_page = client_a.get('/admin/teams').get_data(as_text=True)
+        check('teams hub page loads',
+              'Teams &amp; Families' in teams_page or 'Teams & Families' in teams_page)
+        check('teams hub uses DataTable and detail modal',
+              'teamsTable' in teams_page and 'DataTable' in teams_page
+              and 'teamDetailModal' in teams_page and 'Make lead' in teams_page)
+        check('teams hub can create and archive teams',
+              'btnCreateTeam' in teams_page and '/api/admin/families' in teams_page
+              and 'tdArchive' in teams_page)
+        r = client_a.get('/api/admin/families')
+        fam_list = (r.get_json() or {}).get('families') or []
+        check('teams API lists Alpha and Beta',
+              r.status_code == 200
+              and any(f.get('name') == 'Zztest Alpha' for f in fam_list)
+              and any(f.get('name') == 'Zztest Beta' for f in fam_list),
+              str([(f.get('name'), f.get('has_lead'), f.get('member_count')) for f in fam_list[:8]]))
+        alpha = next((f for f in fam_list if f.get('name') == 'Zztest Alpha'), None)
+        check('teams API includes lead for Alpha',
+              alpha and alpha.get('has_lead') and alpha.get('lead_display_name'),
+              str(alpha))
+        if alpha:
+            r = client_a.get(f"/api/admin/families/{alpha['id']}")
+            detail = r.get_json() or {}
+            members = detail.get('members') or []
+            check('team detail returns members with roles',
+                  r.status_code == 200 and detail.get('family')
+                  and any(m.get('is_lead') for m in members)
+                  and any(m.get('role_label') for m in members),
+                  str([(m.get('display_name'), m.get('role_label'), m.get('login_status'))
+                       for m in members[:6]]))
+            check('team detail includes settings and other families',
+                  'is_discoverable' in (detail.get('family') or {})
+                  and isinstance(detail.get('other_families'), list)
+                  and isinstance(detail.get('alliances'), list))
+        r = client_a.post('/api/admin/families', json={'name': 'Zztest Hub Orphan'})
+        body = r.get_json() or {}
+        check('admin can create orphan team with no lead',
+              r.status_code == 200 and body.get('success') and body.get('family_id'),
+              str(body))
+        if body.get('family_id'):
+            ids['families'].add(body['family_id'])
+            r2 = client_a.get(f"/api/admin/families/{body['family_id']}")
+            d2 = r2.get_json() or {}
+            check('orphan team detail reports no lead',
+                  r2.status_code == 200 and not (d2.get('family') or {}).get('has_lead'))
+            r3 = client_a.put(f"/api/admin/families/{body['family_id']}",
+                              json={'name': 'Zztest Hub Orphan Renamed',
+                                    'is_discoverable': False})
+            check('admin can rename team settings',
+                  r3.status_code == 200 and (r3.get_json() or {}).get('success'))
         r = client_a.get('/api/admin/people', query_string={'scope': 'site'})
         people = (r.get_json() or {}).get('people') or (r.get_json() or {}).get('players') or []
         if isinstance(r.get_json(), list):
