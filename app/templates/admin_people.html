@@ -3,7 +3,13 @@
 
 {% block styles %}
 <style>
-  .aph { max-width: 1200px; }
+  /* Full-bleed page for this admin route only */
+  .aph-page {
+    width: 100%;
+    max-width: none;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
   .aph-help {
     background: var(--df-card, #fff); color: var(--df-text-card, #212529);
     border-radius: 10px; padding: 0.75rem 1rem; margin-bottom: 1rem;
@@ -23,16 +29,27 @@
   .aph-panel table.dataTable tbody td {
     color: #212529 !important;
   }
-  .aph-panel table.dataTable thead th {
+  .aph-panel table.dataTable thead th,
+  .aph-panel .dataTables_scrollHead table.dataTable thead th {
     background: #343a40 !important;
     color: #fff !important;
+    border-bottom: 2px solid var(--df-accent, #0d6efd) !important;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+  }
+  .aph-panel .dataTables_scrollBody {
+    border-bottom: 1px solid #dee2e6;
+  }
+  .aph-panel .dataTables_scrollHead {
     border-bottom: 2px solid var(--df-accent, #0d6efd) !important;
   }
   .aph-panel table.dataTable tbody tr:nth-child(odd) { background: #fff !important; }
   .aph-panel table.dataTable tbody tr:nth-child(even) { background: #f8f9fa !important; }
   .aph-panel table.dataTable tbody tr.aph-selected { background: #e7f1ff !important; }
   .aph-panel table.dataTable tbody tr { cursor: pointer; }
-  .aph-panel table.dataTable tbody tr td:first-child { cursor: default; }
+  .aph-panel table.dataTable tbody tr td:first-child,
+  .aph-panel table.dataTable tbody tr td:last-child { cursor: default; }
   .aph-toolbar .btn { white-space: nowrap; }
   #mergeTwoBtn:disabled { opacity: 0.55; }
   .aph-section {
@@ -55,15 +72,19 @@
     padding: 0.75rem; background: #f8f9fa; color: #212529; height: 100%;
   }
   .aph-merge-card.chosen { border-color: var(--df-accent, #0d6efd); box-shadow: 0 0 0 2px rgba(13,110,253,0.2); }
+  .aph-fullname-col { font-weight: 600; white-space: nowrap; }
+  .aph-display-col { color: #495057; white-space: nowrap; }
+  .aph-email-col { word-break: break-all; }
   @media (max-width: 767.98px) {
     .aph-panel { padding: 0.5rem; }
     .aph-panel table.dataTable { font-size: 0.8rem; }
+    .aph-fullname-col, .aph-display-col { white-space: normal; }
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container py-3 aph">
+<div class="container-fluid py-3 aph-page">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
       <h2 class="page-heading mb-1"><i class="fas fa-users me-2"></i>People &amp; Accounts</h2>
@@ -98,25 +119,25 @@
   <div id="peopleStatus" class="text-muted mb-2" style="font-size:0.85rem;">Loading...</div>
 
   <div class="aph-panel">
-    <div class="table-responsive">
-      <table id="peopleTable" class="table table-striped table-hover w-100" style="color:#212529;">
-        <thead>
-          <tr>
-            <th style="width:2.2rem;"></th>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Family</th>
-            <th>Role</th>
-            <th>Joined</th>
-            <th>Games</th>
-            <th>W/L</th>
-            <th>Login</th>
-            <th>Last login</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <table id="peopleTable" class="table table-striped table-hover w-100" style="color:#212529;">
+      <thead>
+        <tr>
+          <th style="width:2.2rem;"></th>
+          <th>Full name</th>
+          <th>Display name</th>
+          <th>Email</th>
+          <th>Family</th>
+          <th>Role</th>
+          <th>Joined</th>
+          <th>Games</th>
+          <th>W/L</th>
+          <th>Login</th>
+          <th>Last login</th>
+          <th style="width:5.5rem;">Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
   </div>
 </div>
 
@@ -200,13 +221,24 @@
           </div>
         </div>
 
-        <div class="aph-section mb-0">
+        <div class="aph-section">
           <h6>Same person / merge</h6>
           <p class="small text-muted mb-2">
             If this person also exists as another row, select both in the table and use Merge, or pick the other person here.
           </p>
           <div class="aph-modal-actions">
             <button type="button" class="btn btn-outline-danger btn-sm" id="apMergePick">Merge with another person</button>
+          </div>
+        </div>
+
+        <div class="aph-section mb-0">
+          <h6>Delete person</h6>
+          <p class="small text-muted mb-2">
+            Archives this person (hides them from lists). Game history stays. If they have a login, it is removed so the email is free.
+            You can reinstate an archived person later from Admin → Edit Player Details.
+          </p>
+          <div class="aph-modal-actions">
+            <button type="button" class="btn btn-danger btn-sm" id="apDeletePerson">Delete person</button>
           </div>
         </div>
       </div>
@@ -436,8 +468,8 @@
       _id: p.id,
       _raw: p,
       check: '',
-      name: p.display_name || '',
-      legal: ((p.first_name || '') + ' ' + (p.last_name || '')).trim(),
+      full_name: ((p.first_name || '') + ' ' + (p.last_name || '')).trim(),
+      display_name: p.display_name || '',
       email: p.email || '',
       family: p.family_name || 'No family',
       role: p.role_label || '',
@@ -445,7 +477,8 @@
       games: p.games || 0,
       wl: (p.wins || 0) + ' / ' + (p.losses || 0),
       login: p.login_status || 'None',
-      last: fmtDate(p.last_login)
+      last: fmtDate(p.last_login),
+      actions: ''
     };
   }
 
@@ -474,31 +507,52 @@
           }
         },
         {
-          data: 'name',
-          render: function(d, _t, row) {
-            return '<div style="font-weight:600;">' + esc(d) + '</div>'
-              + '<div class="small text-muted">' + esc(row.legal) + '</div>';
-          }
+          data: 'full_name',
+          className: 'aph-fullname-col',
+          render: function(d) { return esc(d); }
         },
-        { data: 'email', defaultContent: '' },
+        {
+          data: 'display_name',
+          className: 'aph-display-col',
+          render: function(d) { return esc(d); }
+        },
+        {
+          data: 'email',
+          className: 'aph-email-col',
+          defaultContent: '',
+          render: function(d) { return esc(d); }
+        },
         { data: 'family' },
         { data: 'role' },
         { data: 'joined' },
         { data: 'games' },
         { data: 'wl' },
         { data: 'login' },
-        { data: 'last' }
+        { data: 'last' },
+        {
+          data: 'actions',
+          orderable: false,
+          searchable: false,
+          className: 'text-center',
+          render: function(_d, _t, row) {
+            return '<button type="button" class="btn btn-sm btn-outline-danger aph-delete-btn" data-id="'
+              + row._id + '" title="Delete person">Delete</button>';
+          }
+        }
       ],
       order: [[1, 'asc']],
       pageLength: 25,
       lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
       dom: 'lrtip',
       autoWidth: false,
+      scrollY: 'calc(100vh - 290px)',
+      scrollX: true,
+      scrollCollapse: true,
       language: { emptyTable: 'No people match this view.' }
     });
 
     $('#peopleTable tbody').on('click', 'tr', function(e) {
-      if ($(e.target).closest('.aph-check').length) return;
+      if ($(e.target).closest('.aph-check, .aph-delete-btn').length) return;
       var d = peopleTable.row(this).data();
       if (!d) return;
       openAdminModal(d._id);
@@ -511,6 +565,61 @@
       else selected.delete(id);
       syncRowHighlight();
     });
+
+    $('#peopleTable tbody').on('click', '.aph-delete-btn', function(e) {
+      e.stopPropagation();
+      var id = parseInt(this.getAttribute('data-id'), 10);
+      deletePerson(id);
+    });
+  }
+
+  function deletePerson(id) {
+    var p = peopleById[id];
+    if (!p) return;
+    var label = ((p.first_name || '') + ' ' + (p.last_name || '')).trim() || p.display_name || 'this person';
+    var extra = p.user_id
+      ? ' Their login will also be removed so the email address is free.'
+      : '';
+    AppModal.confirm(
+      'Delete person',
+      'Archive ' + label + '?' + extra
+        + ' Game history is kept. You can reinstate them later from Admin → Edit Player Details (Archived).',
+      function() {
+        postJson('/api/players/' + id + '/archive', {
+          reason: 'Deleted from People Hub'
+        }).then(function(archRes) {
+          if (!archRes.ok) {
+            AppModal.error('Error', archRes.j.error || 'Could not delete person.');
+            return null;
+          }
+          if (!p.user_id) return archRes;
+          return postJson('/auth/admin/users/' + p.user_id + '/delete', {}).then(function(loginRes) {
+            if (!loginRes.ok) {
+              return {
+                ok: true,
+                j: {
+                  message: (archRes.j.message || 'Person archived.')
+                    + ' Login could not be removed: ' + (loginRes.j.error || 'unknown error')
+                }
+              };
+            }
+            return {
+              ok: true,
+              j: { message: 'Person archived and login removed. Email is free if you need it elsewhere.' }
+            };
+          });
+        }).then(function(res) {
+          if (!res) return;
+          var modalEl = document.getElementById('adminPersonModal');
+          var modal = bootstrap.Modal.getInstance(modalEl);
+          if (modal) modal.hide();
+          AppModal.success('Deleted', res.j.message || 'Person archived.');
+          selected.delete(id);
+          loadPeople();
+        });
+      },
+      { confirmText: 'Delete person', cancelText: 'Cancel' }
+    );
   }
 
   function openAdminModal(id) {
@@ -793,6 +902,11 @@
         + ' (' + (x.games || 0) + ' games · ' + esc(x.email || 'no email') + ')</option>';
     }).join('');
     new bootstrap.Modal(document.getElementById('mergePickModal')).show();
+  };
+
+  document.getElementById('apDeletePerson').onclick = function() {
+    if (!currentId) return;
+    deletePerson(currentId);
   };
 
   document.getElementById('mergePickContinue').onclick = function() {

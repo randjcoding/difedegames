@@ -1179,6 +1179,14 @@ def main():
         check('people hub page loads', 'People & Accounts' in page or 'Entire Site' in page)
         check('people hub uses DataTable',
               'peopleTable' in page and 'DataTable(' in page)
+        check('people hub is full width with sticky header',
+              'container-fluid' in page and 'aph-page' in page
+              and 'scrollY' in page)
+        check('people hub shows full name then display name columns',
+              'Full name' in page and 'Display name' in page)
+        check('people hub can delete/archive a person',
+              'apDeletePerson' in page and 'aph-delete-btn' in page
+              and '/archive' in page)
         check('people hub has administer modal',
               'adminPersonModal' in page and 'apSave' in page and 'Remove login' in page)
         check('people hub has merge-two toolbar and wizard',
