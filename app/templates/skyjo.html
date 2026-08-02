@@ -57,9 +57,8 @@ content %}
     <div class="new-game-section">
       <h3>Start New Game</h3>
       <form id="newGameForm" class="mt-4">
-        
         <div id="gameLayoutsPanel" class="mb-3"></div>
-<div class="mb-3">
+        <div class="mb-3">
           <label for="playerCount" class="form-label">Number of Players ({{ game_def.min_players }}-{{ game_def.max_players }})</label>
           <select class="form-select" id="playerCount" required>
             {% for i in range(game_def.min_players, game_def.max_players + 1) %}
@@ -93,50 +92,73 @@ content %}
       </button>
     </div>
 
-    {% if active_game.target_score %}
     <div class="text-center mb-2">
+      {% if active_game.target_score %}
       <span class="badge" style="background:#f0a500;color:#1a1a1a;font-size:0.85rem;">Target: {{ active_game.target_score }}</span>
+      {% endif %}
       <span class="badge" style="background:rgba(255,255,255,0.15);color:#e0e0e0;font-size:0.85rem;">Low Score Wins</span>
     </div>
-    {% endif %}
 
-    <div class="score-sheet">
-      <div class="table-responsive">
-        <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
-          <thead>
-            <tr class="skyjo-header">
-              <th class="round-header">Round</th>
-              {% for player in game_players %}
-              <th class="player-header"><span class="player-name">{{ player.display_name }}</span></th>
-              {% endfor %}
-            </tr>
-          </thead>
-          <tbody>
-            {% set round_numbers = [] %}
-            {% for key, val in scores.items() %}
-              {% if key[1] not in round_numbers %}
-                {% if round_numbers.append(key[1]) %}{% endif %}
-              {% endif %}
-            {% endfor %}
-            {% for round_num in round_numbers|sort %}
-            <tr>
-              <td class="round-cell">{{ round_num }}</td>
-              {% for player in game_players %}
-              <td class="score-cell" data-player="{{ player.id }}" data-round="{{ round_num }}">{{ scores.get((player.id, round_num), '') }}</td>
-              {% endfor %}
-            </tr>
-            {% endfor %}
-            <tr class="total-row">
-              <td>Total</td>
-              {% for player in game_players %}
-              <td class="total-cell" data-player="{{ player.id }}">0</td>
-              {% endfor %}
-            </tr>
-          </tbody>
-        </table>
+    <div class="round-entry-view" id="roundEntryView">
+      <div class="round-entry-card">
+        <div class="round-entry-header">
+          <span id="reRoundLabel">Round 1</span>
+          <span id="reRoundProgress">1 / 1</span>
+        </div>
+        <div class="round-entry-body" id="rePlayerList"></div>
+      </div>
+      <div class="round-nav-btns">
+        <button class="btn" id="rePrev" type="button"><i class="fas fa-chevron-left"></i> Prev</button>
+        <button class="btn" id="reSaveRound" type="button"><i class="fas fa-check me-1"></i>Save Round</button>
+        <button class="btn" id="reNext" type="button">Next <i class="fas fa-chevron-right"></i></button>
       </div>
     </div>
+
+    <div class="default-table-view" id="defaultTableView">
+      <div class="score-sheet">
+        <div class="table-responsive">
+          <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
+            <thead>
+              <tr class="skyjo-header">
+                <th class="round-header">Round</th>
+                {% for player in game_players %}
+                <th class="player-header"><span class="player-name">{{ player.display_name }}</span></th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% set round_numbers = [] %}
+              {% for key, val in scores.items() %}
+                {% if key[1] not in round_numbers %}
+                  {% if round_numbers.append(key[1]) %}{% endif %}
+                {% endif %}
+              {% endfor %}
+              {% for round_num in round_numbers|sort %}
+              <tr class="hand-row" data-round="{{ round_num }}">
+                <td class="round-cell">{{ round_num }}</td>
+                {% for player in game_players %}
+                <td class="score-cell" data-player="{{ player.id }}" data-round="{{ round_num }}">{{ scores.get((player.id, round_num), '') }}</td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+              <tr class="total-row">
+                <td>Total</td>
+                {% for player in game_players %}
+                <td class="total-cell" data-player="{{ player.id }}">0</td>
+                {% endfor %}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div class="game-actions">
+      <div class="mobile-view-toggle" id="mobileViewToggle">
+        <button class="btn btn-sm view-toggle-btn active" id="btnTableView" type="button"><i class="fas fa-table"></i> Table</button>
+        <button class="btn btn-sm view-toggle-btn" id="btnRoundView" type="button"><i class="fas fa-list-ol"></i> Round</button>
+        <button class="btn btn-sm view-toggle-btn" id="btnFullView" type="button"><i class="fas fa-expand"></i></button>
+      </div>
       <button id="addHand" class="btn btn-sm" style="background:#f0a500;color:#1a1a1a;font-weight:600;"><i class="fas fa-plus me-1"></i>Add Round</button>
       <button id="pauseGame" class="btn btn-sm" style="background:#3a2a6a;color:white;font-weight:600;">Pause</button>
       <button id="completeGame" class="btn btn-sm" style="background:linear-gradient(135deg,#1a5c2e,#2d8a4e);color:white;font-weight:600;">Complete</button>
@@ -171,6 +193,18 @@ content %}
     </div>
   </div>
   {% endif %}
+</div>
+
+<div class="modal fade" id="fullscreenTableModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content" style="background:var(--df-surface, #1e1e3a);">
+      <div class="modal-header py-2" style="background:linear-gradient(135deg,#3a2a6a,#7a3fa0);color:white;">
+        <h6 class="modal-title mb-0">Skyjo - Full View</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-2" id="fullscreenBody" style="overflow:auto;"></div>
+    </div>
+  </div>
 </div>
 
 <div class="modal fade" id="addPlayerModal">
@@ -243,6 +277,19 @@ content %}
   .ref-note{font-size:0.72rem;color:#b8b0d0;padding:8px 10px 2px;line-height:1.4}
   .target-crossed{background-color:rgba(240,165,0,0.35) !important;font-weight:bold;animation:skyjo-target-pulse 1s ease-in-out 3}
   @keyframes skyjo-target-pulse{0%,100%{background-color:rgba(240,165,0,0.35)}50%{background-color:rgba(240,165,0,0.55)}}
+
+  .round-entry-view { display: none; }
+  .mobile-view-toggle { display: none !important; }
+  .fs-tbl input:focus {
+    background: #efe6fa !important;
+    color: #1a0a30 !important;
+    caret-color: #1a0a30 !important;
+    box-shadow: inset 0 0 0 2px #7a3fa0;
+  }
+  .fs-tbl input::-webkit-inner-spin-button,
+  .fs-tbl input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .fs-tbl input[type=number] { -moz-appearance: textfield; }
+
   @media(max-width:768px){
     .skyjo-container{padding:0.5rem;margin:0;border-radius:6px;max-width:100%}
     .game-board{padding:0}
@@ -260,6 +307,124 @@ content %}
     .total-row td:first-child{background:#3a2a6a !important;color:#fff;z-index:5}
     .game-actions{gap:0.25rem;margin-top:0.25rem}
     .game-actions .btn{padding:4px 8px;font-size:0.72rem}
+
+    .mobile-view-toggle { display: inline-flex !important; gap: 2px; }
+    .view-toggle-btn {
+      background: rgba(255,255,255,0.15) !important;
+      color: #e0d4f5 !important;
+      border: 1px solid rgba(255,255,255,0.2) !important;
+      border-radius: 6px !important;
+      padding: 3px 8px !important;
+      font-size: 0.68rem !important;
+      font-weight: 600 !important;
+    }
+    .view-toggle-btn.active {
+      background: rgba(122,63,160,0.85) !important;
+      color: white !important;
+      border-color: #f0a500 !important;
+    }
+    .round-entry-view.active { display: block; }
+    .default-table-view.hidden { display: none; }
+    .round-entry-card {
+      background: var(--df-surface, #1e1e3a);
+      border: 2px solid #7a3fa0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .round-entry-header {
+      background: linear-gradient(135deg, #3a2a6a, #7a3fa0);
+      color: white;
+      padding: 10px 14px;
+      font-weight: bold;
+      font-size: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .round-entry-header #reRoundProgress { font-size: 0.75rem; opacity: 0.8; }
+    .round-entry-body { padding: 6px 10px; }
+    .round-player-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 4px;
+      border-bottom: 1px solid rgba(122,63,160,0.25);
+    }
+    .round-player-row:last-child { border-bottom: none; }
+    .round-player-name {
+      flex: 1;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--df-text, #e0e0e0);
+    }
+    .round-player-score-wrap {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .round-neg-toggle {
+      padding: 0 6px;
+      font-size: 0.85rem;
+      line-height: 1.4;
+      color: #dc3545;
+      font-weight: 900;
+      border: 1px solid #dc3545;
+      border-radius: 6px;
+      background: #fff;
+      min-width: 26px;
+    }
+    .round-player-score {
+      width: 72px;
+      text-align: center;
+      font-size: 1.1rem;
+      font-weight: 600;
+      padding: 8px 4px;
+      border: 2px solid #7a3fa0;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #212529;
+    }
+    .round-player-score:focus {
+      border-color: #f0a500;
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(240,165,0,0.25);
+    }
+    .round-player-total {
+      width: 45px;
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--df-text, #aaa);
+      opacity: 0.7;
+      font-weight: 600;
+    }
+    .round-nav-btns {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      margin-top: 8px;
+    }
+    .round-nav-btns .btn {
+      padding: 8px 16px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      border-radius: 8px;
+    }
+    #rePrev, #reNext {
+      background: rgba(58,42,106,0.45);
+      color: #e0e0e0;
+      border: 1px solid #7a3fa0;
+    }
+    #rePrev:hover, #reNext:hover { background: rgba(58,42,106,0.7); color: #fff; }
+    #rePrev:disabled, #reNext:disabled {
+      background: rgba(58,42,106,0.15);
+      color: rgba(255,255,255,0.3);
+      border-color: rgba(122,63,160,0.3);
+    }
+    #reSaveRound {
+      background: linear-gradient(135deg, #3a2a6a, #7a3fa0);
+      color: white;
+      border: none;
+    }
   }
 </style>
 {% endblock %} {% block scripts %}
@@ -273,7 +438,11 @@ $(document).ready(function(){
     {id:{{ player.id }},name:"{{ player.display_name }}"}{% if not loop.last %},{% endif %}
     {% endfor %}
   ];
-  var currentRound=1;
+  var gameCompletedByCurrentUser=false;
+  var targetScoreAlertShown=false;
+  var updateTimer;
+  var reCurrentIdx=0;
+  var rePlayers=[];
   var pendingAddSeat=null;
   var picker=PlayerPicker.mount({
     container:'#playerSelections',
@@ -301,7 +470,6 @@ $(document).ready(function(){
       } else if(window.GameLayouts){GameLayouts.afterRebuild();}
     });
   }
-
   loadPlayers();
 
   $("#targetScore").change(function(){
@@ -343,27 +511,65 @@ $(document).ready(function(){
     });
   });
 
+  {% if active_game %}
   var pc=$("#scoreTable th").length-1;
   if(pc>0){$("#scoreTable").addClass("players-"+pc);document.documentElement.style.setProperty("--player-count",pc);}
 
-  var existRounds=[];
-  $("#scoreTable .round-cell").each(function(){var rn=parseInt($(this).text().trim());if(!isNaN(rn))existRounds.push(rn);});
-  currentRound=existRounds.length>0?Math.max.apply(null,existRounds)+1:1;
+  GAME_PLAYERS.forEach(function(p){ rePlayers.push({ id:p.id, name:p.name }); });
+  if(!rePlayers.length){
+    $("#scoreTable .skyjo-header th:not(:first-child)").each(function(i){
+      var txt=$(this).find(".player-name").text().trim()||$(this).text().trim();
+      var cell=$("#scoreTable tbody tr.hand-row:first td.score-cell").eq(i);
+      rePlayers.push({ name:txt, id:cell.length?cell.data("player"):null });
+    });
+  }
 
-  $("#addHand").click(function(){
-    var row='<tr><td class="round-cell">'+currentRound+'</td>';
-    GAME_PLAYERS.forEach(function(p){row+='<td class="score-cell" data-player="'+p.id+'" data-round="'+currentRound+'"></td>';});
+  function getMaxRound(){
+    var max=0;
+    $(".hand-row").each(function(){
+      var r=parseInt($(this).data("round"),10);
+      if(!isNaN(r)&&r>max)max=r;
+    });
+    return max;
+  }
+
+  function getRounds(){
+    var rounds=[];
+    $("#scoreTable .hand-row").each(function(){
+      var n=parseInt($(this).data("round"),10);
+      if(!isNaN(n))rounds.push({num:n,label:String(n)});
+    });
+    rounds.sort(function(a,b){return a.num-b.num;});
+    return rounds;
+  }
+
+  function addRoundRow(roundNum){
+    if($('.hand-row[data-round="'+roundNum+'"]').length)return;
+    var row='<tr class="hand-row" data-round="'+roundNum+'"><td class="round-cell">'+roundNum+'</td>';
+    rePlayers.forEach(function(p){
+      row+='<td class="score-cell" data-player="'+p.id+'" data-round="'+roundNum+'"></td>';
+    });
     row+='</tr>';
-    $(".total-row").before(row);currentRound++;
-  });
+    $(".total-row").before(row);
+  }
 
-  var updateTimer;
-  var targetScoreAlertShown=false;
+  function targetReached(){
+    var target=parseInt($(".game-board").data("target-score"),10);
+    if(!target)return false;
+    var anyone=false;
+    $(".total-cell").each(function(){
+      if((parseInt($(this).text(),10)||0)>=target)anyone=true;
+    });
+    return anyone;
+  }
 
   function getCellScoreValue(cell){
+    cell=$(cell);
     if(cell.hasClass("editing")){
       var inp=cell.find("input");
-      if(inp.length)return inp.val().trim();
+      if(inp.length)return String(inp.val()==null?"":inp.val()).trim();
+      var saved=cell.data("saved-value");
+      if(saved!=null)return String(saved).trim();
     }
     return cell.text().trim();
   }
@@ -379,13 +585,49 @@ $(document).ready(function(){
     return ok;
   }
 
-  function checkTargetScore(triggerRound){
+  function ensureEmptyRow(opts){
+    opts=opts||{};
+    if(!$(".game-board").length)return null;
+    var max=getMaxRound();
+    if(!max){
+      addRoundRow(1);
+      if($("#roundEntryView").hasClass("active")){reCurrentIdx=0;reRenderRound();}
+      return 1;
+    }
+    if(!isRoundComplete(max))return null;
+    if(targetReached()&&!opts.forcePastTarget)return null;
+    var next=max+1;
+    addRoundRow(next);
+    if($("#roundEntryView").hasClass("active")||opts.openRoundView){
+      var rounds=getRounds();
+      reCurrentIdx=Math.max(0,rounds.length-1);
+      reRenderRound();
+    }
+    return next;
+  }
+
+  function updateTotals(){
+    $(".total-cell").each(function(){
+      var pid=$(this).data("player"),tot=0;
+      $(".score-cell[data-player='"+pid+"']").each(function(){
+        var s=getCellScoreValue($(this));
+        if(s!==""&&!isNaN(parseInt(s,10)))tot+=parseInt(s,10);
+      });
+      $(this).text(tot);
+    });
+  }
+
+  function afterRoundFilled(triggerRound){
+    if(triggerRound==null||!isRoundComplete(triggerRound))return;
+    var target=parseInt($(".game-board").data("target-score"),10);
+    if(!target){
+      ensureEmptyRow();
+      return;
+    }
     if(targetScoreAlertShown)return;
-    var target=parseInt($(".game-board").data("target-score"));
-    if(!target||triggerRound==null||!isRoundComplete(triggerRound))return;
     var crossed=[];
     $(".total-cell").each(function(){
-      var total=parseInt($(this).text())||0;
+      var total=parseInt($(this).text(),10)||0;
       if(total>=target){
         var idx=$(".total-cell").index(this);
         var name=$("#scoreTable thead th").eq(idx+1).text().trim();
@@ -395,94 +637,398 @@ $(document).ready(function(){
         $(this).removeClass("target-crossed");
       }
     });
-    if(crossed.length>0){
-      targetScoreAlertShown=true;
-      var names=crossed.map(function(c){return "<strong>"+c.name+"</strong> ("+c.total+")";}).join(", ");
-      AppModal.confirm(
-        "Target Score Reached!",
-        names+" reached the target of <strong>"+target+"</strong> points. Would you like to end the game?",
-        function(){doCompleteGame();},
-        {confirmText:"End Game",cancelText:"Keep Playing"}
-      );
-      var modalEl=document.getElementById("appModal");
-      $(modalEl).on("hidden.bs.modal.targetcheck",function(){
-        targetScoreAlertShown=false;
-        $(modalEl).off("hidden.bs.modal.targetcheck");
-      });
+    if(!crossed.length){
+      ensureEmptyRow();
+      return;
     }
+    targetScoreAlertShown=true;
+    var endingGame=false;
+    var names=crossed.map(function(c){return "<strong>"+c.name+"</strong> ("+c.total+")";}).join(", ");
+    AppModal.confirm(
+      "Target Score Reached!",
+      names+" reached the target of <strong>"+target+"</strong> points. Would you like to end the game?",
+      function(){endingGame=true;doCompleteGame();},
+      {confirmText:"End Game",cancelText:"Keep Playing"}
+    );
+    var modalEl=document.getElementById("appModal");
+    $(modalEl).on("hidden.bs.modal.targetcheck",function(){
+      targetScoreAlertShown=false;
+      $(modalEl).off("hidden.bs.modal.targetcheck");
+      if(!endingGame)ensureEmptyRow({forcePastTarget:true});
+    });
+  }
+
+  function checkTargetScore(triggerRound){
+    afterRoundFilled(triggerRound);
   }
 
   function doCompleteGame(){
+    gameCompletedByCurrentUser=true;
     var gid=$(".game-board").data("game-id");
     $.ajax({url:"/api/games/complete/"+gid,method:"POST",
       success:function(r){
-        if(r.summary){AppModal.show({title:"Game Complete!",body:'<pre class="mb-0" style="white-space:pre-wrap;font-family:inherit;">'+r.summary+'</pre>',type:"success"});var m=document.getElementById("appModal");$(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});}
-        else{window.location.reload();}
+        if(r.summary){
+          AppModal.show({title:"Game Complete!",body:'<pre class="mb-0" style="white-space:pre-wrap;font-family:inherit;">'+r.summary+'</pre>',type:"success"});
+          var m=document.getElementById("appModal");
+          $(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});
+        }else{window.location.reload();}
       },
-      error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to complete game");}
+      error:function(xhr){
+        gameCompletedByCurrentUser=false;
+        AppModal.error("Error",xhr.responseJSON?.error||"Failed to complete game");
+      }
+    });
+  }
+
+  function scorePayload(cell,rawValue){
+    var scoreVal=rawValue!==""&&!isNaN(rawValue)?parseInt(rawValue,10):null;
+    return {
+      game_id:$(".game-board").data("game-id"),
+      player_id:cell.data("player")||cell.attr("data-player"),
+      round_number:parseInt(cell.data("round")||cell.attr("data-round"),10),
+      score:scoreVal
+    };
+  }
+
+  function applyScoreToCell(cell,scoreVal,leaveEditing){
+    if(leaveEditing!==false)cell.removeClass("editing");
+    if(leaveEditing===false&&cell.hasClass("editing")){
+      cell.data("saved-value",scoreVal===null?"":String(scoreVal));
+    }else{
+      cell.text(scoreVal===null||scoreVal===""?"":scoreVal);
+      cell.removeData("saved-value");
+    }
+    updateTotals();
+  }
+
+  function saveCellScore(cell,rawValue,opts){
+    opts=opts||{};
+    var leaveEditing=opts.leaveEditing!==false;
+    var payload=scorePayload(cell,rawValue);
+    var displayVal=payload.score;
+    var originalValue=opts.originalValue;
+    var lastKey=cell.data("last-saved-key");
+    var thisKey=payload.player_id+":"+payload.round_number+":"+String(payload.score);
+    if(lastKey===thisKey&&!opts.force)return;
+
+    if(opts.syncDom!==false)applyScoreToCell(cell,displayVal,leaveEditing);
+
+    setTimeout(function(){afterRoundFilled(payload.round_number);},0);
+
+    if(window.ScoreSave){
+      ScoreSave.save(payload,{
+        showError:!!leaveEditing,
+        success:function(){cell.data("last-saved-key",thisKey);},
+        error:function(xhr){
+          if(leaveEditing){
+            cell.removeClass("editing");
+            cell.text(originalValue||"");
+            cell.removeData("saved-value");
+            updateTotals();
+            if(xhr&&xhr.status!==401){
+              AppModal.error("Error",(xhr.responseJSON&&xhr.responseJSON.error)||"Failed to save score");
+            }
+          }
+        }
+      });
+      return;
+    }
+
+    $.ajax({
+      url:"/api/scores",method:"POST",contentType:"application/json",
+      data:JSON.stringify(payload),
+      success:function(){cell.data("last-saved-key",thisKey);},
+      error:function(xhr){
+        if(leaveEditing){
+          cell.removeClass("editing");
+          cell.text(originalValue||"");
+          updateTotals();
+          AppModal.error("Error",(xhr.responseJSON&&xhr.responseJSON.error)||"Failed to save score");
+        }
+      }
     });
   }
 
   function updateScore(cell,nv,ov){
     if(!cell.hasClass("editing"))return;
     clearTimeout(updateTimer);
-    var gid=$(".game-board").data("game-id");
-    var scoreVal=nv!==""&&!isNaN(nv)?parseInt(nv):null;
-    var roundNum=parseInt(cell.attr("data-round"),10);
-    var playerId=cell.attr("data-player");
-    afterScoreSaved(cell,scoreVal);
-    $.ajax({url:"/api/scores",method:"POST",contentType:"application/json",data:JSON.stringify({game_id:gid,player_id:playerId,round_number:roundNum,score:scoreVal}),
-      success:function(){},
-      error:function(xhr){
-        AppModal.error("Error",xhr.responseJSON?.error||"Failed to save score");
-        cell.text(ov||"");
-        updateTotals();
-        checkTargetScore(roundNum);
+    saveCellScore(cell,nv,{leaveEditing:true,originalValue:ov,syncDom:true});
+  }
+
+  function flushOpenScoreEdits(){
+    $(".score-cell.editing input").each(function(){
+      var cell=$(this).closest(".score-cell");
+      var ov=cell.data("original-value");
+      saveCellScore(cell,$(this).val(),{leaveEditing:true,originalValue:ov,syncDom:true,force:true});
+    });
+    if(typeof window.reSaveCurrentRound==="function"){
+      try{window.reSaveCurrentRound();}catch(e){}
+    }
+  }
+
+  function reRenderRound(){
+    var rounds=getRounds();
+    if(!rounds.length){
+      ensureEmptyRow();
+      rounds=getRounds();
+    }
+    if(!rounds.length)return;
+    if(reCurrentIdx>=rounds.length)reCurrentIdx=rounds.length-1;
+    if(reCurrentIdx<0)reCurrentIdx=0;
+    var rd=rounds[reCurrentIdx];
+    $("#reRoundLabel").text("Round "+rd.label);
+    $("#reRoundProgress").text((reCurrentIdx+1)+" / "+rounds.length);
+    $("#rePrev").prop("disabled",reCurrentIdx===0);
+    $("#reNext").prop("disabled",false);
+
+    var html="";
+    rePlayers.forEach(function(p){
+      var existingScore="";
+      var totalScore=0;
+      var cell=$('#scoreTable .score-cell[data-player="'+p.id+'"][data-round="'+rd.num+'"]');
+      if(cell.length)existingScore=getCellScoreValue(cell);
+      var totalCell=$('#scoreTable .total-cell[data-player="'+p.id+'"]');
+      if(totalCell.length)totalScore=totalCell.text().trim();
+      html+='<div class="round-player-row">'
+        +'<span class="round-player-name">'+p.name+'</span>'
+        +'<div class="round-player-score-wrap">'
+        +'<button type="button" class="round-neg-toggle" title="Toggle negative">-</button>'
+        +'<input type="number" class="round-player-score" data-pid="'+p.id+'" value="'+existingScore+'" inputmode="numeric">'
+        +'</div>'
+        +'<span class="round-player-total">'+totalScore+'</span>'
+        +'</div>';
+    });
+    $("#rePlayerList").html(html);
+  }
+
+  window.reSaveCurrentRound=function(){
+    var rounds=getRounds();
+    if(!rounds.length||reCurrentIdx<0||reCurrentIdx>=rounds.length)return;
+    var rd=rounds[reCurrentIdx];
+    $(".round-player-score").each(function(){
+      var pid=$(this).data("pid");
+      var val=$(this).val().trim();
+      var cell=$('#scoreTable .score-cell[data-player="'+pid+'"][data-round="'+rd.num+'"]');
+      if(cell.length)saveCellScore(cell,val,{leaveEditing:false,syncDom:true});
+    });
+    updateTotals();
+  };
+
+  window.reNavigate=function(dir){
+    window.reSaveCurrentRound();
+    var rounds=getRounds();
+    if(dir>0&&reCurrentIdx>=rounds.length-1){
+      var added=ensureEmptyRow({openRoundView:true});
+      rounds=getRounds();
+      if(added!=null){
+        reCurrentIdx=rounds.length-1;
+        reRenderRound();
+        return;
       }
+    }
+    reCurrentIdx=Math.max(0,Math.min(rounds.length-1,reCurrentIdx+dir));
+    reRenderRound();
+  };
+
+  window.switchMobileView=function(mode){
+    $(".view-toggle-btn").removeClass("active");
+    if(mode==="table"){
+      $("#btnTableView").addClass("active");
+      $("#defaultTableView").removeClass("hidden");
+      $("#roundEntryView").removeClass("active");
+    }else if(mode==="round"){
+      $("#btnRoundView").addClass("active");
+      $("#defaultTableView").addClass("hidden");
+      $("#roundEntryView").addClass("active");
+      var rounds=getRounds();
+      if(!rounds.length)ensureEmptyRow();
+      rounds=getRounds();
+      var openIdx=rounds.length-1;
+      for(var i=0;i<rounds.length;i++){
+        if(!isRoundComplete(rounds[i].num)){openIdx=i;break;}
+      }
+      reCurrentIdx=Math.max(0,openIdx);
+      reRenderRound();
+    }
+  };
+
+  window.openFullscreenTable=function(){
+    var body=document.getElementById("fullscreenBody");
+    var rounds=getRounds();
+    if(!rounds.length){ensureEmptyRow();rounds=getRounds();}
+    var pc=rePlayers.length;
+    var colW=pc<=4?'70px':pc<=6?'58px':'48px';
+    var fontSize=pc<=4?'0.88rem':pc<=6?'0.78rem':'0.7rem';
+    var pad=pc<=4?'6px 8px':'4px 5px';
+    var inputPad=pc<=4?'6px 3px':'4px 2px';
+    var tbl='<div style="overflow:auto;-webkit-overflow-scrolling:touch;width:100%;height:100%;">';
+    tbl+='<table class="fs-tbl" style="table-layout:fixed;width:100%;border-collapse:collapse;margin:0;">';
+    tbl+='<colgroup><col style="width:52px;">';
+    for(var i=0;i<pc;i++)tbl+='<col style="width:'+colW+';">';
+    tbl+='</colgroup><thead><tr style="background:#3a2a6a;color:#fff;position:sticky;top:0;z-index:2;">';
+    tbl+='<th style="padding:'+pad+';font-size:'+fontSize+';font-weight:700;text-align:center;position:sticky;left:0;background:#3a2a6a;z-index:3;">Rnd</th>';
+    rePlayers.forEach(function(p){
+      var short=p.name.length>6?p.name.substring(0,5)+'.':p.name;
+      tbl+='<th style="padding:'+pad+';font-size:'+fontSize+';font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'+p.name+'">'+short+'</th>';
+    });
+    tbl+='</tr></thead><tbody>';
+    rounds.forEach(function(rd){
+      tbl+='<tr style="border-bottom:1px solid rgba(122,63,160,0.2);">';
+      tbl+='<td style="background:#7a3fa0;color:#fff;font-weight:700;text-align:center;padding:'+pad+';font-size:'+fontSize+';position:sticky;left:0;z-index:1;">'+rd.label+'</td>';
+      rePlayers.forEach(function(p){
+        var origCell=$('#scoreTable .score-cell[data-player="'+p.id+'"][data-round="'+rd.num+'"]');
+        var val=origCell.length?getCellScoreValue(origCell):'';
+        tbl+='<td style="padding:0;text-align:center;background:#1a1a2e;">';
+        tbl+='<input type="number" inputmode="numeric" class="fs-score-input" data-pid="'+p.id+'" data-rnd="'+rd.num+'" value="'+val+'" style="width:100%;border:none;text-align:center;font-size:'+fontSize+';padding:'+inputPad+';background:transparent;color:#e0e0e0;font-weight:600;outline:none;caret-color:#e0e0e0;">';
+        tbl+='</td>';
+      });
+      tbl+='</tr>';
+    });
+    tbl+='<tr style="border-top:3px solid #7a3fa0;position:sticky;bottom:0;z-index:2;">';
+    tbl+='<td style="background:#3a2a6a;color:#fff;font-weight:700;text-align:center;padding:'+pad+';font-size:'+fontSize+';position:sticky;left:0;z-index:3;">Total</td>';
+    rePlayers.forEach(function(p){
+      tbl+='<td class="fs-total" data-pid="'+p.id+'" style="font-weight:800;text-align:center;padding:'+pad+';font-size:'+fontSize+';color:#f0a500;background:#1a1030;">0</td>';
+    });
+    tbl+='</tr></tbody></table></div>';
+    body.innerHTML=tbl;
+    fsUpdateTotals();
+    $(body).off("change input blur",".fs-score-input")
+      .on("change blur",".fs-score-input",function(){
+        var $inp=$(this);
+        var cell=$('#scoreTable .score-cell[data-player="'+$inp.data("pid")+'"][data-round="'+$inp.data("rnd")+'"]');
+        if(cell.length){saveCellScore(cell,$inp.val().trim(),{leaveEditing:false,syncDom:true});fsUpdateTotals();}
+      })
+      .on("input",".fs-score-input",function(){
+        var $inp=$(this);
+        var cell=$('#scoreTable .score-cell[data-player="'+$inp.data("pid")+'"][data-round="'+$inp.data("rnd")+'"]');
+        clearTimeout($inp.data("saveTimer"));
+        $inp.data("saveTimer",setTimeout(function(){
+          if(cell.length)saveCellScore(cell,$inp.val().trim(),{leaveEditing:false,syncDom:true});
+          fsUpdateTotals();
+        },800));
+      });
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("fullscreenTableModal")).show();
+  };
+
+  function fsUpdateTotals(){
+    rePlayers.forEach(function(p){
+      var total=0;
+      $(".fs-score-input[data-pid='"+p.id+"']").each(function(){
+        var v=parseInt($(this).val(),10);
+        if(!isNaN(v))total+=v;
+      });
+      $(".fs-total[data-pid='"+p.id+"']").text(total);
     });
   }
 
-  $(document).on("click",".score-cell",function(){
+  if(!getMaxRound())addRoundRow(1);
+  updateTotals();
+  ensureEmptyRow();
+
+  $("#addHand").click(function(){
+    var next=getMaxRound()+1;
+    if(!getMaxRound())next=1;
+    addRoundRow(next||1);
+    var tableResp=$(".table-responsive");
+    if(tableResp.length&&tableResp[0])tableResp.scrollTop(tableResp[0].scrollHeight);
+    if($("#roundEntryView").hasClass("active")){
+      reCurrentIdx=getRounds().length-1;
+      reRenderRound();
+    }
+  });
+
+  $("#btnTableView").on("click",function(){switchMobileView("table");});
+  $("#btnRoundView").on("click",function(){switchMobileView("round");});
+  $("#btnFullView").on("click",function(){openFullscreenTable();});
+  $("#rePrev").on("click",function(){reNavigate(-1);});
+  $("#reNext").on("click",function(){reNavigate(1);});
+  $("#reSaveRound").on("click",function(){reSaveCurrentRound();});
+
+  $(window).on("resize",function(){
+    if(window.innerWidth>768)switchMobileView("table");
+  });
+
+  $(document).off("blur.reScore input.reScore click.reNeg",".round-player-score,.round-neg-toggle")
+    .on("click.reNeg",".round-neg-toggle",function(e){
+      e.preventDefault();
+      var inp=$(this).siblings(".round-player-score");
+      var v=parseInt(inp.val(),10)||0;
+      inp.val(v*-1).trigger("input").focus();
+    })
+    .on("blur.reScore",".round-player-score",function(){
+      var rounds=getRounds();
+      if(!rounds.length)return;
+      var rd=rounds[reCurrentIdx];
+      var pid=$(this).data("pid");
+      var cell=$('#scoreTable .score-cell[data-player="'+pid+'"][data-round="'+rd.num+'"]');
+      if(cell.length){
+        saveCellScore(cell,$(this).val().trim(),{leaveEditing:false,syncDom:true});
+        updateTotals();
+        reRenderRound();
+      }
+    })
+    .on("input.reScore",".round-player-score",function(){
+      var $inp=$(this);
+      var rounds=getRounds();
+      if(!rounds.length)return;
+      var rd=rounds[reCurrentIdx];
+      var pid=$inp.data("pid");
+      var cell=$('#scoreTable .score-cell[data-player="'+pid+'"][data-round="'+rd.num+'"]');
+      clearTimeout($inp.data("saveTimer"));
+      $inp.data("saveTimer",setTimeout(function(){
+        if(cell.length){
+          saveCellScore(cell,$inp.val().trim(),{leaveEditing:false,syncDom:true});
+          updateTotals();
+        }
+      },800));
+    });
+
+  $(document).off("click.skyjoScore",".score-cell").on("click.skyjoScore",".score-cell",function(){
     var cell=$(this);
     if(cell.hasClass("editing"))return;
-    var cv=cell.text().trim();cell.data("original-value",cv);cell.addClass("editing");
+    var cv=getCellScoreValue(cell);
+    cell.data("original-value",cv);
+    cell.addClass("editing");
     cell.html(
       '<div class="d-flex align-items-center" style="gap:2px;">'+
         '<button type="button" class="btn btn-sm neg-toggle" style="padding:0 4px;font-size:0.8rem;line-height:1;color:#dc3545;font-weight:900;border:1px solid #dc3545;border-radius:4px;min-width:22px;" title="Toggle negative">-</button>'+
         '<input type="number" class="form-control form-control-sm border-0" value="'+cv+'" style="width:100%;text-align:center;background:transparent;box-shadow:none;">'+
       '</div>'
     );
-    var inp=cell.find("input");inp.focus().select();
-    cell.find(".neg-toggle").on("click",function(e){e.stopPropagation();var v=parseInt(inp.val())||0;inp.val(v*-1);inp.focus();});
+    var inp=cell.find("input");
+    inp.focus().select();
+    cell.find(".neg-toggle").on("click",function(e){
+      e.stopPropagation();
+      var v=parseInt(inp.val(),10)||0;
+      inp.val(v*-1);
+      inp.focus();
+    });
     inp.on("blur",function(){if(cell.hasClass("editing"))updateScore(cell,inp.val(),cv);});
-    inp.on("input",function(){clearTimeout(updateTimer);updateTimer=setTimeout(function(){if(cell.hasClass("editing"))updateScore(cell,inp.val(),cv);},4000);});
+    inp.on("input",function(){
+      clearTimeout(updateTimer);
+      updateTimer=setTimeout(function(){if(cell.hasClass("editing"))updateScore(cell,inp.val(),cv);},4000);
+    });
     inp.on("keypress",function(e){if(e.which===13){e.preventDefault();updateScore(cell,inp.val(),cv);}});
   });
 
   $(document).on("keydown",".score-cell input",function(e){
     var cell=$(this).closest(".score-cell"),cv=cell.data("original-value"),nv=$(this).val();
-    if(e.which===9){e.preventDefault();updateScore(cell,nv,cv);var nc=e.shiftKey?cell.prev(".score-cell"):cell.next(".score-cell");if(!nc.length&&!e.shiftKey){var nr=cell.parent("tr").next("tr");if(nr.length&&!nr.hasClass("total-row"))nc=nr.find(".score-cell").first();}if(nc&&nc.length)nc.click();}
+    if(e.which===9){
+      e.preventDefault();
+      updateScore(cell,nv,cv);
+      var nc=e.shiftKey?cell.prev(".score-cell"):cell.next(".score-cell");
+      if(!nc.length&&!e.shiftKey){
+        var nr=cell.parent("tr").next("tr.hand-row");
+        if(nr.length)nc=nr.find(".score-cell").first();
+        else{
+          ensureEmptyRow();
+          nr=cell.parent("tr").next("tr.hand-row");
+          if(nr.length)nc=nr.find(".score-cell").first();
+        }
+      }
+      if(nc&&nc.length)nc.click();
+    }
   });
-
-  function updateTotals(){
-    $(".total-cell").each(function(){
-      var pid=$(this).data("player"),tot=0;
-      $(".score-cell[data-player='"+pid+"']").each(function(){
-        var s=getCellScoreValue($(this));
-        if(s!==""&&!isNaN(parseInt(s)))tot+=parseInt(s);
-      });
-      $(this).text(tot);
-    });
-  }
-
-  function afterScoreSaved(cell,scoreVal){
-    cell.removeClass("editing");
-    cell.text(scoreVal!==null?scoreVal:"");
-    updateTotals();
-    var roundNum=parseInt(cell.attr("data-round"),10);
-    setTimeout(function(){checkTargetScore(roundNum);},0);
-  }
-  updateTotals();
 
   $("#completeGame").click(function(){
     AppModal.confirm("Complete Game","Are you sure you want to complete this game? This cannot be undone.",function(){
@@ -491,20 +1037,108 @@ $(document).ready(function(){
   });
 
   $("#pauseGame").click(function(){
+    flushOpenScoreEdits();
     var gid=$(".game-board").data("game-id");
     $.ajax({url:"/api/games/pause/"+gid,method:"POST",
-      success:function(){AppModal.show({title:"Game Paused",body:"<p>Returning to Skyjo...</p>",type:"info"});setTimeout(function(){window.location.href="/game/skyjo";},1500);},
+      success:function(){
+        AppModal.show({title:"Game Paused",body:"<p>Returning to Skyjo...</p>",type:"info"});
+        setTimeout(function(){window.location.href="/game/skyjo";},1500);
+      },
       error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to pause game");}
     });
   });
 
-  $(".resume-game").click(function(){var gid=$(this).data("game-id");$.ajax({url:"/api/games/resume/"+gid,method:"POST",success:function(){AppModal.show({title:"Game Resumed",body:"<p>Loading game...</p>",type:"success"});setTimeout(function(){window.location.href="{{ url_for('main.skyjo') }}?game_id="+gid;},1000);},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to resume game");}});});
+  $("#deleteGame").click(function(){
+    var gid=$(this).data("game-id");
+    AppModal.confirm("Delete Game","Are you sure you want to permanently delete this game?",function(){
+      $.ajax({url:"/api/games/delete/"+gid,method:"POST",
+        success:function(){window.location.href="{{ url_for('main.skyjo') }}";},
+        error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to delete game");}
+      });
+    });
+  });
 
-  $(".complete-paused-game").click(function(){var gid=$(this).data("game-id");AppModal.confirm("End Game","End this game without recording results?",function(){$.ajax({url:"/api/games/complete/"+gid,method:"POST",success:function(){window.location.reload();},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to end game");}});},{confirmText:"End Game",cancelText:"Cancel"});});
+  function applyRemoteSkyjoScore(data){
+    var cell=$('.score-cell[data-player="'+data.player_id+'"][data-round="'+data.round_number+'"]');
+    if(!cell.length){
+      var currentMax=getMaxRound();
+      if(data.round_number>currentMax){
+        for(var r=currentMax+1;r<=data.round_number;r++)addRoundRow(r);
+      }else if(!currentMax){
+        addRoundRow(data.round_number);
+      }
+      cell=$('.score-cell[data-player="'+data.player_id+'"][data-round="'+data.round_number+'"]');
+    }
+    if(cell.length&&!cell.hasClass("editing")){
+      cell.text(data.score===null||data.score===""?"":data.score);
+      updateTotals();
+      setTimeout(function(){
+        checkTargetScore(parseInt(data.round_number,10));
+        if($("#roundEntryView").hasClass("active"))reRenderRound();
+      },0);
+    }
+  }
 
-  $("#deleteGame").click(function(){var gid=$(this).data("game-id");AppModal.confirm("Delete Game","Are you sure you want to permanently delete this game?",function(){$.ajax({url:"/api/games/delete/"+gid,method:"POST",success:function(){window.location.href="{{ url_for('main.skyjo') }}";},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to delete game");}});});});
+  function initSock(){
+    if(!window.DiFedeLiveGame){setTimeout(initSock,100);return;}
+    DiFedeLiveGame.connect({{ active_game.id }}, {
+      onScore: applyRemoteSkyjoScore,
+      afterApply: function(){
+        updateTotals();
+        if($("#roundEntryView").hasClass("active"))reRenderRound();
+      },
+      afterScore: function(d){
+        setTimeout(function(){checkTargetScore(parseInt(d.round_number,10));},0);
+      },
+      onCompleted: function(d){
+        if(gameCompletedByCurrentUser){gameCompletedByCurrentUser=false;return;}
+        AppModal.show({title:"Game Complete",body:'<pre style="white-space:pre-wrap;font-family:inherit;">'+d.summary+'</pre>',type:"success"});
+        var m=document.getElementById("appModal");
+        $(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});
+      },
+      onPaused: function(){
+        AppModal.show({title:"Game Paused",body:"<p>Another player has paused this game. Redirecting...</p>",type:"warning"});
+        setTimeout(function(){window.location.href="/game/skyjo";},2000);
+      },
+      onResumed: function(){
+        AppModal.show({title:"Game Resumed",body:"<p>Another player has resumed the game. Loading...</p>",type:"success"});
+        setTimeout(function(){window.location.href="{{ url_for('main.skyjo') }}?game_id={{ active_game.id }}";},2000);
+      }
+    });
+  }
+  initSock();
+  {% endif %}
 
-  $("#clearCompletedGames").click(function(){AppModal.confirm("Clear History","Clear all completed game history?",function(){$.ajax({url:"/api/games/five-crowns/clear-history",method:"POST",contentType:"application/json",data:JSON.stringify({game_id:{{ game_def.id }}}),success:function(){window.location.reload();},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to clear history");}});},{confirmText:"Clear History",cancelText:"Cancel"});});
+  $(".resume-game").click(function(){
+    var gid=$(this).data("game-id");
+    $.ajax({url:"/api/games/resume/"+gid,method:"POST",
+      success:function(){
+        AppModal.show({title:"Game Resumed",body:"<p>Loading game...</p>",type:"success"});
+        setTimeout(function(){window.location.href="{{ url_for('main.skyjo') }}?game_id="+gid;},1000);
+      },
+      error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to resume game");}
+    });
+  });
+
+  $(".complete-paused-game").click(function(){
+    var gid=$(this).data("game-id");
+    AppModal.confirm("End Game","End this game without recording results?",function(){
+      $.ajax({url:"/api/games/complete/"+gid,method:"POST",
+        success:function(){window.location.reload();},
+        error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to end game");}
+      });
+    },{confirmText:"End Game",cancelText:"Cancel"});
+  });
+
+  $("#clearCompletedGames").click(function(){
+    AppModal.confirm("Clear History","Clear all completed game history?",function(){
+      $.ajax({url:"/api/games/five-crowns/clear-history",method:"POST",contentType:"application/json",
+        data:JSON.stringify({game_id:{{ game_def.id }}}),
+        success:function(){window.location.reload();},
+        error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to clear history");}
+      });
+    },{confirmText:"Clear History",cancelText:"Cancel"});
+  });
 
   var refPinned=false;
   $("#refPanelToggle").click(function(){$("#refPanel").toggleClass("open");});
@@ -512,26 +1146,18 @@ $(document).ready(function(){
   $("#refPanelPin").click(function(){refPinned=!refPinned;$(this).css("opacity",refPinned?"1":"0.6");});
   $(document).click(function(e){if(!refPinned&&!$(e.target).closest("#refPanel,#refPanelToggle").length)$("#refPanel").removeClass("open");});
 
-  function initSock(){
-    {% if active_game %}
-    if(!window.DiFedeLiveGame){setTimeout(initSock,100);return;}
-    DiFedeLiveGame.connect({{ active_game.id }}, {
-      afterApply: function(){ updateTotals(); },
-      afterScore: function(d){ setTimeout(function(){ checkTargetScore(parseInt(d.round_number,10)); },0); },
-      onCompleted: function(d){
-        AppModal.show({title:"Game Complete",body:'<pre style="white-space:pre-wrap;font-family:inherit;">'+d.summary+'</pre>',type:"success"});
-        var m=document.getElementById("appModal");
-        $(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});
-      }
-    });
-    {% endif %}
-  }
-  initSock();
-
   $(document).on("click",".game-info-btn",function(){
     var gid=$(this).data("game-id"),modal=new bootstrap.Modal(document.getElementById("gameInfoModal")),ct=document.getElementById("gameInfoContent");
     ct.innerHTML='<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>';modal.show();
-    fetch("/api/game-details/"+gid).then(function(r){return r.json();}).then(function(d){if(d.success){var x=d.details;var h='';function sec(title,body){if(body)h+='<h6 class="fw-bold mt-3" style="color:#3a2a6a;">'+title+'</h6><div class="mb-2">'+body+'</div>';}if(x.rules)h+='<div class="mb-2">'+x.rules+'</div>';sec("Setup",x.setup_instructions);sec("Scoring",x.scoring_system);sec("Winning",x.winning_conditions);sec("Tips & Strategy",x.tips_and_strategies);ct.innerHTML=h||"<p>No game information available.</p>";}else{ct.innerHTML='<p class="text-danger">Error loading game information.</p>';}}).catch(function(){ct.innerHTML='<p class="text-danger">Error loading game information.</p>';});
+    fetch("/api/game-details/"+gid).then(function(r){return r.json();}).then(function(d){
+      if(d.success){
+        var x=d.details;var h='';
+        function sec(title,body){if(body)h+='<h6 class="fw-bold mt-3" style="color:#3a2a6a;">'+title+'</h6><div class="mb-2">'+body+'</div>';}
+        if(x.rules)h+='<div class="mb-2">'+x.rules+'</div>';
+        sec("Setup",x.setup_instructions);sec("Scoring",x.scoring_system);sec("Winning",x.winning_conditions);sec("Tips & Strategy",x.tips_and_strategies);
+        ct.innerHTML=h||"<p>No game information available.</p>";
+      }else{ct.innerHTML='<p class="text-danger">Error loading game information.</p>';}
+    }).catch(function(){ct.innerHTML='<p class="text-danger">Error loading game information.</p>';});
   });
 
   if(window.innerWidth>768){[].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(function(el){return new bootstrap.Tooltip(el);});}

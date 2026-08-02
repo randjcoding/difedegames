@@ -467,6 +467,31 @@ def main():
             check(f'{label} score cells are bold',
                   'font-weight: 700' in page_html or 'font-weight:700' in page_html)
 
+        skyjo_def = q1(conn, "SELECT id FROM games WHERE slug = 'skyjo'")
+        skyjo_ag = None
+        if skyjo_def:
+            r = client_a.post('/api/games/new', json={
+                'game_id': skyjo_def['id'],
+                'player_ids': [adult_id, minor_id],
+                'scoring_direction': 'low_wins',
+                'target_score': 100,
+            })
+            skyjo_game = r.get_json() or {}
+            skyjo_ag = skyjo_game.get('id')
+            check('skyjo game can be started for board checks',
+                  r.status_code == 200 and skyjo_ag, str(skyjo_game))
+        if skyjo_ag:
+            skyjo_board = client_a.get(f'/skyjo?game_id={skyjo_ag}').get_data(as_text=True)
+            check('skyjo board includes live sync wiring',
+                  'DiFedeLiveGame.connect' in skyjo_board
+                  and 'applyRemoteSkyjoScore' in skyjo_board)
+            check('skyjo board has round-by-round view',
+                  'roundEntryView' in skyjo_board and 'switchMobileView' in skyjo_board)
+            check('skyjo board auto-adds rounds',
+                  'ensureEmptyRow' in skyjo_board and 'afterRoundFilled' in skyjo_board)
+            run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (skyjo_ag,))
+            conn.commit()
+
         dash_a = client_a.get('/dashboard').get_data(as_text=True)
         check('dashboard shows hall of fame carousel card',
               'hofCarouselCard' in dash_a and 'Hall of Fame' in dash_a)
