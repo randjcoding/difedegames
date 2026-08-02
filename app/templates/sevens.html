@@ -80,7 +80,8 @@ content %}
   </div>
 
   {% else %}
-  <div class="game-board sevens-board" data-game-id="{{ active_game.id }}" data-target-score="{{ active_game.target_score or '' }}">
+  {% set round_label = 'Round' %}
+  <div class="game-board sevens-board" data-game-id="{{ active_game.id }}" data-target-score="{{ active_game.target_score or '' }}" style="--vrb-accent:#2C4270;--vrb-accent-dark:#1B2A4A;--vrb-gold:#C9A02C;">
     <div class="game-header-container position-relative mb-3">
       <h2 class="game-title text-center mb-0">Sevens - Active Game</h2>
       <button type="button" class="btn btn-link p-1 game-info-btn position-absolute" style="border:none;background:none;top:0;right:0;z-index:10;color:#C9A02C;" data-game-id="sevens" data-bs-toggle="tooltip" data-bs-placement="top" title="View game rules and information">
@@ -95,43 +96,47 @@ content %}
     </div>
     {% endif %}
 
+    {% include 'partials/round_entry_ui.html' %}
+    <div class="default-table-view" id="defaultTableView">
     <div class="score-sheet">
-      <div class="table-responsive">
-        <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
-          <thead>
-            <tr class="sevens-header">
-              <th class="round-header">Round</th>
-              {% for player in game_players %}
-              <th class="player-header"><span class="player-name">{{ player.display_name }}</span></th>
+        <div class="table-responsive">
+          <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
+            <thead>
+              <tr class="sevens-header">
+                <th class="round-header">Round</th>
+                {% for player in game_players %}
+                <th class="player-header"><span class="player-name">{{ player.display_name }}</span></th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% set round_numbers = [] %}
+              {% for key, val in scores.items() %}
+                {% if key[1] not in round_numbers %}
+                  {% if round_numbers.append(key[1]) %}{% endif %}
+                {% endif %}
               {% endfor %}
-            </tr>
-          </thead>
-          <tbody>
-            {% set round_numbers = [] %}
-            {% for key, val in scores.items() %}
-              {% if key[1] not in round_numbers %}
-                {% if round_numbers.append(key[1]) %}{% endif %}
-              {% endif %}
-            {% endfor %}
-            {% for round_num in round_numbers|sort %}
-            <tr>
-              <td class="round-cell">{{ round_num }}</td>
-              {% for player in game_players %}
-              <td class="score-cell" data-player="{{ player.id }}" data-round="{{ round_num }}">{{ scores.get((player.id, round_num), '') }}</td>
+              {% for round_num in round_numbers|sort %}
+              <tr class="hand-row" data-round="{{ round_num }}">
+                <td class="round-cell">{{ round_num }}</td>
+                {% for player in game_players %}
+                <td class="score-cell" data-player="{{ player.id }}" data-round="{{ round_num }}">{{ scores.get((player.id, round_num), '') }}</td>
+                {% endfor %}
+              </tr>
               {% endfor %}
-            </tr>
-            {% endfor %}
-            <tr class="total-row">
-              <td>Total</td>
-              {% for player in game_players %}
-              <td class="total-cell" data-player="{{ player.id }}">0</td>
-              {% endfor %}
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              <tr class="total-row">
+                <td>Total</td>
+                {% for player in game_players %}
+                <td class="total-cell" data-player="{{ player.id }}">0</td>
+                {% endfor %}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+    </div>
     </div>
     <div class="game-actions">
+      {% include 'partials/round_view_controls.html' %}
       <button id="addHand" class="btn btn-sm" style="background:#C9A02C;color:#1a1a1a;font-weight:600;"><i class="fas fa-plus me-1"></i>Add Round</button>
       <button id="pauseGame" class="btn btn-sm" style="background:#1B2A4A;color:white;font-weight:600;">Pause</button>
       <button id="completeGame" class="btn btn-sm" style="background:linear-gradient(135deg,#1a5c2e,#2d8a4e);color:white;font-weight:600;">Complete</button>
@@ -166,6 +171,9 @@ content %}
   </div>
   {% endif %}
 </div>
+
+{% set fs_title = 'Sevens - Full View' %}
+{% include 'partials/fullscreen_score_modal.html' %}
 
 <div class="modal fade" id="addPlayerModal">
   <div class="modal-dialog">
@@ -264,7 +272,6 @@ $(document).ready(function(){
     {id:{{ player.id }},name:"{{ player.display_name }}"}{% if not loop.last %},{% endif %}
     {% endfor %}
   ];
-  var currentRound=1;
   var pendingAddSeat=null;
   var picker=PlayerPicker.mount({
     container:'#playerSelections',
@@ -321,155 +328,22 @@ $(document).ready(function(){
     });
   });
 
-  var pc=$("#scoreTable th").length-1;
-  if(pc>0){$("#scoreTable").addClass("players-"+pc);document.documentElement.style.setProperty("--player-count",pc);}
-
-  var existRounds=[];
-  $("#scoreTable .round-cell").each(function(){var rn=parseInt($(this).text().trim());if(!isNaN(rn))existRounds.push(rn);});
-  currentRound=existRounds.length>0?Math.max.apply(null,existRounds)+1:1;
-
-  $("#addHand").click(function(){
-    var row='<tr><td class="round-cell">'+currentRound+'</td>';
-    GAME_PLAYERS.forEach(function(p){row+='<td class="score-cell" data-player="'+p.id+'" data-round="'+currentRound+'"></td>';});
-    row+='</tr>';
-    $(".total-row").before(row);currentRound++;
+  // ===== SCORE BOARD (shared variable-round system) =====
+  {% if active_game %}
+  var board=DiFedeVariableRounds.create({
+    activeGameId:{{ active_game.id }},
+    players:GAME_PLAYERS,
+    roundLabel:'Round',
+    allowNeg:false,
+    landingUrl:'/game/sevens',
+    resumeUrl:'{{ url_for("main.sevens") }}?game_id={{ active_game.id }}',
+    accent:'#2C4270',
+    accentDark:'#1B2A4A',
+    gold:'#C9A02C',
+    gameTitle:'Sevens'
   });
-
-  var updateTimer;
-  var targetScoreAlertShown=false;
-
-  function getCellScoreValue(cell){
-    if(cell.hasClass("editing")){
-      var inp=cell.find("input");
-      if(inp.length)return inp.val().trim();
-    }
-    return cell.text().trim();
-  }
-
-  function isRoundComplete(roundNum){
-    var expected=$("#scoreTable thead th").length-1;
-    var cells=$('.score-cell[data-round="'+roundNum+'"]');
-    if(!cells.length||cells.length!==expected)return false;
-    var ok=true;
-    cells.each(function(){
-      if(getCellScoreValue($(this))===""){ok=false;return false;}
-    });
-    return ok;
-  }
-
-  function checkTargetScore(triggerRound){
-    if(targetScoreAlertShown)return;
-    var target=parseInt($(".game-board").data("target-score"));
-    if(!target||triggerRound==null||!isRoundComplete(triggerRound))return;
-    var crossed=[];
-    $(".total-cell").each(function(){
-      var total=parseInt($(this).text())||0;
-      if(total>=target){
-        var idx=$(".total-cell").index(this);
-        var name=$("#scoreTable thead th").eq(idx+1).text().trim();
-        crossed.push({name:name,total:total});
-        $(this).addClass("target-crossed");
-      }else{
-        $(this).removeClass("target-crossed");
-      }
-    });
-    if(crossed.length>0){
-      targetScoreAlertShown=true;
-      var names=crossed.map(function(c){return "<strong>"+c.name+"</strong> ("+c.total+")";}).join(", ");
-      AppModal.confirm(
-        "Target Score Reached!",
-        names+" reached the target of <strong>"+target+"</strong> points. Would you like to end the game?",
-        function(){doCompleteGame();},
-        {confirmText:"End Game",cancelText:"Keep Playing"}
-      );
-      var modalEl=document.getElementById("appModal");
-      $(modalEl).on("hidden.bs.modal.targetcheck",function(){
-        targetScoreAlertShown=false;
-        $(modalEl).off("hidden.bs.modal.targetcheck");
-      });
-    }
-  }
-
-  function doCompleteGame(){
-    var gid=$(".game-board").data("game-id");
-    $.ajax({url:"/api/games/complete/"+gid,method:"POST",
-      success:function(r){
-        if(r.summary){AppModal.show({title:"Game Complete!",body:'<pre class="mb-0" style="white-space:pre-wrap;font-family:inherit;">'+r.summary+'</pre>',type:"success"});var m=document.getElementById("appModal");$(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});}
-        else{window.location.reload();}
-      },
-      error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to complete game");}
-    });
-  }
-
-  function updateScore(cell,nv,ov){
-    if(!cell.hasClass("editing"))return;
-    clearTimeout(updateTimer);
-    var gid=$(".game-board").data("game-id");
-    var scoreVal=nv!==""&&!isNaN(nv)?parseInt(nv):null;
-    var roundNum=parseInt(cell.attr("data-round"),10);
-    var playerId=cell.attr("data-player");
-    afterScoreSaved(cell,scoreVal);
-    $.ajax({url:"/api/scores",method:"POST",contentType:"application/json",data:JSON.stringify({game_id:gid,player_id:playerId,round_number:roundNum,score:scoreVal}),
-      success:function(){},
-      error:function(xhr){
-        AppModal.error("Error",xhr.responseJSON?.error||"Failed to save score");
-        cell.text(ov||"");
-        updateTotals();
-        checkTargetScore(roundNum);
-      }
-    });
-  }
-
-  function afterScoreSaved(cell,scoreVal){
-    cell.removeClass("editing");
-    cell.text(scoreVal!==null?scoreVal:"");
-    updateTotals();
-    var roundNum=parseInt(cell.attr("data-round"),10);
-    setTimeout(function(){checkTargetScore(roundNum);},0);
-  }
-
-  $(document).on("click",".score-cell",function(){
-    var cell=$(this);
-    if(cell.hasClass("editing"))return;
-    var cv=cell.text().trim();cell.data("original-value",cv);cell.addClass("editing");
-    cell.html('<input type="number" class="form-control form-control-sm border-0" value="'+cv+'" inputmode="numeric" style="width:100%;text-align:center;background:transparent;box-shadow:none;">');
-    var inp=cell.find("input");inp.focus().select();
-    inp.on("blur",function(){if(cell.hasClass("editing"))updateScore(cell,inp.val(),cv);});
-    inp.on("input",function(){clearTimeout(updateTimer);updateTimer=setTimeout(function(){if(cell.hasClass("editing"))updateScore(cell,inp.val(),cv);},4000);});
-    inp.on("keypress",function(e){if(e.which===13){e.preventDefault();updateScore(cell,inp.val(),cv);}});
-  });
-
-  $(document).on("keydown",".score-cell input",function(e){
-    var cell=$(this).closest(".score-cell"),cv=cell.data("original-value"),nv=$(this).val();
-    if(e.which===9){e.preventDefault();updateScore(cell,nv,cv);var nc=e.shiftKey?cell.prev(".score-cell"):cell.next(".score-cell");if(!nc.length&&!e.shiftKey){var nr=cell.parent("tr").next("tr");if(nr.length&&!nr.hasClass("total-row"))nc=nr.find(".score-cell").first();}if(nc&&nc.length)nc.click();}
-    else if(e.which===13){e.preventDefault();updateScore(cell,nv,cv);var dr=cell.parent("tr").next("tr");if(dr.length&&!dr.hasClass("total-row"))dr.find(".score-cell").eq(cell.index()-1).click();}
-  });
-
-  function updateTotals(){
-    $(".total-cell").each(function(){
-      var pid=$(this).data("player"),tot=0;
-      $(".score-cell[data-player='"+pid+"']").each(function(){
-        var s=getCellScoreValue($(this));
-        if(s!==""&&!isNaN(parseInt(s)))tot+=parseInt(s);
-      });
-      $(this).text(tot);
-    });
-  }
-  updateTotals();
-
-  $("#completeGame").click(function(){
-    AppModal.confirm("Complete Game","Are you sure you want to complete this game? This cannot be undone.",function(){
-      doCompleteGame();
-    });
-  });
-
-  $("#pauseGame").click(function(){
-    var gid=$(".game-board").data("game-id");
-    $.ajax({url:"/api/games/pause/"+gid,method:"POST",
-      success:function(){AppModal.show({title:"Game Paused",body:"<p>Returning to Sevens...</p>",type:"info"});setTimeout(function(){window.location.href="/game/sevens";},1500);},
-      error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to pause game");}
-    });
-  });
+  board.init();
+  {% endif %}
 
   $(".resume-game").click(function(){var gid=$(this).data("game-id");$.ajax({url:"/api/games/resume/"+gid,method:"POST",success:function(){AppModal.show({title:"Game Resumed",body:"<p>Loading game...</p>",type:"success"});setTimeout(function(){window.location.href="{{ url_for('main.sevens') }}?game_id="+gid;},1000);},error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to resume game");}});});
 
@@ -484,22 +358,6 @@ $(document).ready(function(){
   $("#refPanelClose").click(function(){$("#refPanel").removeClass("open");refPinned=false;$("#refPanelPin").css("opacity","0.6");});
   $("#refPanelPin").click(function(){refPinned=!refPinned;$(this).css("opacity",refPinned?"1":"0.6");});
   $(document).click(function(e){if(!refPinned&&!$(e.target).closest("#refPanel,#refPanelToggle").length)$("#refPanel").removeClass("open");});
-
-  function initSock(){
-    {% if active_game %}
-    if(!window.DiFedeLiveGame){setTimeout(initSock,100);return;}
-    DiFedeLiveGame.connect({{ active_game.id }}, {
-      afterApply: function(){ updateTotals(); },
-      afterScore: function(d){ setTimeout(function(){ checkTargetScore(parseInt(d.round_number,10)); },0); },
-      onCompleted: function(d){
-        AppModal.show({title:"Game Complete",body:'<pre style="white-space:pre-wrap;font-family:inherit;">'+d.summary+'</pre>',type:"success"});
-        var m=document.getElementById("appModal");
-        $(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});
-      }
-    });
-    {% endif %}
-  }
-  initSock();
 
   $(document).on("click",".game-info-btn",function(){
     var gid=$(this).data("game-id"),modal=new bootstrap.Modal(document.getElementById("gameInfoModal")),ct=document.getElementById("gameInfoContent");

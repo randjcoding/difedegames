@@ -1,0 +1,12 @@
+{% set fs_title = fs_title|default('Full View') %}
+<div class="modal fade" id="fullscreenTableModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content" style="background:var(--df-surface, #1e1e3a);">
+      <div class="modal-header py-2" style="background:linear-gradient(135deg,var(--vrb-accent-dark,#3a2a6a),var(--vrb-accent,#7a3fa0));color:white;">
+        <h6 class="modal-title mb-0">{{ fs_title }}</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-2" id="fullscreenBody" style="overflow:auto;"></div>
+    </div>
+  </div>
+</div>

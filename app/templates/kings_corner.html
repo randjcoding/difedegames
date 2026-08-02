@@ -80,7 +80,8 @@ content %}
   </div>
 
   {% else %}
-  <div class="game-board kings-board" data-game-id="{{ active_game.id }}" data-mode="{{ active_game.scoring_direction }}">
+  {% set round_label = 'Hand' %}
+  <div class="game-board kings-board" data-game-id="{{ active_game.id }}" data-mode="{{ active_game.scoring_direction }}" data-target-score="" style="--vrb-accent:#2d8a4e;--vrb-accent-dark:#1a5c2e;--vrb-gold:#C9A02C;">
     <div class="game-header-container position-relative mb-3">
       <h2 class="game-title text-center mb-0">Kings in the Corner - Active Game</h2>
       <button type="button" class="btn btn-link p-1 game-info-btn position-absolute" style="border:none;background:none;top:0;right:0;z-index:10;color:#C9A02C;" data-game-id="kings-corner" data-bs-toggle="tooltip" data-bs-placement="top" title="View game rules and information">
@@ -129,43 +130,47 @@ content %}
     </div>
 
     {% else %}
+    {% include 'partials/round_entry_ui.html' %}
+    <div class="default-table-view" id="defaultTableView">
     <div class="score-sheet">
-      <div class="table-responsive">
-        <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
-          <thead>
-            <tr class="kings-header">
-              <th class="round-header">Hand</th>
-              {% for player in game_players %}
-              <th class="player-header"><span class="player-name">{{ player.display_name }}</span></th>
+        <div class="table-responsive">
+          <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
+            <thead>
+              <tr class="kings-header">
+                <th class="round-header">Hand</th>
+                {% for player in game_players %}
+                <th class="player-header"><span class="player-name">{{ player.display_name }}</span></th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% set round_numbers = [] %}
+              {% for key, val in scores.items() %}
+                {% if key[1] not in round_numbers %}
+                  {% if round_numbers.append(key[1]) %}{% endif %}
+                {% endif %}
               {% endfor %}
-            </tr>
-          </thead>
-          <tbody>
-            {% set round_numbers = [] %}
-            {% for key, val in scores.items() %}
-              {% if key[1] not in round_numbers %}
-                {% if round_numbers.append(key[1]) %}{% endif %}
-              {% endif %}
-            {% endfor %}
-            {% for round_num in round_numbers|sort %}
-            <tr>
-              <td class="round-cell">{{ round_num }}</td>
-              {% for player in game_players %}
-              <td class="score-cell" data-player="{{ player.id }}" data-round="{{ round_num }}">{{ scores.get((player.id, round_num), '') }}</td>
+              {% for round_num in round_numbers|sort %}
+              <tr class="hand-row" data-round="{{ round_num }}">
+                <td class="round-cell">{{ round_num }}</td>
+                {% for player in game_players %}
+                <td class="score-cell" data-player="{{ player.id }}" data-round="{{ round_num }}">{{ scores.get((player.id, round_num), '') }}</td>
+                {% endfor %}
+              </tr>
               {% endfor %}
-            </tr>
-            {% endfor %}
-            <tr class="total-row">
-              <td>Total</td>
-              {% for player in game_players %}
-              <td class="total-cell" data-player="{{ player.id }}">0</td>
-              {% endfor %}
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              <tr class="total-row">
+                <td>Total</td>
+                {% for player in game_players %}
+                <td class="total-cell" data-player="{{ player.id }}">0</td>
+                {% endfor %}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+    </div>
     </div>
     <div class="game-actions">
+      {% include 'partials/round_view_controls.html' %}
       <button id="addHand" class="btn btn-sm" style="background:#C9A02C;color:#1a1a1a;font-weight:600;"><i class="fas fa-plus me-1"></i>Add Hand</button>
       <button id="pauseGame" class="btn btn-sm" style="background:#b22234;color:white;font-weight:600;">Pause</button>
       <button id="completeGame" class="btn btn-sm" style="background:linear-gradient(135deg,#1a5c2e,#2d8a4e);color:white;font-weight:600;">Complete</button>
@@ -196,6 +201,9 @@ content %}
   </div>
   {% endif %}
 </div>
+
+{% set fs_title = 'Kings in the Corner - Full View' %}
+{% include 'partials/fullscreen_score_modal.html' %}
 
 <div class="modal fade" id="addPlayerModal">
   <div class="modal-dialog">
@@ -308,7 +316,6 @@ $(document).ready(function(){
     {id:{{ player.id }},name:"{{ player.display_name }}"}{% if not loop.last %},{% endif %}
     {% endfor %}
   ];
-  var currentRound=1;
   var pendingAddSeat=null;
   var picker=PlayerPicker.mount({
     container:'#playerSelections',
@@ -368,80 +375,22 @@ $(document).ready(function(){
     });
   });
 
-  // ===== MULTI-ROUND SCORE TABLE =====
-  var pc=$("#scoreTable th").length-1;
-  if(pc>0){$("#scoreTable").addClass("players-"+pc);document.documentElement.style.setProperty("--player-count",pc);}
-
-  var existRounds=[];
-  $("#scoreTable .round-cell").each(function(){var rn=parseInt($(this).text().trim());if(!isNaN(rn))existRounds.push(rn);});
-  currentRound=existRounds.length>0?Math.max.apply(null,existRounds)+1:1;
-
-  $("#addHand").click(function(){
-    var row='<tr><td class="round-cell">'+currentRound+'</td>';
-    GAME_PLAYERS.forEach(function(p){row+='<td class="score-cell" data-player="'+p.id+'" data-round="'+currentRound+'"></td>';});
-    row+='</tr>';
-    $(".total-row").before(row);currentRound++;
+  // ===== MULTI-ROUND SCORE BOARD (shared variable-round system) =====
+  {% if active_game and active_game.scoring_direction != 'single_round' %}
+  var board=DiFedeVariableRounds.create({
+    activeGameId:{{ active_game.id }},
+    players:GAME_PLAYERS,
+    roundLabel:'Hand',
+    allowNeg:false,
+    landingUrl:'/game/kings-corner',
+    resumeUrl:'{{ url_for("main.kings_corner") }}?game_id={{ active_game.id }}',
+    accent:'#2d8a4e',
+    accentDark:'#1a5c2e',
+    gold:'#C9A02C',
+    gameTitle:'Kings in the Corner'
   });
-
-  var updateTimer;
-  function updateScore(cell,nv,ov){
-    var gid=$(".game-board").data("game-id");
-    if(nv!==""&&!isNaN(nv)){
-      $.ajax({url:"/api/scores",method:"POST",contentType:"application/json",data:JSON.stringify({game_id:gid,player_id:cell.data("player"),round_number:cell.data("round"),score:parseInt(nv)}),
-        success:function(){cell.removeClass("editing");cell.text(nv);updateTotals();},
-        error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to save score");cell.removeClass("editing");cell.text(ov||"");}
-      });
-    }else{
-      $.ajax({url:"/api/scores",method:"POST",contentType:"application/json",data:JSON.stringify({game_id:gid,player_id:cell.data("player"),round_number:cell.data("round"),score:null}),
-        success:function(){cell.removeClass("editing");cell.text("");updateTotals();},
-        error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to delete score");cell.removeClass("editing");cell.text(ov||"");}
-      });
-    }
-  }
-
-  $(document).on("click",".score-cell",function(){
-    var cell=$(this);
-    if(!cell.hasClass("editing")){
-      var cv=cell.text().trim();cell.data("original-value",cv);cell.addClass("editing");
-      cell.html('<input type="number" class="form-control form-control-sm border-0" value="'+cv+'" inputmode="numeric" style="width:100%;text-align:center;background:transparent;box-shadow:none;">');
-      var inp=cell.find("input");inp.focus().select();
-      inp.on("blur",function(){updateScore(cell,inp.val(),cv);});
-      inp.on("input",function(){clearTimeout(updateTimer);updateTimer=setTimeout(function(){updateScore(cell,inp.val(),cv);},4000);});
-      inp.on("keypress",function(e){if(e.which===13)updateScore(cell,inp.val(),cv);});
-    }
-  });
-
-  $(document).on("keydown",".score-cell input",function(e){
-    var cell=$(this).closest(".score-cell"),cv=cell.data("original-value"),nv=$(this).val();
-    if(e.which===9){e.preventDefault();updateScore(cell,nv,cv);var nc=e.shiftKey?cell.prev(".score-cell"):cell.next(".score-cell");if(!nc.length&&!e.shiftKey){var nr=cell.parent("tr").next("tr");if(nr.length&&!nr.hasClass("total-row"))nc=nr.find(".score-cell").first();}if(nc&&nc.length)nc.click();}
-    else if(e.which===13){e.preventDefault();updateScore(cell,nv,cv);var dr=cell.parent("tr").next("tr");if(dr.length&&!dr.hasClass("total-row"))dr.find(".score-cell").eq(cell.index()-1).click();}
-  });
-
-  function updateTotals(){
-    $(".total-cell").each(function(){var pid=$(this).data("player"),tot=0;$(".score-cell[data-player='"+pid+"']").each(function(){var s=$(this).text().trim();if(s!==""&&!isNaN(parseInt(s)))tot+=parseInt(s);});$(this).text(tot);});
-  }
-  updateTotals();
-
-  $("#completeGame").click(function(){
-    AppModal.confirm("Complete Game","Are you sure you want to complete this game? This cannot be undone.",function(){
-      var gid=$(".game-board").data("game-id");
-      $.ajax({url:"/api/games/complete/"+gid,method:"POST",
-        success:function(r){
-          if(r.summary){AppModal.show({title:"Game Complete!",body:'<pre class="mb-0" style="white-space:pre-wrap;font-family:inherit;">'+r.summary+'</pre>',type:"success"});var m=document.getElementById("appModal");$(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});}
-          else{window.location.reload();}
-        },
-        error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to complete game");}
-      });
-    });
-  });
-
-  $("#pauseGame").click(function(){
-    var gid=$(".game-board").data("game-id");
-    $.ajax({url:"/api/games/pause/"+gid,method:"POST",
-      success:function(){AppModal.show({title:"Game Paused",body:"<p>Returning to Kings in the Corner...</p>",type:"info"});setTimeout(function(){window.location.href="/game/kings-corner";},1500);},
-      error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to pause game");}
-    });
-  });
+  board.init();
+  {% endif %}
 
   // ===== SINGLE-ROUND SOW =====
   $("#recordResults").click(function(){$(this).hide();$("#resultsSection").slideDown();});
@@ -499,16 +448,23 @@ $(document).ready(function(){
   $("#refPanelPin").click(function(){refPinned=!refPinned;$(this).css("opacity",refPinned?"1":"0.6");});
   $(document).click(function(e){if(!refPinned&&!$(e.target).closest("#refPanel,#refPanelToggle").length)$("#refPanel").removeClass("open");});
 
-  // Live score sync (Socket.IO + poll backup)
+  // Live score sync for single-round mode (multi-round is handled by the board above)
   function initSock(){
-    {% if active_game %}
+    {% if active_game and active_game.scoring_direction == 'single_round' %}
     if(!window.DiFedeLiveGame){setTimeout(initSock,100);return;}
     DiFedeLiveGame.connect({{ active_game.id }}, {
-      afterApply: function(){ updateTotals(); },
       onCompleted: function(d){
         AppModal.show({title:"Game Complete",body:'<pre style="white-space:pre-wrap;font-family:inherit;">'+d.summary+'</pre>',type:"success"});
         var m=document.getElementById("appModal");
         $(m).on("hidden.bs.modal.reload",function(){$(m).off("hidden.bs.modal.reload");window.location.reload();});
+      },
+      onPaused: function(){
+        AppModal.show({title:"Game Paused",body:"<p>Another player has paused this game. Redirecting...</p>",type:"warning"});
+        setTimeout(function(){window.location.href="/game/kings-corner";},2000);
+      },
+      onResumed: function(){
+        AppModal.show({title:"Game Resumed",body:"<p>Another player has resumed the game. Loading...</p>",type:"success"});
+        setTimeout(function(){window.location.href="{{ url_for('main.kings_corner') }}?game_id={{ active_game.id }}";},2000);
       }
     });
     {% endif %}

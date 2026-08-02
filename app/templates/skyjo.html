@@ -1038,14 +1038,21 @@ $(document).ready(function(){
 
   $("#pauseGame").click(function(){
     flushOpenScoreEdits();
-    var gid=$(".game-board").data("game-id");
-    $.ajax({url:"/api/games/pause/"+gid,method:"POST",
-      success:function(){
-        AppModal.show({title:"Game Paused",body:"<p>Returning to Skyjo...</p>",type:"info"});
-        setTimeout(function(){window.location.href="/game/skyjo";},1500);
-      },
-      error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to pause game");}
-    });
+    function proceedWithPause(){
+      var gid=$(".game-board").data("game-id");
+      $.ajax({url:"/api/games/pause/"+gid,method:"POST",
+        success:function(){
+          AppModal.show({title:"Game Paused",body:"<p>Returning to Skyjo...</p>",type:"info"});
+          setTimeout(function(){window.location.href="/game/skyjo";},1500);
+        },
+        error:function(xhr){AppModal.error("Error",xhr.responseJSON?.error||"Failed to pause game");}
+      });
+    }
+    if(window.ScoreSave&&typeof ScoreSave.flushAsync==="function"){
+      ScoreSave.flushAsync().always(proceedWithPause);
+    }else{
+      proceedWithPause();
+    }
   });
 
   $("#deleteGame").click(function(){

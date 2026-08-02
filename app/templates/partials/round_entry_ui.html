@@ -1,0 +1,146 @@
+{# Shared round-entry + mobile toggle + fullscreen modal.
+   Expects CSS vars on .game-board or container:
+   --vrb-accent, --vrb-accent-dark, --vrb-gold
+   Optional: round_label (default Round) #}
+{% set round_label = round_label|default('Round') %}
+
+<div class="round-entry-view" id="roundEntryView">
+  <div class="round-entry-card">
+    <div class="round-entry-header">
+      <span id="reRoundLabel">{{ round_label }} 1</span>
+      <span id="reRoundProgress">1 / 1</span>
+    </div>
+    <div class="round-entry-body" id="rePlayerList"></div>
+  </div>
+  <div class="round-nav-btns">
+    <button class="btn" id="rePrev" type="button"><i class="fas fa-chevron-left"></i> Prev</button>
+    <button class="btn" id="reSaveRound" type="button"><i class="fas fa-check me-1"></i>Save {{ round_label }}</button>
+    <button class="btn" id="reNext" type="button">Next <i class="fas fa-chevron-right"></i></button>
+  </div>
+</div>
+
+<style>
+  .round-entry-view { display: none; }
+  .mobile-view-toggle { display: none !important; }
+  .default-table-view.hidden { display: none; }
+  .fs-tbl input:focus {
+    background: #efe6fa !important;
+    color: #1a0a30 !important;
+    caret-color: #1a0a30 !important;
+    box-shadow: inset 0 0 0 2px var(--vrb-accent, #7a3fa0);
+  }
+  .fs-tbl input::-webkit-inner-spin-button,
+  .fs-tbl input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .fs-tbl input[type=number] { -moz-appearance: textfield; }
+  @media (max-width: 768px) {
+    .mobile-view-toggle { display: inline-flex !important; gap: 2px; }
+    .view-toggle-btn {
+      background: rgba(255,255,255,0.15) !important;
+      color: #e0d4f5 !important;
+      border: 1px solid rgba(255,255,255,0.2) !important;
+      border-radius: 6px !important;
+      padding: 3px 8px !important;
+      font-size: 0.68rem !important;
+      font-weight: 600 !important;
+    }
+    .view-toggle-btn.active {
+      background: color-mix(in srgb, var(--vrb-accent, #7a3fa0) 85%, black) !important;
+      color: white !important;
+      border-color: var(--vrb-gold, #f0a500) !important;
+    }
+    .round-entry-view.active { display: block; }
+    .round-entry-card {
+      background: var(--df-surface, #1e1e3a);
+      border: 2px solid var(--vrb-accent, #7a3fa0);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .round-entry-header {
+      background: linear-gradient(135deg, var(--vrb-accent-dark, #3a2a6a), var(--vrb-accent, #7a3fa0));
+      color: white;
+      padding: 10px 14px;
+      font-weight: bold;
+      font-size: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .round-entry-header #reRoundProgress { font-size: 0.75rem; opacity: 0.8; }
+    .round-entry-body { padding: 6px 10px; }
+    .round-player-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 4px;
+      border-bottom: 1px solid rgba(255,255,255,0.12);
+    }
+    .round-player-row:last-child { border-bottom: none; }
+    .round-player-name {
+      flex: 1;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--df-text, #e0e0e0);
+    }
+    .round-player-score-wrap { display: flex; align-items: center; gap: 4px; }
+    .round-neg-toggle {
+      padding: 0 6px;
+      font-size: 0.85rem;
+      line-height: 1.4;
+      color: #dc3545;
+      font-weight: 900;
+      border: 1px solid #dc3545;
+      border-radius: 6px;
+      background: #fff;
+      min-width: 26px;
+    }
+    .round-player-score {
+      width: 72px;
+      text-align: center;
+      font-size: 1.1rem;
+      font-weight: 600;
+      padding: 8px 4px;
+      border: 2px solid var(--vrb-accent, #7a3fa0);
+      border-radius: 8px;
+      background: #ffffff;
+      color: #212529;
+    }
+    .round-player-score:focus {
+      border-color: var(--vrb-gold, #f0a500);
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(240,165,0,0.25);
+    }
+    .round-player-total {
+      width: 45px;
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--df-text, #aaa);
+      opacity: 0.7;
+      font-weight: 600;
+    }
+    .round-nav-btns {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      margin-top: 8px;
+    }
+    .round-nav-btns .btn {
+      padding: 8px 16px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      border-radius: 8px;
+    }
+    #rePrev, #reNext {
+      background: rgba(0,0,0,0.25);
+      color: #e0e0e0;
+      border: 1px solid var(--vrb-accent, #7a3fa0);
+    }
+    #rePrev:disabled, #reNext:disabled {
+      opacity: 0.35;
+    }
+    #reSaveRound {
+      background: linear-gradient(135deg, var(--vrb-accent-dark, #3a2a6a), var(--vrb-accent, #7a3fa0));
+      color: white;
+      border: none;
+    }
+  }
+</style>

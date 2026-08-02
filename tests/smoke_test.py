@@ -467,29 +467,148 @@ def main():
             check(f'{label} score cells are bold',
                   'font-weight: 700' in page_html or 'font-weight:700' in page_html)
 
-        skyjo_def = q1(conn, "SELECT id FROM games WHERE slug = 'skyjo'")
-        skyjo_ag = None
-        if skyjo_def:
-            r = client_a.post('/api/games/new', json={
-                'game_id': skyjo_def['id'],
+        # Shared board helper must be served from base for variable-round games.
+        any_game_page = client_a.get('/gin-rummy').get_data(as_text=True)
+        check('base loads variable_round_board.js helper',
+              'variable_round_board.js' in any_game_page
+              or 'DiFedeVariableRounds' in any_game_page)
+        vrb_js_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'app', 'static', 'js', 'variable_round_board.js'
+        )
+        vrb_js = ''
+        if os.path.isfile(vrb_js_path):
+            with open(vrb_js_path, encoding='utf-8') as fh:
+                vrb_js = fh.read()
+        check('variable_round_board.js wires DiFedeLiveGame.connect',
+              'DiFedeLiveGame.connect' in vrb_js and 'applyRemoteScore' in vrb_js
+              and 'ensureEmptyRow' in vrb_js and 'afterRoundFilled' in vrb_js)
+
+        # Variable-round / live-sync board matrix.
+        # Five Crowns: fixed rounds (no auto-add). Trouble: SOW/pegs (no round grid).
+        board_specs = [
+            {
+                'slug': 'skyjo', 'path': '/skyjo', 'label': 'skyjo',
+                'scoring_direction': 'low_wins', 'target_score': 100,
+                'live': ('DiFedeLiveGame.connect', 'applyRemoteSkyjoScore'),
+                'round_view': True, 'auto_rounds': True, 'vrb': False,
+            },
+            {
+                'slug': 'gin-rummy', 'path': '/gin-rummy', 'label': 'gin rummy',
+                'scoring_direction': 'high_wins', 'target_score': 100,
+                'live': ('DiFedeVariableRounds.create',),
+                'round_view': True, 'auto_rounds': True, 'vrb': True,
+            },
+            {
+                'slug': 'sevens', 'path': '/sevens', 'label': 'sevens',
+                'scoring_direction': 'low_wins', 'target_score': 100,
+                'live': ('DiFedeVariableRounds.create',),
+                'round_view': True, 'auto_rounds': True, 'vrb': True,
+            },
+            {
+                'slug': 'kings-corner', 'path': '/kings-corner', 'label': 'kings corner multi',
+                'scoring_direction': 'low_wins', 'target_score': None,
+                'live': ('DiFedeVariableRounds.create',),
+                'round_view': True, 'auto_rounds': True, 'vrb': True,
+            },
+            {
+                'slug': 'basic-other', 'path': '/basic-other', 'label': 'basic other scored',
+                'scoring_direction': 'high_wins', 'target_score': 50,
+                'live': ('DiFedeVariableRounds.create',),
+                'round_view': True, 'auto_rounds': True, 'vrb': True,
+                'extra_new': {'custom_game_name': 'Zztest Board Check'},
+            },
+            {
+                'slug': 'dutch-blitz', 'path': '/dutch-blitz', 'label': 'dutch blitz',
+                'scoring_direction': 'high_wins', 'target_score': 75,
+                'live': ('DiFedeLiveGame.connect', 'applyRemoteBlitzScore'),
+                'round_view': True, 'auto_rounds': True, 'vrb': False,
+            },
+            {
+                'slug': 'uno-classic', 'path': '/uno', 'label': 'uno classic',
+                'scoring_direction': 'high_wins', 'target_score': 500,
+                'live': ('DiFedeLiveGame.connect', 'applyRemoteUnoScore'),
+                'round_view': True, 'auto_rounds': True, 'vrb': False,
+            },
+            {
+                'slug': 'uno-flip', 'path': '/uno-flip', 'label': 'uno flip',
+                'scoring_direction': 'high_wins', 'target_score': 500,
+                'live': ('DiFedeLiveGame.connect', 'applyRemoteFlipScore'),
+                'round_view': True, 'auto_rounds': True, 'vrb': False,
+            },
+            {
+                'slug': 'five-crowns', 'path': '/five-crowns', 'label': 'five crowns',
+                'scoring_direction': 'low_wins', 'target_score': None,
+                'live': ('DiFedeLiveGame.connect',),
+                'round_view': True, 'auto_rounds': False, 'vrb': False,
+                'fixed_rounds': True,
+            },
+            {
+                'slug': 'trouble', 'path': '/trouble', 'label': 'trouble',
+                'scoring_direction': 'single_round', 'target_score': None,
+                'live': ('DiFedeLiveGame.connect', 'onPaused'),
+                'round_view': False, 'auto_rounds': False, 'vrb': False,
+            },
+        ]
+
+        for spec in board_specs:
+            gdef = q1(conn, "SELECT id FROM games WHERE slug = %s", (spec['slug'],))
+            if not gdef:
+                check(f"{spec['label']} game type exists", False, f"missing slug {spec['slug']}")
+                continue
+            payload = {
+                'game_id': gdef['id'],
                 'player_ids': [adult_id, minor_id],
-                'scoring_direction': 'low_wins',
-                'target_score': 100,
-            })
-            skyjo_game = r.get_json() or {}
-            skyjo_ag = skyjo_game.get('id')
-            check('skyjo game can be started for board checks',
-                  r.status_code == 200 and skyjo_ag, str(skyjo_game))
-        if skyjo_ag:
-            skyjo_board = client_a.get(f'/skyjo?game_id={skyjo_ag}').get_data(as_text=True)
-            check('skyjo board includes live sync wiring',
-                  'DiFedeLiveGame.connect' in skyjo_board
-                  and 'applyRemoteSkyjoScore' in skyjo_board)
-            check('skyjo board has round-by-round view',
-                  'roundEntryView' in skyjo_board and 'switchMobileView' in skyjo_board)
-            check('skyjo board auto-adds rounds',
-                  'ensureEmptyRow' in skyjo_board and 'afterRoundFilled' in skyjo_board)
-            run(conn, 'UPDATE active_games SET is_complete = TRUE WHERE id = %s', (skyjo_ag,))
+                'scoring_direction': spec['scoring_direction'],
+                'target_score': spec['target_score'],
+            }
+            if spec.get('extra_new'):
+                payload.update(spec['extra_new'])
+            r = client_a.post('/api/games/new', json=payload)
+            created = r.get_json() or {}
+            ag = created.get('id')
+            check(f"{spec['label']} game can be started for board checks",
+                  r.status_code == 200 and ag, str(created)[:200])
+            if not ag:
+                continue
+            board = client_a.get(f"{spec['path']}?game_id={ag}").get_data(as_text=True)
+            for marker in spec['live']:
+                check(f"{spec['label']} live sync has {marker}", marker in board)
+            if spec['round_view']:
+                check(f"{spec['label']} has round-by-round view",
+                      'roundEntryView' in board
+                      and ('switchMobileView' in board or 'btnRoundView' in board))
+            else:
+                check(f"{spec['label']} correctly omits round grid view",
+                      'roundEntryView' not in board)
+            if spec['vrb']:
+                check(f"{spec['label']} uses shared variable-round board",
+                      'DiFedeVariableRounds.create' in board)
+            if spec['auto_rounds']:
+                if spec['vrb']:
+                    check(f"{spec['label']} wires auto-rounds via VariableRounds",
+                          'DiFedeVariableRounds.create' in board
+                          and ('board.init()' in board or 'VRB.init()' in board))
+                else:
+                    check(f"{spec['label']} auto-adds rounds",
+                          'ensureEmptyRow' in board and 'afterRoundFilled' in board)
+            if spec.get('fixed_rounds'):
+                check(f"{spec['label']} stays fixed-round (no auto-add helper)",
+                      'ensureEmptyRow' not in board
+                      and 'DiFedeVariableRounds' not in board)
+            # Score persistence smoke for round-based boards (not Trouble SOW).
+            if spec['round_view'] and spec['slug'] != 'five-crowns':
+                r1 = client_a.post('/api/scores', json={
+                    'game_id': ag, 'player_id': adult_id,
+                    'round_number': 1, 'score': 7,
+                })
+                check(f"{spec['label']} can save a round score",
+                      r1.status_code == 200, str(r1.get_json())[:120])
+            # Fully remove these disposable sessions so later identity tests
+            # that assert exact score counts on adult/minor are not polluted.
+            run(conn, 'DELETE FROM game_scores WHERE active_game_id = %s', (ag,))
+            run(conn, 'DELETE FROM active_game_players WHERE active_game_id = %s', (ag,))
+            run(conn, 'DELETE FROM active_games WHERE id = %s', (ag,))
             conn.commit()
 
         dash_a = client_a.get('/dashboard').get_data(as_text=True)

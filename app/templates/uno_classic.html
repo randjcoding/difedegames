@@ -131,6 +131,7 @@ content %}
     data-game-id="{{ active_game.id }}"
     data-scoring-direction="{{ active_game.scoring_direction }}"
     data-target-score="{{ active_game.target_score }}"
+    style="--vrb-accent:#ED1C24;--vrb-accent-dark:#c41920;--vrb-gold:#FFCD00;"
   >
     <div class="game-header-container position-relative mb-3">
       <h2 class="game-title text-center mb-0">UNO Classic - Active Game</h2>
@@ -171,47 +172,53 @@ content %}
       </span>
     </div>
 
-    <div class="score-sheet">
-      <div class="table-responsive">
-        <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
-          <thead>
-            <tr class="uno-header">
-              <th class="round-header">Hand</th>
-              {% for player in game_players %}
-              <th>{{ player.display_name }}{% if game_family_id and player.family_id and player.family_id != game_family_id %}<br><small style="font-size:0.7em;opacity:0.8">({{ player.family_name }})</small>{% endif %}</th>
+    {% set round_label = 'Hand' %}
+    {% include 'partials/round_entry_ui.html' %}
+
+    <div class="default-table-view" id="defaultTableView">
+      <div class="score-sheet">
+        <div class="table-responsive">
+          <table id="scoreTable" class="table table-bordered" style="--pc: {{ game_players|length }}">
+            <thead>
+              <tr class="uno-header">
+                <th class="round-header">Hand</th>
+                {% for player in game_players %}
+                <th><span class="player-name">{{ player.display_name }}</span>{% if game_family_id and player.family_id and player.family_id != game_family_id %}<br><small style="font-size:0.7em;opacity:0.8">({{ player.family_name }})</small>{% endif %}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody id="scoreBody">
+              {% set ns = namespace(max_round=0) %} {% for key in scores %} {% if
+              key[1] > ns.max_round %} {% set ns.max_round = key[1] %} {% endif %}
+              {% endfor %} {% for round_num in range(1, (ns.max_round if
+              ns.max_round > 0 else 0) + 2) %}
+              <tr class="hand-row" data-round="{{ round_num }}">
+                <td class="round-cell">{{ round_num }}</td>
+                {% for player in game_players %}
+                <td
+                  class="score-cell"
+                  data-player="{{ player.id }}"
+                  data-round="{{ round_num }}"
+                >
+                  {{ scores.get((player.id, round_num), '') }}
+                </td>
+                {% endfor %}
+              </tr>
               {% endfor %}
-            </tr>
-          </thead>
-          <tbody id="scoreBody">
-            {% set ns = namespace(max_round=0) %} {% for key in scores %} {% if
-            key[1] > ns.max_round %} {% set ns.max_round = key[1] %} {% endif %}
-            {% endfor %} {% for round_num in range(1, (ns.max_round if
-            ns.max_round > 0 else 0) + 2) %}
-            <tr class="hand-row" data-round="{{ round_num }}">
-              <td class="round-cell">{{ round_num }}</td>
-              {% for player in game_players %}
-              <td
-                class="score-cell"
-                data-player="{{ player.id }}"
-                data-round="{{ round_num }}"
-              >
-                {{ scores.get((player.id, round_num), '') }}
-              </td>
-              {% endfor %}
-            </tr>
-            {% endfor %}
-            <tr class="total-row">
-              <td>Total</td>
-              {% for player in game_players %}
-              <td class="total-cell" data-player="{{ player.id }}">0</td>
-              {% endfor %}
-            </tr>
-          </tbody>
-        </table>
+              <tr class="total-row">
+                <td>Total</td>
+                {% for player in game_players %}
+                <td class="total-cell" data-player="{{ player.id }}">0</td>
+                {% endfor %}
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
     <div class="text-center mt-3 d-flex flex-wrap justify-content-center gap-2">
+      {% include 'partials/round_view_controls.html' %}
       <button id="dealerToggle" class="btn btn-outline-secondary btn-sm" style="background-color: rgba(248, 249, 250, 0.9); border-color: rgba(108, 117, 125, 0.3); color: #495057; font-weight: bold;" data-active="true">Hide Dealer</button>
       <button id="addHand" class="btn btn-sm" style="background-color: #00A651; color: white; border-color: #00A651;">
         <i class="fas fa-plus"></i> Add Hand
@@ -261,6 +268,9 @@ content %}
   </div>
   {% endif %}
 </div>
+
+{% set fs_title = 'UNO Classic - Full View' %}
+{% include 'partials/fullscreen_score_modal.html' %}
 
 <!-- Add Player Modal -->
 <div class="modal fade" id="addPlayerModal">
@@ -989,6 +999,8 @@ content %}
 
     let updateTimer;
     let targetScoreAlertShown = false;
+    var reCurrentIdx = 0;
+    var rePlayers = [];
 
     function getPlayerIds() {
       var ids = [];
@@ -996,6 +1008,17 @@ content %}
         ids.push($(this).data("player"));
       });
       return ids;
+    }
+
+    function buildRePlayers() {
+      var arr = [];
+      $("#scoreTable thead th:not(:first-child)").each(function (i) {
+        var name = $(this).clone().find("small").remove().end().text().trim();
+        var cell = $("#scoreTable tbody tr.hand-row:first td.score-cell").eq(i);
+        var pid = cell.length ? cell.data("player") : $(".total-cell").eq(i).data("player");
+        arr.push({ id: pid, name: name });
+      });
+      return arr;
     }
 
     function getMaxRound() {
@@ -1007,7 +1030,18 @@ content %}
       return max || 1;
     }
 
+    function getRounds() {
+      var rounds = [];
+      $(".hand-row").each(function () {
+        var n = parseInt($(this).data("round"), 10);
+        if (!isNaN(n)) rounds.push({ num: n, label: String(n) });
+      });
+      rounds.sort(function (a, b) { return a.num - b.num; });
+      return rounds;
+    }
+
     function addHandRow(roundNum) {
+      if ($('.hand-row[data-round="' + roundNum + '"]').length) return;
       var playerIds = getPlayerIds();
       var row =
         '<tr class="hand-row" data-round="' +
@@ -1034,6 +1068,10 @@ content %}
       // Scroll to bottom of table
       var tableResp = $(".table-responsive");
       tableResp.scrollTop(tableResp[0].scrollHeight);
+      if ($("#roundEntryView").hasClass("active")) {
+        reCurrentIdx = getRounds().length - 1;
+        reRenderRound();
+      }
     });
 
     // Score cell editing (event delegation for dynamic rows)
@@ -1078,53 +1116,95 @@ content %}
       });
     });
 
-    function updateScore(cell, newValue, originalValue) {
-      if (!cell.hasClass("editing")) return;
-      clearTimeout(updateTimer);
+    function scorePayload(cell, rawValue) {
+      var scoreVal = rawValue !== "" && !isNaN(rawValue) ? parseInt(rawValue, 10) : null;
+      return {
+        game_id: $(".game-board").data("game-id"),
+        player_id: cell.data("player") || cell.attr("data-player"),
+        round_number: parseInt(cell.data("round") || cell.attr("data-round"), 10),
+        score: scoreVal
+      };
+    }
 
-      var gameId = $(".game-board").data("game-id");
-      var scoreVal = newValue !== "" && !isNaN(newValue) ? parseInt(newValue) : null;
-      var roundNum = parseInt(cell.attr("data-round"), 10);
-      var playerId = cell.attr("data-player");
+    function applyScoreToCell(cell, scoreVal, leaveEditing) {
+      if (leaveEditing !== false) cell.removeClass("editing");
+      if (leaveEditing === false && cell.hasClass("editing")) {
+        cell.data("saved-value", scoreVal === null ? "" : String(scoreVal));
+      } else {
+        cell.text(scoreVal === null || scoreVal === "" ? "" : scoreVal);
+        cell.removeData("saved-value");
+      }
+      updateTotals();
+      updateLeader();
+      highlightDealer();
+    }
 
-      afterScoreSaved(cell, scoreVal);
+    function saveCellScore(cell, rawValue, opts) {
+      opts = opts || {};
+      var leaveEditing = opts.leaveEditing !== false;
+      var payload = scorePayload(cell, rawValue);
+      var displayVal = payload.score;
+      var originalValue = opts.originalValue;
+      var lastKey = cell.data("last-saved-key");
+      var thisKey = payload.player_id + ":" + payload.round_number + ":" + String(payload.score);
+      if (lastKey === thisKey && !opts.force) return;
+
+      if (opts.syncDom !== false) applyScoreToCell(cell, displayVal, leaveEditing);
+      setTimeout(function () { afterRoundFilled(payload.round_number); }, 0);
+
+      if (window.ScoreSave) {
+        ScoreSave.save(payload, {
+          showError: !!leaveEditing,
+          success: function () { cell.data("last-saved-key", thisKey); },
+          error: function (xhr) {
+            if (leaveEditing) {
+              cell.removeClass("editing");
+              cell.text(originalValue || "");
+              cell.removeData("saved-value");
+              updateTotals();
+              updateLeader();
+              highlightDealer();
+              if (xhr && xhr.status !== 401) {
+                AppModal.error("Error", (xhr.responseJSON && xhr.responseJSON.error) || "Failed to save score");
+              }
+            }
+          }
+        });
+        return;
+      }
 
       $.ajax({
         url: "/api/scores",
         method: "POST",
         contentType: "application/json",
-        data: JSON.stringify({
-          game_id: gameId,
-          player_id: playerId,
-          round_number: roundNum,
-          score: scoreVal,
-        }),
-        success: function () {},
+        data: JSON.stringify(payload),
+        success: function () { cell.data("last-saved-key", thisKey); },
         error: function (xhr) {
-          AppModal.error(
-            "Error",
-            xhr.responseJSON?.error || "Failed to save score"
-          );
-          cell.text(originalValue || "");
-          updateTotals();
-          updateLeader();
-          highlightDealer();
-          checkTargetScore(roundNum);
-        },
+          if (leaveEditing) {
+            cell.removeClass("editing");
+            cell.text(originalValue || "");
+            updateTotals();
+            updateLeader();
+            highlightDealer();
+            AppModal.error("Error", (xhr.responseJSON && xhr.responseJSON.error) || "Failed to save score");
+          }
+        }
       });
     }
 
-    function afterScoreSaved(cell, scoreVal) {
-      cell.removeClass("editing");
-      cell.text(scoreVal !== null ? scoreVal : "");
-      updateTotals();
-      updateLeader();
-      highlightDealer();
-      var roundNum = parseInt(cell.attr("data-round"), 10);
-      setTimeout(function () {
-        checkTargetScore(roundNum);
-        ensureEmptyRow();
-      }, 0);
+    function updateScore(cell, newValue, originalValue) {
+      if (!cell.hasClass("editing")) return;
+      clearTimeout(updateTimer);
+      saveCellScore(cell, newValue, { leaveEditing: true, originalValue: originalValue, syncDom: true });
+    }
+
+    function flushOpenScoreEdits() {
+      $(".score-cell.editing input").each(function () {
+        var cell = $(this).closest(".score-cell");
+        var ov = cell.data("original-value");
+        saveCellScore(cell, $(this).val(), { leaveEditing: true, originalValue: ov, syncDom: true, force: true });
+      });
+      reSaveCurrentRound();
     }
 
     function getCellScoreValue(cell) {
@@ -1203,11 +1283,36 @@ content %}
       return ok;
     }
 
-    function checkTargetScore(triggerRound) {
-      if (targetScoreAlertShown) return;
+    function targetReached() {
+      var target = parseInt($(".game-board").data("target-score"), 10);
+      if (!target) return false;
+      var anyone = false;
+      $(".total-cell").each(function () {
+        if ((parseInt($(this).text(), 10) || 0) >= target) anyone = true;
+      });
+      return anyone;
+    }
 
-      var target = parseInt($(".game-board").data("target-score"));
-      if (!target || triggerRound == null || !isRoundComplete(triggerRound)) return;
+    function ensureEmptyRow(opts) {
+      opts = opts || {};
+      var max = getMaxRound();
+      if (!isRoundComplete(max)) return null;
+      if (targetReached() && !opts.forcePastTarget) return null;
+      var next = max + 1;
+      addHandRow(next);
+      if ($("#roundEntryView").hasClass("active") || opts.openRoundView) {
+        var rounds = getRounds();
+        reCurrentIdx = Math.max(0, rounds.length - 1);
+        reRenderRound();
+      }
+      return next;
+    }
+
+    function afterRoundFilled(triggerRound) {
+      if (triggerRound == null || !isRoundComplete(triggerRound)) return;
+      var target = parseInt($(".game-board").data("target-score"), 10);
+      if (!target) { ensureEmptyRow(); return; }
+      if (targetScoreAlertShown) return;
 
       var crossed = [];
       $(".total-cell").each(function () {
@@ -1226,57 +1331,236 @@ content %}
         }
       });
 
-      if (crossed.length > 0) {
-        targetScoreAlertShown = true;
-        var names = crossed
-          .map(function (c) {
-            return "<strong>" + c.name + "</strong> (" + c.total + ")";
-          })
-          .join(", ");
+      if (!crossed.length) { ensureEmptyRow(); return; }
 
-        AppModal.confirm(
-          "Target Score Reached!",
-          names +
-            " crossed the target of <strong>" +
-            target +
-            "</strong> points. Would you like to end the game?",
-          function () {
-            doCompleteGame();
-          },
-          {
-            confirmText: "End Game",
-            cancelText: "Keep Playing",
-          }
-        );
+      targetScoreAlertShown = true;
+      var endingGame = false;
+      var names = crossed
+        .map(function (c) {
+          return "<strong>" + c.name + "</strong> (" + c.total + ")";
+        })
+        .join(", ");
 
-        // Allow re-triggering if they choose to keep playing
-        var modalEl = document.getElementById("appModal");
-        $(modalEl).on("hidden.bs.modal.targetcheck", function () {
-          targetScoreAlertShown = false;
-          $(modalEl).off("hidden.bs.modal.targetcheck");
-        });
-      }
-    }
-
-    function ensureEmptyRow() {
-      var lastRow = $(".hand-row").last();
-      if (!lastRow.length) {
-        addHandRow(1);
-        return;
-      }
-
-      var allFilled = true;
-      lastRow.find(".score-cell").each(function () {
-        if (getCellScoreValue($(this)) === "") {
-          allFilled = false;
-          return false;
+      AppModal.confirm(
+        "Target Score Reached!",
+        names +
+          " crossed the target of <strong>" +
+          target +
+          "</strong> points. Would you like to end the game?",
+        function () {
+          endingGame = true;
+          doCompleteGame();
+        },
+        {
+          confirmText: "End Game",
+          cancelText: "Keep Playing",
         }
-      });
+      );
 
-      if (allFilled) {
-        addHandRow(getMaxRound() + 1);
+      var modalEl = document.getElementById("appModal");
+      $(modalEl).on("hidden.bs.modal.targetcheck", function () {
+        targetScoreAlertShown = false;
+        $(modalEl).off("hidden.bs.modal.targetcheck");
+        if (!endingGame) ensureEmptyRow({ forcePastTarget: true });
+      });
+    }
+
+    // ===================== ROUND ENTRY VIEW / MOBILE TOGGLE =====================
+
+    function reRenderRound() {
+      var rounds = getRounds();
+      if (!rounds.length) { ensureEmptyRow(); rounds = getRounds(); }
+      if (!rounds.length) return;
+      if (reCurrentIdx >= rounds.length) reCurrentIdx = rounds.length - 1;
+      if (reCurrentIdx < 0) reCurrentIdx = 0;
+      var rd = rounds[reCurrentIdx];
+      $("#reRoundLabel").text("Hand " + rd.label);
+      $("#reRoundProgress").text((reCurrentIdx + 1) + " / " + rounds.length);
+      $("#rePrev").prop("disabled", reCurrentIdx === 0);
+
+      var html = "";
+      rePlayers.forEach(function (p) {
+        var existingScore = "";
+        var totalScore = 0;
+        var cell = $('#scoreTable .score-cell[data-player="' + p.id + '"][data-round="' + rd.num + '"]');
+        if (cell.length) existingScore = getCellScoreValue(cell);
+        var totalCell = $('#scoreTable .total-cell[data-player="' + p.id + '"]');
+        if (totalCell.length) totalScore = totalCell.text().trim();
+        html += '<div class="round-player-row">'
+          + '<span class="round-player-name">' + p.name + '</span>'
+          + '<div class="round-player-score-wrap">'
+          + '<input type="number" class="round-player-score" data-pid="' + p.id + '" value="' + existingScore + '" inputmode="numeric" min="0">'
+          + '</div>'
+          + '<span class="round-player-total">' + totalScore + '</span>'
+          + '</div>';
+      });
+      $("#rePlayerList").html(html);
+    }
+
+    function reSaveCurrentRound() {
+      var rounds = getRounds();
+      if (!rounds.length || reCurrentIdx < 0 || reCurrentIdx >= rounds.length) return;
+      var rd = rounds[reCurrentIdx];
+      $(".round-player-score").each(function () {
+        var pid = $(this).data("pid");
+        var val = $(this).val().trim();
+        var cell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rd.num + '"]');
+        if (cell.length) saveCellScore(cell, val, { leaveEditing: false, syncDom: true });
+      });
+      updateTotals();
+      updateLeader();
+      highlightDealer();
+    }
+
+    function reNavigate(dir) {
+      reSaveCurrentRound();
+      var rounds = getRounds();
+      if (dir > 0 && reCurrentIdx >= rounds.length - 1) {
+        var added = ensureEmptyRow({ openRoundView: true });
+        rounds = getRounds();
+        if (added != null) {
+          reCurrentIdx = rounds.length - 1;
+          reRenderRound();
+          return;
+        }
+      }
+      reCurrentIdx = Math.max(0, Math.min(rounds.length - 1, reCurrentIdx + dir));
+      reRenderRound();
+    }
+
+    function switchMobileView(mode) {
+      $(".view-toggle-btn").removeClass("active");
+      if (mode === "table") {
+        $("#btnTableView").addClass("active");
+        $("#defaultTableView").removeClass("hidden");
+        $("#roundEntryView").removeClass("active");
+      } else if (mode === "round") {
+        $("#btnRoundView").addClass("active");
+        $("#defaultTableView").addClass("hidden");
+        $("#roundEntryView").addClass("active");
+        var rounds = getRounds();
+        if (!rounds.length) ensureEmptyRow();
+        rounds = getRounds();
+        var openIdx = rounds.length - 1;
+        for (var i = 0; i < rounds.length; i++) {
+          if (!isRoundComplete(rounds[i].num)) { openIdx = i; break; }
+        }
+        reCurrentIdx = Math.max(0, openIdx);
+        reRenderRound();
       }
     }
+
+    function fsUpdateTotals() {
+      rePlayers.forEach(function (p) {
+        var total = 0;
+        $(".fs-score-input[data-pid='" + p.id + "']").each(function () {
+          var v = parseInt($(this).val(), 10);
+          if (!isNaN(v)) total += v;
+        });
+        $(".fs-total[data-pid='" + p.id + "']").text(total);
+      });
+    }
+
+    function openFullscreenTable() {
+      var body = document.getElementById("fullscreenBody");
+      if (!body) return;
+      var rounds = getRounds();
+      if (!rounds.length) { ensureEmptyRow(); rounds = getRounds(); }
+      var pc = rePlayers.length;
+      var colW = pc <= 4 ? "70px" : pc <= 6 ? "58px" : "48px";
+      var fontSize = pc <= 4 ? "0.88rem" : pc <= 6 ? "0.78rem" : "0.7rem";
+      var pad = pc <= 4 ? "6px 8px" : "4px 5px";
+      var inputPad = pc <= 4 ? "6px 3px" : "4px 2px";
+      var accent = "#ED1C24", accentDark = "#c41920", gold = "#FFCD00";
+      var tbl = '<div style="overflow:auto;-webkit-overflow-scrolling:touch;width:100%;height:100%;">';
+      tbl += '<table class="fs-tbl" style="table-layout:fixed;width:100%;border-collapse:collapse;margin:0;">';
+      tbl += '<colgroup><col style="width:52px;">';
+      for (var i = 0; i < pc; i++) tbl += '<col style="width:' + colW + ';">';
+      tbl += '</colgroup><thead><tr style="background:' + accentDark + ';color:#fff;position:sticky;top:0;z-index:2;">';
+      tbl += '<th style="padding:' + pad + ';font-size:' + fontSize + ';font-weight:700;text-align:center;position:sticky;left:0;background:' + accentDark + ';z-index:3;">Hand</th>';
+      rePlayers.forEach(function (p) {
+        var short = p.name.length > 6 ? p.name.substring(0, 5) + "." : p.name;
+        tbl += '<th style="padding:' + pad + ';font-size:' + fontSize + ';font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + p.name + '">' + short + '</th>';
+      });
+      tbl += '</tr></thead><tbody>';
+      rounds.forEach(function (rd) {
+        tbl += '<tr style="border-bottom:1px solid rgba(0,0,0,0.15);">';
+        tbl += '<td style="background:' + accent + ';color:#fff;font-weight:700;text-align:center;padding:' + pad + ';font-size:' + fontSize + ';position:sticky;left:0;z-index:1;">' + rd.label + '</td>';
+        rePlayers.forEach(function (p) {
+          var origCell = $('#scoreTable .score-cell[data-player="' + p.id + '"][data-round="' + rd.num + '"]');
+          var val = origCell.length ? getCellScoreValue(origCell) : "";
+          tbl += '<td style="padding:0;text-align:center;background:#1a1a1a;">';
+          tbl += '<input type="number" inputmode="numeric" min="0" class="fs-score-input" data-pid="' + p.id + '" data-rnd="' + rd.num + '" value="' + val + '" style="width:100%;border:none;text-align:center;font-size:' + fontSize + ';padding:' + inputPad + ';background:transparent;color:#e0e0e0;font-weight:600;outline:none;caret-color:#e0e0e0;">';
+          tbl += '</td>';
+        });
+        tbl += '</tr>';
+      });
+      tbl += '<tr style="border-top:3px solid ' + accent + ';position:sticky;bottom:0;z-index:2;">';
+      tbl += '<td style="background:' + accentDark + ';color:#fff;font-weight:700;text-align:center;padding:' + pad + ';font-size:' + fontSize + ';position:sticky;left:0;z-index:3;">Total</td>';
+      rePlayers.forEach(function (p) {
+        tbl += '<td class="fs-total" data-pid="' + p.id + '" style="font-weight:800;text-align:center;padding:' + pad + ';font-size:' + fontSize + ';color:' + gold + ';background:#1a1030;">0</td>';
+      });
+      tbl += '</tr></tbody></table></div>';
+      body.innerHTML = tbl;
+      fsUpdateTotals();
+      $(body).off("change input blur", ".fs-score-input")
+        .on("change blur", ".fs-score-input", function () {
+          var $inp = $(this);
+          var cell = $('#scoreTable .score-cell[data-player="' + $inp.data("pid") + '"][data-round="' + $inp.data("rnd") + '"]');
+          if (cell.length) { saveCellScore(cell, $inp.val().trim(), { leaveEditing: false, syncDom: true }); fsUpdateTotals(); }
+        })
+        .on("input", ".fs-score-input", function () {
+          var $inp = $(this);
+          var cell = $('#scoreTable .score-cell[data-player="' + $inp.data("pid") + '"][data-round="' + $inp.data("rnd") + '"]');
+          clearTimeout($inp.data("saveTimer"));
+          $inp.data("saveTimer", setTimeout(function () {
+            if (cell.length) saveCellScore(cell, $inp.val().trim(), { leaveEditing: false, syncDom: true });
+            fsUpdateTotals();
+          }, 800));
+        });
+      bootstrap.Modal.getOrCreateInstance(document.getElementById("fullscreenTableModal")).show();
+    }
+
+    $("#btnTableView").on("click", function () { switchMobileView("table"); });
+    $("#btnRoundView").on("click", function () { switchMobileView("round"); });
+    $("#btnFullView").on("click", function () { openFullscreenTable(); });
+    $("#rePrev").on("click", function () { reNavigate(-1); });
+    $("#reNext").on("click", function () { reNavigate(1); });
+    $("#reSaveRound").on("click", function () { reSaveCurrentRound(); });
+    $(window).on("resize", function () { if (window.innerWidth > 768) switchMobileView("table"); });
+
+    $(document).off("blur.unoReScore input.unoReScore", ".round-player-score")
+      .on("blur.unoReScore", ".round-player-score", function () {
+        var rounds = getRounds();
+        if (!rounds.length) return;
+        var rd = rounds[reCurrentIdx];
+        var pid = $(this).data("pid");
+        var cell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rd.num + '"]');
+        if (cell.length) {
+          saveCellScore(cell, $(this).val().trim(), { leaveEditing: false, syncDom: true });
+          updateTotals();
+          updateLeader();
+          highlightDealer();
+          reRenderRound();
+        }
+      })
+      .on("input.unoReScore", ".round-player-score", function () {
+        var $inp = $(this);
+        var rounds = getRounds();
+        if (!rounds.length) return;
+        var rd = rounds[reCurrentIdx];
+        var pid = $inp.data("pid");
+        var cell = $('#scoreTable .score-cell[data-player="' + pid + '"][data-round="' + rd.num + '"]');
+        clearTimeout($inp.data("saveTimer"));
+        $inp.data("saveTimer", setTimeout(function () {
+          if (cell.length) {
+            saveCellScore(cell, $inp.val().trim(), { leaveEditing: false, syncDom: true });
+            updateTotals();
+            updateLeader();
+            highlightDealer();
+          }
+        }, 800));
+      });
 
     // ===================== DEALER TRACKING =====================
 
@@ -1486,27 +1770,35 @@ content %}
     });
 
     $("#pauseGame").click(function () {
-      var gid = $(".game-board").data("game-id");
-      $.ajax({
-        url: "/api/games/pause/" + gid,
-        method: "POST",
-        success: function () {
-          AppModal.show({
-            title: "Game Paused",
-            body: "<p>The game has been paused successfully. Redirecting...</p>",
-            type: "warning",
-          });
-          setTimeout(function () {
-            window.redirectToUno();
-          }, 1500);
-        },
-        error: function (xhr) {
-          AppModal.error(
-            "Error",
-            xhr.responseJSON?.error || "Failed to pause game"
-          );
-        },
-      });
+      flushOpenScoreEdits();
+      function proceedWithPause() {
+        var gid = $(".game-board").data("game-id");
+        $.ajax({
+          url: "/api/games/pause/" + gid,
+          method: "POST",
+          success: function () {
+            AppModal.show({
+              title: "Game Paused",
+              body: "<p>The game has been paused successfully. Redirecting...</p>",
+              type: "warning",
+            });
+            setTimeout(function () {
+              window.redirectToUno();
+            }, 1500);
+          },
+          error: function (xhr) {
+            AppModal.error(
+              "Error",
+              xhr.responseJSON?.error || "Failed to pause game"
+            );
+          },
+        });
+      }
+      if (window.ScoreSave && typeof ScoreSave.flushAsync === "function") {
+        ScoreSave.flushAsync().always(proceedWithPause);
+      } else {
+        proceedWithPause();
+      }
     });
 
     $(".resume-game").click(function () {
@@ -1622,6 +1914,8 @@ content %}
         var currentMax = getMaxRound();
         if (data.round_number > currentMax) {
           for (var r = currentMax + 1; r <= data.round_number; r++) addHandRow(r);
+        } else {
+          addHandRow(data.round_number);
         }
         cell = $(
           '.score-cell[data-player="' + data.player_id + '"][data-round="' + data.round_number + '"]'
@@ -1633,8 +1927,8 @@ content %}
         updateLeader();
         highlightDealer();
         setTimeout(function () {
-          checkTargetScore(parseInt(data.round_number, 10));
-          ensureEmptyRow();
+          afterRoundFilled(parseInt(data.round_number, 10));
+          if ($("#roundEntryView").hasClass("active")) reRenderRound();
         }, 0);
       }
     }
@@ -1648,6 +1942,7 @@ content %}
           updateTotals();
           updateLeader();
           highlightDealer();
+          if ($("#roundEntryView").hasClass("active")) reRenderRound();
         },
         onCompleted: function (data) {
           if (!gameCompletedByCurrentUser) {
@@ -1835,9 +2130,11 @@ content %}
 
     // ===================== INITIALIZE =====================
 
+    rePlayers = buildRePlayers();
     updateTotals();
     updateLeader();
     highlightDealer();
+    ensureEmptyRow();
   });
 </script>
 {% endblock %}

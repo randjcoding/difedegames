@@ -877,6 +877,22 @@ content %}
             $(modalEl).off("hidden.bs.modal.reload");
             window.location.reload();
           });
+        },
+        onPaused: function () {
+          AppModal.show({
+            title: "Game Paused",
+            body: "<p>Another player has paused this game. Redirecting...</p>",
+            type: "warning",
+          });
+          setTimeout(function () { window.location.href = "/game/trouble"; }, 2000);
+        },
+        onResumed: function () {
+          AppModal.show({
+            title: "Game Resumed",
+            body: "<p>Another player has resumed the game. Loading...</p>",
+            type: "success",
+          });
+          setTimeout(function () { window.location.href = "/game/trouble"; }, 2000);
         }
       });
       {% endif %}
