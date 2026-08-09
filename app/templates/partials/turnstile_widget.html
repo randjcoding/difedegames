@@ -1,0 +1,7 @@
+{# Cloudflare Turnstile widget for public forms. No-op when disabled. #}
+{% if turnstile_enabled and turnstile_site_key %}
+<div class="mb-3 d-flex justify-content-center">
+  <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" data-theme="auto"></div>
+</div>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+{% endif %}

@@ -9,8 +9,9 @@ alwaysApply: true
 **NOT:** A rules engine or digital board -- scores only.
 
 ## Must-Read Docs
-- `APPLICATION_EXPERT_GUIDE.md` -- full architecture, all 10 games, API, pitfalls
+- `APPLICATION_EXPERT_GUIDE.md` -- full architecture, all games, API, pitfalls
 - `CREATINGANEWGAME.MD` -- step-by-step new game checklist + image creation
+- `DEPLOY_ROCKY.md` -- live Docker deploy (`--scale web=2`)
 - `README.md` -- service ops, backup, troubleshooting
 - `.cursor/rules/theme-text-contrast.mdc` -- light-on-light text bug
 
@@ -19,18 +20,25 @@ alwaysApply: true
 - `/api/scores` uses `active_games.id`; `/api/games/new` uses `games.id`
 - `game_sessions_numbered` view provides `game_number` per game type (use in UI, not session IDs)
 
-## New Game Checklist (8 steps)
-1. INSERT `games` + `game_details` 2. Generate image 3. Create template 4. Route in routes.py
-5. `SLUG_TO_URL` entry 6. Dashboard (6 slug cases) 7. Verify Jinja parses 8. Restart port 5002
+## New Game Checklist
+1. INSERT `games` (+ `display_order`) + `game_details`
+2. Generate image (see CREATINGANEWGAME image guide)
+3. Template from `gin_rummy.html` / `sevens.html` + `DiFedeVariableRounds` + round partials + `PlayerPicker`
+4. Route in `routes.py` + `SLUG_TO_URL`
+5. Dashboard slug cases (card + table icons/Continue)
+6. Jinja parse + `python tests/smoke_test.py`
+7. Dev restart port 5002; live = push then Rocky pull + `docker compose up -d --build --scale web=2`
 
 ## Critical Pitfalls
 - Jinja in JS: `function(){ {% if %}` NOT `function(){{% if`
 - Light backgrounds MUST have `color: #212529` (dark themes use light body text)
-- Kill stale processes: `lsof -i :5002` before restart (systemd auto-restarts with Restart=always)
-- Reference template for new games: `gin_rummy.html` or `uno_classic.html`
+- Kill stale processes: `lsof -i :5002` before Ubuntu restart
+- Do not clone UNO Classic for plain Pattern A -- use Gin/Sevens + VariableRounds
+- Live sync must create missing round rows (VariableRounds / applyRemote*)
 
-## Current Games (id 1-10)
-Five Crowns, UNO (group), UNO Classic, UNO Flip, Dutch Blitz, Trouble, Basic/Other, Kings Corner, Gin Rummy, Sevens
+## Current Games (id 1-11)
+Five Crowns, UNO (group), UNO Classic, UNO Flip, Dutch Blitz, Trouble, Basic/Other, Kings Corner, Gin Rummy, Sevens, Skyjo
 
 ## UX Rules
 Mobile-first. No emojis. Plain labels. Save immediately. Modals outside game container.
+Round view + auto-rounds for most multi-round boards; Five Crowns stays fixed-round.

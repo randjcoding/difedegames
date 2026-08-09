@@ -13,15 +13,27 @@ from .email_utils import (
     send_password_reset_email,
 )
 from .identity import unique_family_slug, audit
+from .turnstile import turnstile_ok, turnstile_failure_message
 import logging
 from datetime import datetime
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 logger = logging.getLogger(__name__)
 
+
+def _reject_turnstile(template, **ctx):
+    """Flash + re-render when Turnstile fails. Returns a response, or None if OK."""
+    if turnstile_ok():
+        return None
+    flash(turnstile_failure_message(), 'error')
+    return render_template(template, **ctx)
+
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
+        blocked = _reject_turnstile('auth/login.html')
+        if blocked is not None:
+            return blocked
         try:
             email = request.form.get('email', '').strip().lower()
             password = request.form.get('password', '')
@@ -211,6 +223,13 @@ def register():
 
     conn = None
     try:
+        conn = get_db_connection()
+        ctx = _register_context(conn)
+        prefill = _register_prefill(ctx)
+        blocked = _reject_turnstile('auth/register.html', **prefill)
+        if blocked is not None:
+            return blocked
+
         first_name = request.form.get('first_name', '').strip()
         last_name = request.form.get('last_name', '').strip()
         family_name = request.form.get('family_name', '').strip()
@@ -218,9 +237,6 @@ def register():
         password = request.form.get('password', '')
         confirm_password = request.form.get('confirm_password', '')
 
-        conn = get_db_connection()
-        ctx = _register_context(conn)
-        prefill = _register_prefill(ctx)
         joins_existing_family = ctx is not None and (
             ctx['kind'] == 'claim'
             or (ctx['kind'] == 'invite' and ctx['invitation']['invite_type'] == 'join_family'
@@ -707,6 +723,10 @@ def resend_verification():
     """Resend verification email"""
     if request.method == 'GET':
         return render_template('auth/resend_verification.html')
+
+    blocked = _reject_turnstile('auth/resend_verification.html')
+    if blocked is not None:
+        return blocked
     
     email = request.form.get('email', '').strip().lower()
     if not email:
@@ -746,6 +766,10 @@ def forgot_password():
     so we do not reveal whether an email is registered."""
     if request.method == 'GET':
         return render_template('auth/forgot_password.html')
+
+    blocked = _reject_turnstile('auth/forgot_password.html')
+    if blocked is not None:
+        return blocked
 
     email = request.form.get('email', '').strip().lower()
     if not email:
@@ -807,6 +831,11 @@ def reset_password(token):
         if request.method == 'GET':
             return render_template('auth/reset_password.html',
                                   email=user['email'], token=token)
+
+        blocked = _reject_turnstile('auth/reset_password.html',
+                                    email=user['email'], token=token)
+        if blocked is not None:
+            return blocked
 
         password = request.form.get('password', '')
         confirm = request.form.get('confirm_password', '')
@@ -1204,12 +1233,18 @@ def set_password(token):
             flash('This invite has no email address. Ask your family lead to send a new one.', 'error')
             return redirect(url_for('auth.login'))
 
+        set_pw_ctx = dict(
+            token=token,
+            email=email,
+            display_name=player.get('display_name') or player.get('first_name'),
+            family_name=player.get('family_name') or 'your family',
+        )
         if request.method == 'GET':
-            return render_template('auth/set_password.html',
-                                   token=token,
-                                   email=email,
-                                   display_name=player.get('display_name') or player.get('first_name'),
-                                   family_name=player.get('family_name') or 'your family')
+            return render_template('auth/set_password.html', **set_pw_ctx)
+
+        blocked = _reject_turnstile('auth/set_password.html', **set_pw_ctx)
+        if blocked is not None:
+            return blocked
 
         password = request.form.get('password', '')
         confirm = request.form.get('confirm_password', '')

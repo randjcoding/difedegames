@@ -49,6 +49,9 @@ services:
       EMAIL_SENDER: ${EMAIL_SENDER:-randjcoding@gmail.com}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-DiFede Games}
       APP_BASE_URL: ${APP_BASE_URL:-https://games.difedes.com}
+      TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       # Enables SocketIO broadcasts across scaled web replicas
       REDIS_URL: redis://redis:6379/0
     # No host ports — nginx (proxy) is the only public entry on localhost:5002

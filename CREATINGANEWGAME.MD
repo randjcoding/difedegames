@@ -1,8 +1,11 @@
 # Creating a New Game - Complete Guide
 
-This document contains everything needed to add a new game to DiFede Games. Provide this file (or `APPLICATION_EXPERT_GUIDE.md`) to an AI along with the game rules, and it can build the game without reviewing the full codebase.
+This document contains everything needed to add a new game to DiFede Games. Provide this file (or `APPLICATION_EXPERT_GUIDE.md`) to an AI along with the game rules and expectations, and it can bootstrap the game without reviewing the full codebase.
 
 For full application architecture, see **`APPLICATION_EXPERT_GUIDE.md`**.
+For live deploy (Rocky), see **`DEPLOY_ROCKY.md`**.
+
+**Last refreshed:** August 2026 (VariableRounds, PlayerPicker, Skyjo, Rocky Docker deploy).
 
 ---
 
@@ -13,11 +16,15 @@ When requesting a new game, provide these details:
 - **Game name** (e.g., "Dutch Blitz")
 - **Short description** (1-2 sentences)
 - **Min/max players** (e.g., 2-8)
-- **Scoring direction**: `high_wins` or `low_wins`
+- **Scoring direction**: `high_wins` or `low_wins` (or `single_round` / `manual` if Pattern B/C)
 - **Target score**: default value (or null if no target), and whether it should be customizable
 - **Has rounds/hands?** Yes or No
-- **Round labels**: Numbered (1, 2, 3...) or named (3s, 4s, ... K)
-- **Dealer tracking?** Yes or No
+- **Round labels**: Numbered (1, 2, 3...) or named (3s, 4s, ... K) or "Hand"
+- **Auto-add rounds?** Yes for most target/endless games; **No** only for fixed-round games (Five Crowns style)
+- **Round view / mobile Table-Round-Full?** Yes for almost all multi-round boards
+- **Allow negative scores?** Yes/No
+- **Dealer tracking?** Yes or No (extra UI; UNO Classic is the reference if yes)
+- **Special board mechanics?** (flip dark-side, blitz formula, partnerships, SOW, etc.)
 - **Standalone or variant?** If variant, which parent game group
 - **Primary color** (hex, e.g., #006B3F)
 - **Secondary/accent color** (hex, e.g., #DAA520)
@@ -26,7 +33,8 @@ When requesting a new game, provide these details:
 - **Equipment needed**
 - **Scoring formula or explanation** (for the point reference panel)
 - **Estimated duration, age recommendation, difficulty**
-- **Scoring pattern**: Pattern A (multi-round manual), Pattern B (single-round custom completion), or Pattern C (Basic/Other style)
+- **Scoring pattern**: Pattern A (multi-round), Pattern B (single-round custom completion), or Pattern C (Basic/Other style)
+- **`display_order` hint** (optional): where it should sit on the Games page relative to existing titles
 
 ---
 
@@ -34,21 +42,37 @@ When requesting a new game, provide these details:
 
 ### 1. Database: `games` table
 
-Get next ID: `SELECT MAX(id) FROM games;`
+Backup V2 first (dev DB on Ubuntu):
+
+```bash
+PGPASSWORD=Password pg_dump -h localhost -U difedeapp -d difedeappv2 > backup_$(date +%Y%m%d_%H%M%S).sql
+```
+
+Get next ID and a sensible display order:
+
+```sql
+SELECT MAX(id) FROM games;
+SELECT id, name, display_order FROM games ORDER BY display_order, id;
+```
 
 ```sql
 INSERT INTO games (id, name, slug, min_players, max_players, scoring_direction,
-    default_target_score, has_rounds, image_url, description, parent_game_id, is_variant_group)
+    default_target_score, has_rounds, image_url, description, parent_game_id,
+    is_variant_group, display_order)
 VALUES (<id>, 'Game Name', 'game-slug', 2, 8, 'high_wins', 100, TRUE,
-    '/static/images/game_slug.png', 'Short description here.', NULL, FALSE);
+    '/static/images/game_slug.png', 'Short description here.', NULL, FALSE,
+    <display_order>);
 ```
 
 Key columns:
 - `slug`: URL-safe lowercase with hyphens (e.g., `dutch-blitz`)
-- `scoring_direction`: `'high_wins'` or `'low_wins'`
+- `scoring_direction`: `'high_wins'` or `'low_wins'` (session can override where the UI allows)
 - `default_target_score`: integer or NULL
 - `parent_game_id`: NULL for standalone, or FK to parent `games.id` for variants
 - `is_variant_group`: TRUE only for parent grouping entries (e.g., "UNO" parent)
+- `display_order`: Games page sort key (Five Crowns=10, Skyjo=15, UNO group=20, ...). Leave gaps of 10 when possible.
+
+Apply the same INSERT on Rocky after testing on Ubuntu (or ship via migration script you run in both places). Never modify V1 (`difedeapp` / port 5001).
 
 ### 2. Database: `game_details` table
 
@@ -75,11 +99,6 @@ VALUES (
 
 Note: `difficulty_level` must be `'Easy'`, `'Medium'`, or `'Hard'` (CHECK constraint).
 
-**Always backup before schema changes:**
-```bash
-PGPASSWORD=Password pg_dump -h localhost -U difedeapp -d difedeappv2 > backup_$(date +%Y%m%d_%H%M%S).sql
-```
-
 ### 3. Game Image
 
 See **Game Image Creation** section below. Place at `app/static/images/<slug_underscored>.png`.
@@ -99,21 +118,65 @@ template = slug.replace('-', '_') + '.html'  # dutch-blitz -> dutch_blitz.html
 - Use `--df-*` CSS variables for theme colors (game-specific accents allowed in container)
 - Force dark text (`color: #212529`) on all white/light sections (score sheet, new game form, modals)
 - Place ALL modals OUTSIDE the game container div (z-index stacking context issue)
-- Save scores via `POST /api/scores` with `{game_id, player_id, round_number, score}`
-- Create new games via `POST /api/games/new` with `{game_id, player_ids, scoring_direction, target_score}`
-- Use generic endpoints for pause/resume/complete/delete (unless Pattern B custom completion)
-- Connect to SocketIO with correct Jinja spacing (see Pitfalls)
-- Use `<optgroup>` labels for "Your Family" and "Crew" in player dropdowns
-- Display `Game #{{ game.game_number or game.id }}` in completed games lists
+- Use **`PlayerPicker.mount`** via `{% include 'partials/player_picker.html' %}` for seat selection (family + crew + personal crew)
+- Create games via `POST /api/games/new` with `{game_id, player_ids, scoring_direction, target_score}`
+- Save scores via `POST /api/scores` with `{game_id, player_id, round_number, score}` (`game_id` = `active_games.id`)
+- Use generic pause/resume/complete/delete unless Pattern B needs a custom complete endpoint
+- Display `Game #{{ game.game_number or game.id }}` in completed lists (link to `main.game_summary`)
+- No emojis in UI text
+- Bold score cells (match existing boards: `font-weight: 700` on `.score-cell`)
+
+**Pattern A (default multi-round) -- use the shared board, do not reinvent:**
+
+1. Copy **`gin_rummy.html`** or **`sevens.html`** (not UNO Classic -- that has dealer-specific logic).
+2. On the active board, set CSS vars and target:
+   ```html
+   <div class="game-board ..." data-game-id="{{ active_game.id }}"
+        data-target-score="{{ active_game.target_score or '' }}"
+        style="--vrb-accent:#...;--vrb-accent-dark:#...;--vrb-gold:#...;">
+   ```
+3. Include shared partials (round entry **outside** the white `.score-sheet`):
+   - `{% set round_label = 'Round' %}` then `{% include 'partials/round_entry_ui.html' %}`
+   - wrap table in `#defaultTableView.default-table-view`
+   - `{% include 'partials/round_view_controls.html' %}` in action buttons
+   - `{% include 'partials/fullscreen_score_modal.html' %}` outside the game container
+4. Score table must use `.hand-row`, `.score-cell`, `.total-cell` with `data-player` / `data-round`.
+5. Wire the board once:
+   ```javascript
+   var board = DiFedeVariableRounds.create({
+     activeGameId: {{ active_game.id }},
+     players: GAME_PLAYERS,  // [{id, name}, ...]
+     roundLabel: 'Round',    // or 'Hand'
+     allowNeg: false,
+     landingUrl: '/game/game-slug',  // game landing after pause
+     resumeUrl: '{{ url_for("main.game_slug_fn") }}?game_id={{ active_game.id }}',
+     accent: '#...',
+     accentDark: '#...',
+     gold: '#...'
+   });
+   board.init();
+   ```
+6. `DiFedeVariableRounds` (loaded from `base.html` via `variable_round_board.js`) provides:
+   - live sync with remote row creation (`DiFedeLiveGame.connect`)
+   - `ScoreSave` debounced writes + pause flush
+   - auto-add next round when the current round is full (skips while target is crossed until user chooses Keep Playing)
+   - mobile Table / Round / fullscreen views
+
+**When NOT to use VariableRounds alone:**
+- **Fixed rounds** (Five Crowns): keep custom round list; do not auto-add.
+- **Dealer / flip / blitz extras**: start from `uno_classic.html`, `uno_flip.html`, or `dutch_blitz.html` (they already have round view + ensureEmptyRow + live sync).
+- **Pattern B SOW**: `trouble.html` or Kings single-round section; still wire `DiFedeLiveGame` `onPaused` / `onResumed` / `onCompleted`.
+- **Pattern C**: `basic_other.html` (scored mode already uses VariableRounds; manual winner mode does not).
 
 **Reference templates:**
-- **Pattern A (multi-round):** `gin_rummy.html` or `uno_classic.html`
-- **Pattern B (single-round SOW):** `trouble.html` or kings_corner.html single-round section
+- **Pattern A (multi-round):** `gin_rummy.html` or `sevens.html` (+ shared partials / VariableRounds)
+- **Pattern A + extras:** `skyjo.html`, `uno_classic.html`, `dutch_blitz.html`
+- **Pattern B (single-round SOW):** `trouble.html` or kings_corner single-round section
 - **Pattern C (open-ended):** `basic_other.html`
 
 ### 5. Route Alias in `app/routes.py`
 
-Add after existing game routes (~line 745):
+Add next to the other game routes (search for `@main.route('/skyjo')`):
 
 ```python
 @main.route('/game-slug')
@@ -124,7 +187,7 @@ def game_slug_fn():
 
 ### 6. SLUG_TO_URL in `app/routes.py`
 
-Add to `SLUG_TO_URL` dict (~line 556):
+Add to the `SLUG_TO_URL` dict (search for `SLUG_TO_URL =`):
 
 ```python
 'game-slug': '/game-slug',
@@ -134,45 +197,48 @@ Without this, the Games page Play button links to the landing page instead of th
 
 Note: slug and URL path can differ (e.g., `'uno-classic': '/uno'`).
 
+Pause redirects often use `/game/<slug>` which hits the **game landing** page (`game_landing`) -- that is intentional.
+
 ### 7. Dashboard: `app/templates/dashboard.html`
 
-Add **6 insertion points** for the new slug:
+Add slug cases in these places (card + table):
 
-**Card view icon** (after last `{% elif game.slug == ... %}` before `{% else %}`):
-```html
-{% elif game.slug == 'game-slug' %}<i class="fas fa-icon me-1" style="color:#HEX;"></i>
-```
+1. Card view icon (`{% elif game.slug == 'game-slug' %}`)
+2. Card view Continue link → `url_for('main.game_slug_fn')`
+3. Table view icon
+4. Table view Continue link (btn-sm)
 
-**Card view Continue link:**
-```html
-{% elif game.slug == 'game-slug' %}
-  <a href="{{ url_for('main.game_slug_fn') }}?game_id={{ game.id }}" class="btn btn-primary w-100"><i class="fas fa-play me-1"></i>Continue</a>
-```
+Without these, Live Games shows a generic dice icon and Continue goes to `/games`.
 
-**Table view icon** (same pattern as card view icon)
-
-**Table view Continue link** (btn-sm variant):
-```html
-{% elif game.slug == 'game-slug' %}
-  <a href="{{ url_for('main.game_slug_fn') }}?game_id={{ game.id }}" class="btn btn-primary btn-sm"><i class="fas fa-play"></i></a>
-```
-
-### 8. Verify and Restart
+### 8. Verify, smoke, deploy
 
 ```bash
-# Verify Jinja2 template parses
+# Jinja parse
 cd /home/joe/DiFedeAppV2 && source venv/bin/activate
 python3 -c "from jinja2 import Environment, FileSystemLoader; Environment(loader=FileSystemLoader('app/templates')).get_template('game_slug.html'); print('OK')"
 
-# Kill stale processes and restart
+# Dev (Ubuntu): kill stale listeners, restart
 lsof -i :5002 -t | xargs -r kill -9
-sudo systemctl restart difedeappv2.service
-# OR for dev: python3 run.py
+# then: sudo systemctl restart difedeappv2.service   OR   python3 run.py
 
-# Verify
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5002/game-slug -L
-lsof -i :5002
+# Full regression (preferred before push)
+python3 tests/smoke_test.py
 ```
+
+**Ship to Rocky (live):**
+
+```bash
+# on Ubuntu after commit
+git push origin main
+
+# on Rocky
+cd ~/difedegames && git pull
+docker compose up -d --build --scale web=2
+curl -sS http://127.0.0.1:5002/lb-health   # expect: ok
+git log -1 --oneline
+```
+
+Always keep `--scale web=2` (or higher). Do not scale db/redis/proxy. See `DEPLOY_ROCKY.md`.
 
 ---
 
@@ -218,13 +284,14 @@ reference_image_paths: ["/home/joe/DiFedeAppV2/app/static/images/basic_other.png
 3. Write prompt following structure above
 4. Generate with `basic_other.png` as reference
 5. Copy to `app/static/images/<slug_underscored>.png`
-6. Set `image_url` in games table
+6. Set `image_url` in the games table
 
 ### Existing Game Images
 
 | Game | Filename | Key Visual Elements |
 |------|----------|-------------------|
 | Five Crowns | five_crowns.png | Crown, playing cards |
+| Skyjo | skyjo.png / skyjo_box.png | Numbered Skyjo cards, purple accent |
 | UNO Classic | uno_classic.png | UNO cards, colorful |
 | UNO Flip | uno_flip.png | UNO Flip cards, light/dark sides |
 | Dutch Blitz | dutch_blitz.png | Dutch Blitz cards, speed theme |
@@ -246,9 +313,10 @@ reference_image_paths: ["/home/joe/DiFedeAppV2/app/static/images/basic_other.png
 | `/api/games/resume/<id>` | POST | Resume a paused game | (none) |
 | `/api/games/complete/<id>` | POST | Complete game, determine winner | (none) |
 | `/api/games/delete/<id>` | POST | Delete an active game | (none) |
-| `/api/players` | GET | Get players (family + crew) | (none) |
+| `/api/players` | GET | Get players (family + crew + personal crew) | (none) |
 | `/api/players` | POST | Create a new player | `{first_name, last_name, display_name}` |
 | `/api/game-details/<slug>` | GET | Get rules for Rules modal | (none) |
+| `/api/games/<id>/live-scores` | GET | Poll scores for live sync fallback | (none) |
 
 **Payload note:** In `/api/scores`, `game_id` = `active_games.id`. In `/api/games/new`, `game_id` = `games.id`.
 
@@ -272,33 +340,42 @@ Add a new custom endpoint in `routes.py` only when generic completion cannot cal
 {% block content %}
 <div class="SLUG-container">
   {% if not active_game %}
-    <!-- New Game: paused list, completed list, player count, dropdowns, target score, Start -->
+    <!-- New Game: paused list, completed list, PlayerPicker, target, Start -->
   {% else %}
-    <!-- Active Game: header, score table, action buttons, point reference panel -->
+    <!-- Active: header, round_entry_ui, score table, round_view_controls, actions, ref panel -->
   {% endif %}
 </div>
-<!-- Modals OUTSIDE container -->
+<!-- Modals + fullscreen_score_modal OUTSIDE container -->
 {% endblock %}
 
-{% block styles %} ... game theme CSS, mobile @media ... {% endblock %}
-{% block scripts %} ... jQuery, SocketIO, score save, totals ... {% endblock %}
+{% block styles %} ... game theme CSS, mobile @media, bold .score-cell ... {% endblock %}
+{% block scripts %}
+  PlayerPicker.mount(...);
+  DiFedeVariableRounds.create({...}).init();  // Pattern A
+{% endblock %}
 ```
 
 Score cells: `class="score-cell" data-player="X" data-round="Y"`
 Total cells: `class="total-cell" data-player="X"`
+Round rows: `class="hand-row" data-round="N"`
+
+Shared assets (already in `base.html`):
+- `app/static/js/live_game.js` → `DiFedeLiveGame`
+- `app/static/js/variable_round_board.js` → `DiFedeVariableRounds`
+- `ScoreSave` helper on `window` (debounced `/api/scores`)
 
 ---
 
-## SocketIO Events
+## Live Sync / SocketIO
 
-| Event | Direction | When |
-|-------|-----------|------|
-| `join_game` | Emit | On connect if active game: `{game_id: activeGameId}` |
-| `leave_game` | Emit | On page unload |
-| `score_update` | Listen | Another user updated a score |
-| `game_completed` | Listen | Another user completed the game |
-| `game_paused` | Listen | Another user paused the game |
-| `game_resumed` | Listen | Another user resumed the game |
+Prefer **`DiFedeLiveGame.connect(activeGameId, handlers)`** (or VariableRounds, which calls it). Do not hand-roll `io()` unless extending a specialty board.
+
+| Event / handler | When |
+|-----------------|------|
+| `onScore` / `applyRemoteScore` | Another user updated a score (must create missing rows) |
+| `onCompleted` | Another user completed the game |
+| `onPaused` / `onResumed` | Another user paused or resumed |
+| Pause button | Flush open edits via `ScoreSave.flushAsync` before pause API |
 
 **Jinja2 in SocketIO (CRITICAL):**
 ```javascript
@@ -322,35 +399,47 @@ sock.on("connect",function(){ {% if active_game %}sock.emit(...);{% endif %} });
 
 ## Current Games in the System
 
-| ID | Name | Slug | Route | Scoring | Target | Type |
-|----|------|------|-------|---------|--------|------|
-| 1 | Five Crowns | five-crowns | /five-crowns | low_wins | NULL | Standalone |
+| ID | Name | Slug | Route | Scoring | Target | Type / notes |
+|----|------|------|-------|---------|--------|--------------|
+| 1 | Five Crowns | five-crowns | /five-crowns | low_wins | NULL | Fixed rounds 3-K; custom board |
 | 2 | UNO | uno | -- | -- | -- | Variant group |
-| 3 | UNO Classic | uno-classic | /uno | high_wins | 500 | Variant of 2 |
-| 4 | UNO Flip | uno-flip | /uno-flip | high_wins | 500 | Variant of 2 |
-| 5 | Dutch Blitz | dutch-blitz | /dutch-blitz | high_wins | 75 | Standalone |
-| 6 | Trouble | trouble | /trouble | high_wins | NULL | Standalone (Pattern B) |
-| 7 | Basic / Other | basic-other | /basic-other | configurable | NULL | Standalone (Pattern C) |
-| 8 | Kings in the Corner | kings-corner | /kings-corner | low_wins | NULL | Standalone (A + B) |
-| 9 | Gin Rummy | gin-rummy | /gin-rummy | high_wins | 100 | Standalone |
-| 10 | Sevens | sevens | /sevens | low_wins | 100 | Standalone |
+| 3 | UNO Classic | uno-classic | /uno | high_wins | 500 | Dealer highlight + VariableRounds-style sync |
+| 4 | UNO Flip | uno-flip | /uno-flip | high_wins | 500 | Light/dark side per hand |
+| 5 | Dutch Blitz | dutch-blitz | /dutch-blitz | high_wins | 75 | Negatives + leader |
+| 6 | Trouble | trouble | /trouble | high_wins | NULL | Pattern B SOW / pegs |
+| 7 | Basic / Other | basic-other | /basic-other | configurable | NULL | Pattern C |
+| 8 | Kings in the Corner | kings-corner | /kings-corner | low_wins / single_round | NULL | Multi (VRB) or single SOW |
+| 9 | Gin Rummy | gin-rummy | /gin-rummy | high_wins | 100 | **Pattern A reference** |
+| 10 | Sevens | sevens | /sevens | low_wins | 100 | Pattern A reference |
+| 11 | Skyjo | skyjo | /skyjo | low_wins | 100 | Pattern A + neg scores |
 
 ---
 
 ## The `game_page()` Function
 
-Central handler in `routes.py` (~line 107). Takes slug and games.id:
+Central handler in `routes.py` (search for `def game_page`). Takes slug and `games.id`:
 
 1. Loads game definition from `games` table
-2. Resolves active session via `?game_id=` or most recent incomplete; auto-unpauses
-3. Loads paused games, last 5 completed (with `game_sessions_numbered` for game_number)
+2. Resolves active session via `?game_id=` or most recent incomplete
+3. Loads paused games, last completed (with `game_sessions_numbered` for `game_number`)
 4. If active: loads players + scores from `game_scores` (fallback `five_crowns_scores` for Five Crowns only)
-5. Loads selectable players via `get_family_players(family_id, include_crew=True)`
+5. Loads selectable players via family + crew helpers used by PlayerPicker / `/api/players`
 6. Renders `slug.replace('-', '_') + '.html'`
 
 **Template variables:**
 - `game_def`, `active_game`, `paused_games`, `completed_games`
 - `game_players`, `scores`, `players`, `game_family_id`, `user_family_id`
+
+---
+
+## Environments
+
+| Env | Host | Port / URL | Database | How to restart |
+|-----|------|------------|----------|----------------|
+| Dev (Ubuntu) | build machine | `0.0.0.0:5002` | `difedeappv2` | kill port 5002 + systemd or `run.py` |
+| Live (Rocky) | `joe@192.168.68.71` `~/difedegames` | proxy → `127.0.0.1:5002` / https://games.difedes.com | Docker Postgres | `git pull` + `docker compose up -d --build --scale web=2` |
+
+V1 (`difedeapp` / port 5001) is sacred -- never modify.
 
 ---
 
@@ -361,7 +450,12 @@ Central handler in `routes.py` (~line 107). Takes slug and games.id:
 | Internal Server Error on game page | Check Jinja `function(){{% if` -> add space |
 | Invisible text on forms/score sheets | Add `color: #212529` on light backgrounds |
 | Play button goes to landing page | Add slug to `SLUG_TO_URL` |
-| Dashboard Continue goes to /games | Add slug cases in dashboard.html (6 places) |
-| Stale code after changes | Kill all port 5002 processes before restart |
+| Dashboard Continue goes to /games | Add slug cases in dashboard.html |
+| Stale code after changes (Ubuntu) | Kill all port 5002 processes before restart |
+| Live still on old code | Rocky pull + rebuild with `--scale web=2`; confirm `git log -1` and `/lb-health` |
+| Live sync drops remote rounds | Must create missing `.hand-row`s (VariableRounds/`applyRemote*`) |
+| Round entry looks wrong on desktop | Keep `#roundEntryView` outside white `.score-sheet`; toggle only on mobile |
 | Game # shows wrong order | Use `game_number` from view, sort numerically in DataTables |
-| StrReplace fails on dashboard.html | File may have CRLF line endings; run `sed -i 's/\r$//' dashboard.html` |
+| StrReplace fails on dashboard.html | File may have CRLF; run `sed -i 's/\r$//' dashboard.html` |
+| Copied UNO as Pattern A base | Prefer Gin/Sevens + VariableRounds unless you need dealer/flip/blitz |
+| Smoke test score-count fails | Disposable board-check games must delete `game_scores` / session rows after checks |

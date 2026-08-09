@@ -234,7 +234,6 @@ def cleanup(conn, ids):
 
 def main():
     app = create_app()
-    app.config['TESTING'] = True
     conn = get_db_connection()
 
     ids = {'players': set(), 'families': set(), 'users': set()}
@@ -243,6 +242,38 @@ def main():
         print(f'Pre-run cleanup removed leftovers: {pre[0]} players, {pre[1]} users, {pre[2]} families')
     try:
         schema_audit(conn)
+
+        print('\n== Section 1b: Turnstile on public forms ==')
+        # Enforce Siteverify for these checks (Flask test client has no JS widget).
+        app.config['TESTING'] = False
+        if app.config.get('TURNSTILE_ENABLED') and app.config.get('TURNSTILE_SITE_KEY'):
+            anon_ts = app.test_client()
+            r = anon_ts.post('/auth/login', data={
+                'email': 'zztest.turnstile@example.com',
+                'password': 'not-a-real-password',
+            })
+            body = r.get_data(as_text=True).lower()
+            check('login without Turnstile token is rejected',
+                  r.status_code == 200 and 'security check' in body)
+            r = anon_ts.get('/auth/login')
+            page = r.get_data(as_text=True)
+            check('login page embeds Turnstile widget',
+                  'cf-turnstile' in page
+                  and 'challenges.cloudflare.com/turnstile' in page
+                  and (app.config.get('TURNSTILE_SITE_KEY') or '') in page)
+            for path, label in (
+                ('/auth/register', 'register'),
+                ('/auth/forgot-password', 'forgot password'),
+                ('/auth/resend-verification', 'resend verification'),
+            ):
+                page = anon_ts.get(path).get_data(as_text=True)
+                check(f'{label} page embeds Turnstile widget', 'cf-turnstile' in page)
+        else:
+            check('Turnstile enabled with site key for this environment', False,
+                  'Set TURNSTILE_ENABLED=true and TURNSTILE_SITE_KEY in .env')
+
+        # Remaining API/form smoke runs without a browser Turnstile token.
+        app.config['TESTING'] = True
 
         print('\n== Section 2: registration and family setup ==')
         client_a = app.test_client()

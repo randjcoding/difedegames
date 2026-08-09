@@ -76,11 +76,17 @@ def create_app():
         message_queue=_redis_url,
     )
     
-    # Add context processor for authentication
+    # Add context processor for authentication + Turnstile
     @app.context_processor
     def inject_auth():
         from app.auth import get_current_user
-        return dict(current_user=get_current_user())
+        from app.turnstile import turnstile_active
+        site_key = (app.config.get('TURNSTILE_SITE_KEY') or '').strip()
+        return dict(
+            current_user=get_current_user(),
+            turnstile_enabled=turnstile_active(),
+            turnstile_site_key=site_key,
+        )
 
     @app.template_filter('utc_iso')
     def utc_iso_filter(dt):

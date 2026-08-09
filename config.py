@@ -1,6 +1,12 @@
 import os
 import secrets
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 class Config:
     # Flask Configuration - Ensure SECRET_KEY is always a string
     _secret_key = os.environ.get('SECRET_KEY') or 'difedeapp-static-secret-key-for-development-only'
@@ -52,4 +58,9 @@ class Config:
     
     # Security Configuration
     WTF_CSRF_ENABLED = True
-    WTF_CSRF_TIME_LIMIT = None 
+    WTF_CSRF_TIME_LIMIT = None
+
+    # Cloudflare Turnstile (public forms). Disabled unless enabled + both keys set.
+    TURNSTILE_ENABLED = os.environ.get('TURNSTILE_ENABLED', 'false').lower() in ('true', 'on', '1')
+    TURNSTILE_SITE_KEY = (os.environ.get('TURNSTILE_SITE_KEY') or '').strip()
+    TURNSTILE_SECRET_KEY = (os.environ.get('TURNSTILE_SECRET_KEY') or '').strip() 

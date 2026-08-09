@@ -26,7 +26,7 @@ DiFede Games (DiFedeAppV2) is a family game night score tracker built with Flask
 - PostgreSQL is the single source of truth. Scores save to DB on every entry.
 - `game_scores` table is the unified score table for UNO games. `five_crowns_scores` is legacy (read-only fallback).
 - The `/api/scores` endpoint handles all score persistence.
-- Game types are defined in the `games` table. Adding a new game means: insert into `games`, create a template, add to SLUG_TO_URL mapping, add route alias, add dashboard slug cases (6 places). See CREATINGANEWGAME.MD.
+- Game types are defined in the `games` table. Adding a new game means: insert into `games` (+ display_order) + game_details, image, template from gin/sevens + DiFedeVariableRounds + round partials + PlayerPicker, SLUG_TO_URL, route alias, dashboard slug cases, smoke test, then Rocky deploy. See CREATINGANEWGAME.MD.
 - Family-based multi-tenancy: players belong to families, games belong to families, alliances connect families.
 
 ### Database
