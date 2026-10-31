@@ -9,7 +9,7 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
   try {
     const response = await fetch('/api' + path, { method, credentials: 'same-origin', signal: controller.signal, headers: { Accept: 'application/json', ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(method !== 'GET' && csrf ? { 'X-CSRF-Token': csrf } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
     const data = await response.json().catch(() => ({ detail: 'The server returned an unreadable response. Please try again.' }));
-    if (!response.ok) { if (response.status === 401 && csrf) window.dispatchEvent(new Event('difede-session-expired')); throw new ApiError(response.status, data); }
+    if (!response.ok) { if (response.status === 401 && csrf && path !== '/auth/login') window.dispatchEvent(new Event('difede-session-expired')); throw new ApiError(response.status, data); }
     return data as T;
   } catch (error) {
     if (error instanceof ApiError) throw error;

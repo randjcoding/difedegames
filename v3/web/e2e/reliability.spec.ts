@@ -3,11 +3,14 @@ import type { Page } from '@playwright/test';
 import type { Game } from '../src/types';
 const base = (slug = 'five-crowns', mode = 'rounds'): Game => ({ id: 1, slug, title: slug === 'trouble' ? 'Trouble' : 'Five Crowns', status: 'active', revision: 1, mode, scoring_direction: 'low', target_score: null, group_id: 1, viewer_group_ids: [1], players: [{ id: 1, name: 'Alexandra' }, { id: 2, name: 'Sammy' }], rounds: [{ number: 3, label: '3' }], scores: [], standings: [{ player_id: 1, name: 'Alexandra', total: 0, rank: 1, winner: false }, { player_id: 2, name: 'Sammy', total: 0, rank: 1, winner: false }], permissions: { can_score: true, can_manage: true }, created_at: '2026-10-31T00:00:00Z', imported: false });
 async function mock(page: Page, initial = base()) {
-  const state = { game: initial, scoreError: false, getError: false, finish: [] as Record<string, unknown>[], scores: [] as Record<string, unknown>[] };
+  const state = { game: initial, expired: false, scoreError: false, getError: false, finish: [] as Record<string, unknown>[], scores: [] as Record<string, unknown>[] };
   await page.addInitScript(() => { class Events { listeners: Record<string, (e: { data: string }) => void> = {}; constructor() { Object.assign(window, { live: this }); } addEventListener(name: string, cb: (e: { data: string }) => void) { this.listeners[name] = cb; } close() {} } Object.assign(window, { EventSource: Events }); });
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/api/me') return route.fulfill({ json: { user: { id: 1, name: 'Alexandra', email: 'pilot@example.test', person_id: 1 }, groups: [{ id: 1, name: 'Family', role: 'admin' }], csrf_token: 'test' } });
+    const me = { user: { id: 1, name: 'Alexandra', email: 'pilot@example.test', person_id: 1 }, groups: [{ id: 1, name: 'Family', role: 'admin' }], csrf_token: 'test' };
+    if (path === '/api/auth/login') { state.expired = false; return route.fulfill({ json: me }); }
+    if (state.expired && ['/api/me', '/api/games/1/scores'].includes(path)) return route.fulfill({ status: 401, json: { detail: 'Session expired.' } });
+    if (path === '/api/me') return route.fulfill({ json: me });
     if (path === '/api/catalog') return route.fulfill({ json: { games: [{ slug: initial.slug, name: initial.title, description: 'Pilot game', min_players: 2, max_players: 10, modes: [initial.mode], scoring_direction: 'low', fixed_rounds: initial.mode === 'rounds' ? [3] : null, targets: [], default_target: null, allow_negative: false, has_dealer: false, rule_note: 'Manual pilot scoring' }] } });
     if (path === '/api/games/1') return route.fulfill(state.getError ? { status: 503, json: { detail: 'Snapshot unavailable; try again.' } } : { json: state.game });
     if (path.endsWith('/scores')) { const body = route.request().postDataJSON(); state.scores.push(body); if (state.scoreError) return route.fulfill({ status: 409, json: { detail: 'Someone changed this score.' } }); state.game = { ...state.game, revision: state.game.revision + 1, scores: [{ player_id: body.player_id, round_number: body.round_number, value: body.score, version: body.expected_version + 1 }] }; return route.fulfill({ json: state.game }); }
@@ -65,4 +68,18 @@ test('original imported result stays separate from summed totals and preserves u
   await expect(page.getByRole('heading', { name: 'Totals from saved scores.' })).toBeVisible();
   await expect(page.locator('.standing-row').first().locator('strong')).toHaveText('8 pts');
   expect(await page.evaluate(() => getComputedStyle(document.querySelector('.board-header img')!).objectFit)).toBe('contain');
+});
+test('expired score and SSE sessions return to sign-in and reauthentication restores same-game drafts', async ({ page }) => {
+  const state = await mock(page); await page.goto('/game/1');
+  const score = page.getByRole('textbox', { name: 'Alexandra, round 3' }); await expect(score).toBeVisible(); state.expired = true; await score.fill('37'); await score.press('Tab');
+  await expect(page.getByRole('button', { name: 'Take your seat' })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe('/game/1');
+  expect(await page.evaluate(() => localStorage.getItem('difede-drafts:1:1'))).toContain('37');
+  const signIn = async () => { await page.getByLabel('Email', { exact: true }).fill('pilot@example.test'); await page.getByLabel('Password', { exact: true }).fill('SyntheticPassword'); await page.getByRole('button', { name: 'Take your seat' }).click(); };
+  await signIn(); await expect(score).toHaveValue('37'); await page.getByRole('button', { name: 'Retry saves', exact: true }).click();
+  await expect(page.getByText('All entered scores saved')).toBeVisible();
+  await score.fill('48'); state.expired = true;
+  await page.evaluate(() => (window as unknown as { live: { listeners: Record<string, (e: { data: string }) => void> } }).live.listeners.access_revoked({ data: '{}' }));
+  await expect(page.getByRole('button', { name: 'Take your seat' })).toBeVisible();
+  await signIn(); await expect(score).toHaveValue('48'); expect(new URL(page.url()).pathname).toBe('/game/1');
 });

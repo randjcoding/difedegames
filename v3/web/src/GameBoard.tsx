@@ -36,7 +36,7 @@ function Session({ initial, definition }: { initial: Game; definition: Definitio
   useEffect(() => {
     const stream = new EventSource(`/api/games/${initial.id}/events`, { withCredentials: true }); streamRef.current = stream;
     stream.addEventListener('snapshot', e => { try { merge(JSON.parse((e as MessageEvent).data)); setConnection('Live'); } catch { setConnection('Reconnecting'); } });
-    stream.addEventListener('access_revoked', () => { revoke(); setError(new Error('Your access changed. Sign in again or ask the organizer to check sharing.')); });
+    stream.addEventListener('access_revoked', () => { revoke(); setError(new Error('Your access changed. Sign in again or ask the organizer to check sharing.')); void api('/me').catch(() => { /* Authenticated 401 clears the app session centrally; connection errors leave the private game hidden. */ }); });
     stream.onopen = () => setConnection('Live'); stream.onerror = () => setConnection('Reconnecting');
     const timer = setInterval(() => { if (!accessLost) void reload(); }, 15000);
     const resume = () => { if (!document.hidden) { void reload(); if (gameRef.current.permissions.can_score && gameRef.current.status === 'active') void queue.flush(); } };
