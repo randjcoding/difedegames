@@ -14,3 +14,4 @@ archive/
 *.log
 .env
 node_modules/
+v3/
