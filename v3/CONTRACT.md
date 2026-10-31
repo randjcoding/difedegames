@@ -1,0 +1,47 @@
+# V3 pilot implementation contract
+
+V2 remains untouched. All V3 code lives below v3/. Runtime and database are separate; imported history is a point-in-time snapshot, not a two-way sync. Keep the V2 return link visible. Invite-only pilot, not a claim of public-launch readiness.
+
+## Stack and boundaries
+React/TypeScript/Vite/React Router frontend; FastAPI, SQLAlchemy, Alembic, PostgreSQL backend. Same-origin /api via nginx. Server-side opaque sessions, Secure HttpOnly SameSite=Lax host-only cookie; CSRF on mutations; password hashes imported compatibly. No secrets in the repository. Backend owns v3/api; frontend owns v3/web; infrastructure owns compose/nginx/deployment; orchestrator owns this contract. Coordinate contract changes before diverging.
+
+V3 has normalized models and a repeatable one-time legacy import into a fresh database, preserving source IDs and original results. Preserve the full restored V2 source separately for provenance. Import never connects to the live V2 database and must refuse a nonempty V3 target unless explicitly safe and idempotent. No identity auto-merges or recalculation of historical winners. Keep counts and reconciliation evidence, omit personal data from logs.
+
+## API contract
+JSON endpoints. Errors: {detail:string, code?:string, missing?:[{player_id:number,round_number:number}]}. 401 unauthenticated, 403 unauthorized, 409 version/idempotency conflict, 422 invalid/incomplete. IDs numeric; timestamps ISO8601. All responses private/no-store.
+
+- GET /api/health -> {status:"ok", database:bool}
+- GET /api/catalog -> {games:GameDefinition[]}; public definitions only.
+- GET /api/me -> {user:{id,email,name,person_id},groups:[{id,name,role}],csrf_token:string}
+- POST /api/auth/login {email,password} -> same as /me; POST /api/auth/logout {}.
+- GET /api/dashboard -> {active:Game[],recent:Game[],stats:{games:number,wins:number},people:Person[],groups:Group[]}
+- GET /api/people -> {people:Person[]}; POST /api/people {name,group_id} creates guest identity.
+- GET /api/groups -> {groups:Group[]}; POST /api/groups {name} creates group with current user admin.
+- POST /api/groups/{id}/invites {person_id?:number} -> {url:string,expires_at:string}; opaque single-use invite links, no email sending. GET /api/invites/{token} public minimal group/invited-name; POST /api/invites/{token}/accept {name?,email?,password?} supports signed-in join or fresh account, claims guest only with explicit bound invite authority.
+- GET /api/games?status=&slug=&limit=50&offset=0 -> {games:Game[],total:number}; authorized only, bounded pagination (max100). List summaries may return empty scores/rounds; detail endpoint returns full board. Filter changes reset offset.
+- POST /api/games {slug,title?,mode?:"rounds"|"single"|"winner",player_ids:number[],group_id:number,viewer_group_ids:number[],scorekeeper_ids?:number[],scoring_direction?:"low"|"high",target_score?:number|null} -> Game. player IDs are person IDs; scorekeeper IDs are user IDs.
+- GET /api/games/{id} -> Game
+- POST /api/games/{id}/scores {operation_id:string,player_id:number,round_number:number,score:number|null,expected_version:number} -> Game. Version 0 means previously absent cell; null clears, zero is a valid score. Retries of identical operation return original result; different payload with same ID conflicts.
+- POST /api/games/{id}/rounds {operation_id,expected_revision:number,side?:"light"|"dark"} -> Game. Adds next variable round. Fixed rounds already exist.
+- PATCH /api/games/{id}/rounds/{number} {operation_id,expected_revision,side:"light"|"dark"} -> Game.
+- POST /api/games/{id}/finish {operation_id,expected_revision,early?:boolean,winner_id?:number,details?:object} -> Game. Normal finish validates all required scores; trailing wholly empty variable round excluded. Early finish records incomplete, no official wins. Trouble details {pegs:[{player_id,color,finish,board,home}]}, Kings single details {penalties:[{player_id,score}]}, basic winner has winner_id. Validate exact roster/values and compute special results server-side.
+- POST /api/games/{id}/reopen {operation_id,expected_revision} -> Game. Organizer/group admin only.
+- DELETE /api/games/{id} with JSON {operation_id,expected_revision} -> {ok:true}; soft delete, organizer/group admin only.
+- GET /api/games/{id}/events SSE, event: snapshot, data: full Game, id: revision. Auth on initial/catch-up and periodically; poll committed revision if no broker, heartbeat. Frontend reconnect uses snapshot, preserves drafts and versions. No token in URL.
+
+Person = {id:number,name:string,has_account:boolean,account_id:number|null,group_ids:number[]}; account_id is exposed only for people visible to the signed-in viewer through shared active groups, to permit explicit scorekeeper assignment. Group = {id,name,role:"admin"|"member"}.
+GameDefinition = {slug,name,description,scoring_direction:"low"|"high",min_players,max_players,fixed_rounds:number[]|null,round_labels:Record<string,string>,modes:string[],allow_negative:boolean,has_dealer:boolean,targets:number[],default_target:number|null,rule_note:string,rule_source?:string,image:string}.
+Game = {id,slug,title,status:"active"|"completed"|"incomplete",revision:number,mode,scoring_direction,target_score:number|null,group_id,viewer_group_ids:number[],players:[{id,name,color?:string}],rounds:[{number,label,side?:"light"|"dark"}],scores:[{player_id,round_number,value:number|null,version:number,metadata?:object}],standings:[{player_id,name,total:number,rank:number,winner:boolean}],permissions:{can_score:boolean,can_manage:boolean},created_at,finished_at?:string,imported:boolean,rule_note?:string}. Nullable score cells must remain represented with their version after clear. Dashboard recent is limited to20 before serialization. Avoid fetching every historical board for navigation/list views.
+
+## Permissions and reliability
+Participant linked accounts plus explicitly assigned nonplaying scorekeepers may score all players and finish. Participants always see game. Group members only see if game explicitly shared with their group; organizer access retained. Sharing/setup requires membership in selected groups. Guests cannot log in; preserve one identity when invited/claimed. Organizer and game-owning group admin may reopen/soft-delete, with immutable audit records. Import legacy explicit family sharing rather than public access.
+
+Transactions serialize each game revision with row lock; per-cell optimistic versions allow unrelated edits. Durable operation IDs scoped actor/game with canonical payload hash and result. Completion atomically validates saved revision and freezes results. Retrying after timeout must not double-apply. No optimistic success indicator until acknowledgement. Stored server sessions check current account active status. Login rate limiting and bounded inputs. Meaningful tests for permission boundaries, missing vs zero, ties, concurrent stale edits, idempotency, all special formulas and import invariants.
+
+## Ten game policies
+Five Crowns: 11 fixed hands 3..13, labels 3..10/J/Q/K, low total, ties shared, dealer follows contiguous completed hands. UNO Classic and Flip: variable hands, high default or low alternative, optional targets; Flip light/dark persisted per hand. Dutch Blitz: variable signed totals, high default or low alternative, target choices 75/100/150, no dealer. Skyjo: low signed adjusted manual totals, default target100; never automatically double already adjusted scores. Gin Rummy: high nonnegative hands, optional targets100/200/300/500, no bonus/card engine. Sevens: low nonnegative rounds, default100; ANY player's reaching threshold prompts End/Continue. Basic: custom title, high/low signed rounds optional target, or explicit winner mode with no fake point displayed. Kings in Corner: low nonnegative multi-round penalties OR single winner where winner strength equals sum of opponent remaining-card penalties and losers zero. Trouble: one result with player/colors, winner selected; each player's finish+board+home=4; winner all4finish, each opponent incomplete; winner strength =25+5*opponent board+10*opponent home, losers0, retain peg metadata. No automatic board-photo inference yet.
+
+Existing variants and original results retained as historical provenance. Standard/house-rule differences labeled. Targets prompt, never automatically finish. Validate negative eligibility, roster limits, tie semantics, and modes server-side.
+
+## UX acceptance
+Premium warm paper/ink/teal visual system, restrained typography and tactile tabletop artwork, clear hierarchy and empty/error/loading states. Desktop and 390x844/375x812 phone widths. Main home: resume, watch, start; recent history secondary. One person entering everyone on one phone is primary: round-first player rows with full names, large numeric fields, sequential navigation, explicit save status. No horizontal scrolling required to score. Desktop history grid optional. Save drafts locally keyed account/game/cell and preserve base version; visibly reconcile conflict, never silently overwrite. Dedicated Trouble peg/count form, Kings result form, winner picker; shared shell/lifecycle. Watch is read-only standings-first. People/groups with guest and invite paths, readable history and account/logout. V2 link and V3 pilot/data separation note easy to find. No fabricated analytics, no dead controls, no promise of photo recognition. Physical iPhone testing remains a later user validation gate.
