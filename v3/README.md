@@ -74,8 +74,12 @@ health, static 404/cache behavior, and access denial without creating real-user
 sessions. V2 container identities, images, and start timestamps are preserved.
 Public cutover passed all 13 operational checks on 2026-10-31 at 13:33 UTC using
 the actual curl transport. Accepted application sources: API `05e6f79`, frontend
-`6d50e2f`. Deployment reports are private files `deployed-smoke.json` and
+`e70fd4a` (mobile sign-in improvement deployed with only the web container
+recreated). Deployment reports are private files `deployed-smoke.json` and
 `deployed-runtime.txt` beside the V3 private configuration, with off-server copies.
+The final web-only update passed another 13 public checks; its report is
+`deployed-mobile-web.txt`. API, database, and all V2 container identities and
+start times remained unchanged across that update.
 
 This is an invite-only pilot with manually entered scores. Physical iPhone/Safari
 validation, larger-load testing, password recovery/email delivery, and automatic
