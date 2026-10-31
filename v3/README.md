@@ -1,6 +1,6 @@
 # DiFede Games V3 pilot
 
-The pilot is staged for https://games2.difedes.com. Current V2 games remain available
+The pilot is live at https://games2.difedes.com. Current V2 games remain available
 at https://games.difedes.com and keep running until the user explicitly requests
 retirement. The two environments have separate databases, sessions, secrets,
 containers, and storage. New scores do not synchronize between them.
@@ -72,6 +72,10 @@ Snapshot import rehearsal passed 14 independent checks; actual import passed all
 Anonymous operational checks cover routing, security headers, API/database
 health, static 404/cache behavior, and access denial without creating real-user
 sessions. V2 container identities, images, and start timestamps are preserved.
+Public cutover passed all 13 operational checks on 2026-10-31 at 13:33 UTC using
+the actual curl transport. Accepted application sources: API `05e6f79`, frontend
+`6d50e2f`. Deployment reports are private files `deployed-smoke.json` and
+`deployed-runtime.txt` beside the V3 private configuration, with off-server copies.
 
 This is an invite-only pilot with manually entered scores. Physical iPhone/Safari
 validation, larger-load testing, password recovery/email delivery, and automatic
