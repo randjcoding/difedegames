@@ -12,7 +12,7 @@ file; the repository root's legacy Compose file belongs to V2.
 
 ```sh
 docker compose --project-name difedegames-v3 -f v3/compose.yaml config --quiet
-docker compose --project-name difedegames-v3 -f v3/compose.yaml run --rm --no-deps preview -t
+docker compose --project-name difedegames-v3 -f v3/compose.yaml run --rm --no-deps preview -t < /dev/null
 docker compose --project-name difedegames-v3 -f v3/compose.yaml up -d --pull never
 curl -fsS http://127.0.0.1:5003/healthz
 ```
@@ -21,7 +21,7 @@ The image is pinned to the existing Rocky Nginx image digest; no build or pull i
 needed. On another host, provision that exact image deliberately before starting.
 The preview runs as UID/GID 101 with a read-only root filesystem, a small temporary
 filesystem, dropped capabilities, limited resources, and read-only V3-only mounts.
-Its dedicated internal network has no V2 connections. Only host loopback port
+Its dedicated project network has no V2 connections. Only host loopback port
 5003 is published; Nginx listens on 8080 inside the container.
 
 The user manages the Cloudflare route `games2.difedes.com` to

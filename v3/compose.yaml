@@ -37,4 +37,4 @@ services:
 
 networks:
   preview:
-    internal: true
+    driver: bridge
