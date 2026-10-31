@@ -1,6 +1,10 @@
 """Destructive acceptance setup is restricted to the exact isolated test database."""
 import os
 import subprocess
+import sys
+
+# API image WORKDIR is /app; the acceptance folder is a separate read-only mount.
+sys.path.insert(0, os.getcwd())
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
