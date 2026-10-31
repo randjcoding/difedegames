@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from difede_api.db import Base, make_engine, make_sessions
 from difede_api.import_legacy import fingerprint, import_rows, json_value, validate_source
+from difede_api.games import serialize, summaries
 from difede_api.models import Game, LegacyRecord, Membership, Person, Score, User
 
 
@@ -69,6 +70,11 @@ def test_import_preserves_identity_score_precedence_original_result_and_privacy(
         assert next(r for r in result['standings'] if r['winner'])['player_id'] == 10
         assert result['original_results'][0]['winning_score'] == 5
         assert result['original_results'][0]['is_tie'] is True
+        detail = serialize(db, db.get(Game, 50), db.get(User, 4))
+        original = {'winners': [{'player_id': 10, 'winning_score': 5, 'is_tie': True}]}
+        assert detail['imported_result'] == original
+        assert next(r for r in detail['standings'] if r['winner'])['total'] == 8
+        assert summaries(db, [db.get(Game, 50)], db.get(User, 4))[0]['imported_result'] == original
         assert db.get(Membership, 7).is_home is True
         assert db.get(LegacyRecord, ('player_not_duplicates', '0')).payload['player_a_id'] == 10
     with pytest.raises(ValueError, match='not empty'):
@@ -98,3 +104,14 @@ def test_postgres_native_uuid_and_other_types_roundtrip_fingerprint():
     assert converted['interval']['legacy_interval_microseconds'] == 86400000007
     assert fingerprint([row]) == fingerprint([converted])
     assert fingerprint([row, {'id': 1}]) == fingerprint([{'id': 1}, row])
+
+
+def test_original_result_nulls_stay_null(tmp_path):
+    engine = make_engine(f'sqlite:///{tmp_path / "null-result.db"}')
+    Base.metadata.create_all(engine)
+    source = snapshot()
+    source['game_stats'].append({'id': 401, 'game_id': 50, 'winner_id': None, 'winning_score': 0, 'player_count': 2, 'is_tie': None})
+    with make_sessions(engine).begin() as db:
+        import_rows(db, source, 'null-result-snapshot')
+        payload = serialize(db, db.get(Game, 50), db.get(User, 4))
+        assert payload['imported_result']['winners'][1] == {'player_id': None, 'winning_score': 0, 'is_tie': None}

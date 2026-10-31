@@ -98,6 +98,7 @@ def summaries(db, games, user):
             permissions={'can_score': game.id in keeper_games or any(s.person_id == user.person_id for s in roster),
                          'can_manage': game.organizer_id == user.id or game.group_id in admin_groups},
             created_at=iso(game.created_at), finished_at=iso(game.finished_at), imported=game.imported,
+            **imported_result(game),
             rule_note=CATALOG.get(game.slug, {}).get('rule_note', 'Legacy history')))
     return output
 
@@ -139,6 +140,14 @@ def iso(value):
     return value.isoformat() + ('Z' if not value.tzinfo else '')
 
 
+def imported_result(game):
+    if not game.imported:
+        return {}
+    return {'imported_result': {'winners': [
+        {'player_id': row.get('winner_id'), 'winning_score': row.get('winning_score'), 'is_tie': row.get('is_tie')}
+        for row in game.legacy.get('original_results', [])]}}
+
+
 def serialize(db, game, user):
     roster = seats(db, game.id)
     policy = CATALOG.get(game.slug)
@@ -159,6 +168,7 @@ def serialize(db, game, user):
             'standings': standings, 'permissions': permissions(db, user, game),
             'created_at': iso(game.created_at), 'finished_at': iso(game.finished_at),
             'imported': game.imported,
+            **imported_result(game),
             'rule_note': ('Imported snapshot: original results are retained. Reopening applies V3 pilot scoring. '
                           if game.imported else '') + (policy['rule_note'] if policy else 'Legacy variant retained as imported history.')}
 

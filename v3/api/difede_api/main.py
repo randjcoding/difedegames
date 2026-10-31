@@ -41,7 +41,8 @@ def people_payload(db, user):
     output = []
     for person in db.scalars(select(Person).where(Person.id.in_(visible_ids), Person.archived.is_(False),
                                                    Person.purged.is_(False)).order_by(Person.name)):
-        account_id = db.scalar(select(User.id).where(User.person_id == person.id, User.active.is_(True)))
+        account_id = db.scalar(select(User.id).where(User.person_id == person.id, User.active.is_(True),
+                                                    User.approved.is_(True), User.verified.is_(True)))
         output.append({'id': person.id, 'name': person.name,
                        'has_account': db.scalar(select(User.id).where(User.person_id == person.id)) is not None,
                        'account_id': account_id,

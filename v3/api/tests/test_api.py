@@ -269,3 +269,10 @@ def test_guest_only_table_requires_explicit_scorekeeper(client):
     assert response.status_code == 422 and response.json()['code'] == 'scorer_required'
     response = client.post('/api/games', json=body | {'scorekeeper_ids': [1]})
     assert response.status_code == 200 and response.json()['permissions']['can_score'] is True
+
+
+def test_scorekeeper_picker_excludes_unapproved_account(app, client):
+    with app.state.sessions.begin() as db:
+        db.get(User, 5).approved = False
+    person = next(p for p in client.get('/api/people').json()['people'] if p['id'] == 5)
+    assert person['has_account'] is True and person['account_id'] is None
