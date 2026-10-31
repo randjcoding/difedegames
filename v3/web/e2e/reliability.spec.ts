@@ -20,11 +20,11 @@ async function snapshot(page: Page, game: Game) { await page.evaluate(g => (wind
 test('completion freezes the reviewed revision and demands review when live scores change', async ({ page }) => {
   const state = await mock(page); await page.goto('/game/1');
   await page.getByRole('button', { name: 'Finish game', exact: true }).click();
-  await expect(page.getByText('Reviewed result · revision 1')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Review saved scores' })).toBeVisible(); await expect(page.locator('.review-summary')).toHaveAttribute('data-review-revision', '1');
   state.game = { ...state.game, revision: 9 }; await snapshot(page, state.game);
   await expect(page.getByRole('button', { name: 'Finish & show results' })).toBeDisabled();
   await page.getByRole('button', { name: 'Review updated scores' }).click();
-  await expect(page.getByText('Reviewed result · revision 9')).toBeVisible();
+  await expect(page.locator('.review-summary')).toHaveAttribute('data-review-revision', '9');
   await page.getByRole('button', { name: 'Finish & show results' }).click();
   await expect.poll(() => state.finish.length).toBe(1); expect(state.finish[0].expected_revision).toBe(9);
 });
@@ -54,4 +54,15 @@ test('Trouble specialty draft survives refresh and submits exact reviewed peg me
   await expect.poll(() => state.finish.length).toBe(1);
   expect(state.finish[0].details).toEqual({ pegs: [{ player_id: 1, color: 'red', finish: 4, board: 0, home: 0 }, { player_id: 2, color: 'blue', finish: 1, board: 1, home: 2 }] });
   expect(await page.evaluate(() => localStorage.getItem('difede-result:1:1:pegs'))).toBeNull();
+});
+test('original imported result stays separate from summed totals and preserves unknowns', async ({ page }) => {
+  const game: Game = { ...base(), imported: true, status: 'completed', imported_result: { winners: [{ player_id: 1, winning_score: 5, is_tie: false }, { player_id: null, winning_score: null, is_tie: null }] }, standings: [{ player_id: 1, name: 'Alexandra', total: 8, rank: 1, winner: true }, { player_id: 2, name: 'Sammy', total: 12, rank: 2, winner: false }] };
+  await mock(page, game); await page.goto('/game/1');
+  await expect(page.getByRole('heading', { name: 'Original recorded result.' })).toBeVisible();
+  await expect(page.getByText('5 recorded winning points · Winner', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Winner not recorded' })).toBeVisible();
+  await expect(page.getByText('Winning score not recorded · Tie status not recorded', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Totals from saved scores.' })).toBeVisible();
+  await expect(page.locator('.standing-row').first().locator('strong')).toHaveText('8 pts');
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector('.board-header img')!).objectFit)).toBe('contain');
 });
