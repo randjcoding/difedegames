@@ -1,0 +1,11 @@
+[Unit]
+Description=Private logical backup of DiFede Games V3 only
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /home/joe/difedegames-v3/v3/scripts/backup-pilot.sh
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=10min

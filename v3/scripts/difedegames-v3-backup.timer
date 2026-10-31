@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily private DiFede Games V3 logical backup
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 America/New_York
+RandomizedDelaySec=15min
+Persistent=true
+Unit=difedegames-v3-backup.service
+
+[Install]
+WantedBy=timers.target
