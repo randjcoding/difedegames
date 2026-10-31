@@ -1,6 +1,6 @@
 # DiFede Games V3 pilot
 
-The pilot is live at https://games2.difedes.com. Current V2 games remain available
+The pilot is staged for https://games2.difedes.com. Current V2 games remain available
 at https://games.difedes.com and keep running until the user explicitly requests
 retirement. The two environments have separate databases, sessions, secrets,
 containers, and storage. New scores do not synchronize between them.

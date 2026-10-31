@@ -35,8 +35,12 @@ Use a new exact container name for `postgres_http.py` after import rehearsal.
 Reports are stdout JSON, suitable for private backup evidence. Remove only the
 exact acceptance containers after recording results; retain source/pilot volumes.
 
-`deployed_smoke.py --base-url https://games2.difedes.com` makes read-only anonymous
+`deployed_smoke.py --base-url https://games2.difedes.com --transport curl` makes read-only anonymous
 HTTP requests after accepted cutover: app/SPA/API routing, database health,
 security headers, missing-static 404/cache behavior, and anonymous account denial.
 It creates no users, games, or real-password sessions. Authenticated browser/mobile
 behavior and live Cloudflare interactions remain separate validation steps.
+Public Cloudflare currently rejects Python urllib's default client with 403;
+the explicit curl transport uses the actual curl client without changing WAF,
+tunnel, or authentication settings. The default urllib transport remains useful
+inside isolated staging containers where no edge filter is present.
