@@ -194,6 +194,10 @@ def create_game(db, user, data):
         if not keeper or not keeper.active or not keeper.approved or not keeper.verified or not any(
                 is_member(db, keeper, g) for g in requester_groups):
             raise GameError('Scorekeepers must be active accounts sharing one of your groups.')
+    participant_account = db.scalar(select(User.id).where(User.person_id.in_(data.player_ids),
+        User.active.is_(True), User.approved.is_(True), User.verified.is_(True)).limit(1))
+    if participant_account is None and not data.scorekeeper_ids:
+        raise GameError('Assign a signed-in scorekeeper for a table of guests.', code='scorer_required')
     direction = 'high' if mode == 'single' else (data.scoring_direction or policy['scoring_direction'])
     if mode != 'single' and data.slug not in ('basic-other', 'uno-classic', 'uno-flip', 'dutch-blitz') and direction != policy['scoring_direction']:
         raise GameError('This game has a fixed scoring direction.')

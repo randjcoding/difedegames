@@ -261,3 +261,11 @@ def test_invite_revoked_by_guest_membership_removal(app, client):
     anonymous = TestClient(app, base_url='https://testserver')
     assert anonymous.get(f'/api/invites/{token}').status_code == 404
     assert anonymous.post(f'/api/invites/{token}/accept', json={}).status_code == 404
+
+
+def test_guest_only_table_requires_explicit_scorekeeper(client):
+    body = {'slug': 'basic-other', 'player_ids': [6], 'group_id': 1, 'viewer_group_ids': []}
+    response = client.post('/api/games', json=body)
+    assert response.status_code == 422 and response.json()['code'] == 'scorer_required'
+    response = client.post('/api/games', json=body | {'scorekeeper_ids': [1]})
+    assert response.status_code == 200 and response.json()['permissions']['can_score'] is True
