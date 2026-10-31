@@ -1,11 +1,14 @@
 from copy import deepcopy
-from datetime import datetime
+import ipaddress
+from datetime import datetime, time, timedelta
+from decimal import Decimal
+from uuid import UUID
 
 import pytest
 from sqlalchemy import select
 
 from difede_api.db import Base, make_engine, make_sessions
-from difede_api.import_legacy import import_rows, validate_source
+from difede_api.import_legacy import fingerprint, import_rows, json_value, validate_source
 from difede_api.models import Game, LegacyRecord, Membership, Person, Score, User
 
 
@@ -80,3 +83,18 @@ def test_import_rejects_live_source_same_database_and_unconfirmed():
         validate_source('postgresql://reader@db/v3_snapshot', 'postgresql://writer@db/v3_snapshot', True)
     with pytest.raises(ValueError, match='confirm-isolated'):
         validate_source('postgresql://reader@db/v3_snapshot', 'postgresql://writer@db/difede_v3', False)
+
+
+def test_postgres_native_uuid_and_other_types_roundtrip_fingerprint():
+    row = {'batch_id': UUID('11111111-2222-3333-4444-555555555555'), 'at': time(12, 34, 56),
+           'interval': timedelta(days=1, microseconds=7), 'exact': Decimal('12.3400'),
+           'binary': memoryview(b'example'), 'ip': ipaddress.ip_address('192.0.2.1'),
+           'ipv6': ipaddress.ip_address('2001:db8::1'), 'nested': [UUID('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')]}
+    converted = json_value(row)
+    assert converted['batch_id'] == '11111111-2222-3333-4444-555555555555'
+    assert converted['exact'] == '12.3400'
+    assert converted['ip'] == '192.0.2.1'
+    assert converted['ipv6'] == '2001:db8::1'
+    assert converted['interval']['legacy_interval_microseconds'] == 86400000007
+    assert fingerprint([row]) == fingerprint([converted])
+    assert fingerprint([row, {'id': 1}]) == fingerprint([{'id': 1}, row])

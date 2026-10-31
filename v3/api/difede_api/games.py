@@ -43,12 +43,14 @@ def can_view(db, user, game):
 
 
 def visible_games_query(db, user):
-    groups = [g['id'] for g in user_groups(db, user)]
+    memberships = user_groups(db, user)
+    groups = [g['id'] for g in memberships]
+    admin_groups = [g['id'] for g in memberships if g['role'] == 'admin']
     return select(Game).where(Game.deleted.is_(False), or_(
         Game.organizer_id == user.id,
         exists().where(Seat.game_id == Game.id, Seat.person_id == (user.person_id or -1)),
         exists().where(Scorekeeper.game_id == Game.id, Scorekeeper.user_id == user.id),
-        exists().where(GroupAdmin.group_id == Game.group_id, GroupAdmin.user_id == user.id),
+        Game.group_id.in_(admin_groups),
         exists().where(ViewerGroup.game_id == Game.id, ViewerGroup.group_id.in_(groups)),
     ))
 

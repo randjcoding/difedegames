@@ -5,13 +5,17 @@ The full source dump must also remain backed up independently of this database.
 """
 import argparse
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
+import sys
+import traceback
+from uuid import UUID
 
 from sqlalchemy import MetaData, Table, create_engine, func, inspect, select, text
 from sqlalchemy.engine import make_url
@@ -28,12 +32,18 @@ def json_value(value):
         return {str(k): json_value(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [json_value(v) for v in value]
-    if isinstance(value, (datetime, date)):
+    if isinstance(value, (datetime, date, time)):
         return value.isoformat()
+    if isinstance(value, (UUID, ipaddress.IPv4Address, ipaddress.IPv6Address,
+                          ipaddress.IPv4Network, ipaddress.IPv6Network,
+                          ipaddress.IPv4Interface, ipaddress.IPv6Interface)):
+        return str(value)
+    if isinstance(value, timedelta):
+        return {'legacy_interval_microseconds': (value.days * 86400 + value.seconds) * 1000000 + value.microseconds}
     if isinstance(value, Decimal):
         return str(value)
-    if isinstance(value, bytes):
-        return value.hex()
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).hex()
     return value
 
 
@@ -268,8 +278,17 @@ def main():
     try:
         with make_sessions(engine).begin() as db:
             report = import_rows(db, source, args.source_name)
-    except Exception:
+    except Exception as exc:
         # Database exceptions may contain personal rows/password hashes; never dump them.
+        original = getattr(exc, 'orig', None)
+        diag = getattr(original, 'diag', None)
+        descriptor = {'error_type': type(exc).__name__, 'database_error_type': type(original).__name__ if original else None,
+                      'sqlstate': getattr(original, 'sqlstate', None),
+                      'constraint': getattr(diag, 'constraint_name', None),
+                      'column': getattr(diag, 'column_name', None),
+                      'frames': [{'file': Path(frame.filename).name, 'line': frame.lineno}
+                                 for frame in traceback.extract_tb(exc.__traceback__) if 'difede_api' in frame.filename]}
+        print(json.dumps(descriptor), file=sys.stderr)
         raise SystemExit('Import failed and rolled back. Inspect schema/reconciliation privately; no source data was changed.') from None
     if args.report:
         args.report.write_text(json.dumps(report, indent=2), encoding='utf-8')
