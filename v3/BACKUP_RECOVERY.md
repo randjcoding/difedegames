@@ -71,11 +71,23 @@ staging directory. Never print its contents or overwrite active configuration.
 An actual recovery requires separately reviewed application/configuration
 validation and a controlled cutover; it is not an automatic rollback.
 
-## Current verification boundary
+## Recorded post-import restore verification
 
-The V2 source dump has passed a full disposable restore. The new V3 target was
-initially empty. A full disposable V3 restore must be recorded after the actual
-pilot import; dump parsing alone is not a restore test. The timer preserves
+After the actual pilot import, backup
+`pilot-20261031T132745Z-SNCuFd5d` passed a full disposable PostgreSQL 16 restore
+on 2026-10-31 at 13:28 UTC. Every public table's count and canonical row-hash
+aggregate matched the original V3 target: all 20 tables. The isolated restore
+used network none, no published ports, and a fresh volume; its exact container
+and volume were removed and absence verified. Dump SHA256:
+`00fdf0eb8ebbfb53e5984b1ee261d95e1347eca689cbc97a4e8e6701732ebbb3`.
+
+Private report: `/home/joe/.config/difedegames-v3/pilot-restore-drill.txt`, with
+before/restored fingerprint files beside it. The complete backup was copied to
+the ACL-protected Windows `v3-private/backups/` folder and all four manifest
+hashes verified. Sanitized acceptance reports and V2 before/after identity
+evidence are in the sibling Windows `v3-private/evidence-20261031/` folder.
+This validates this backup; future scheduled backups still require monitoring
+and periodic restore drills. The timer preserves
 database state and current V3 private configuration sequentially, not one atomic
 cross-component snapshot. It does not export application images, host settings,
 Cloudflare credentials, or V2 data.

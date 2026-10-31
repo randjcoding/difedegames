@@ -40,6 +40,12 @@ Prepared databases:
 - `difedegames_v3_legacy_snapshot_20261031`: retained restored legacy source.
   `v3_legacy_reader` has SELECT-only grants and defaults to read-only transactions.
 
+The actual one-time pilot import is now complete (38/38 importer checks passed):
+31 people, 9 accounts, 7 groups, 566 sessions, 1,394 seats, 13,543 score cells,
+and all 25,595 original source records retained. Do not rerun initialization or
+import against this populated target. The separate test database contains only
+disposable acceptance fixtures and may be reset by the guarded acceptance runner.
+
 The source was restored from the verified custom-format dump at
 `/home/joe/difedegames-backups/recovery-2026-10-31-THbUhYYR/database.dump`.
 SHA256: `7784ad3c339969a016eaaac9f014a26489a4126e6297c67e6afced08b978077b`.
