@@ -1,0 +1,97 @@
+name: difedegames-v3
+
+services:
+  db:
+    image: postgres@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    pull_policy: never
+    env_file:
+      - /home/joe/.config/difedegames-v3/database.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [data]
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 100
+    shm_size: 64m
+    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=30"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    logging: &logging
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  api:
+    image: difedegames-v3-api:pilot
+    build: {context: ./api}
+    env_file:
+      - /home/joe/.config/difedegames-v3/runtime.env
+    networks: [edge, data]
+    depends_on:
+      db: {condition: service_healthy}
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 100
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 10s
+    logging: *logging
+
+  importer:
+    profiles: [tools]
+    image: difedegames-v3-api:pilot
+    env_file:
+      - /home/joe/.config/difedegames-v3/runtime.env
+      - /home/joe/.config/difedegames-v3/import.env
+    networks: [data]
+    entrypoint: ["python", "-m", "difede_api.import_legacy"]
+    command: ["--source-name", "difedegames_v3_legacy_snapshot_20261031", "--confirm-isolated", "--report", "/tmp/import-report.json"]
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 100
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging: *logging
+
+  web:
+    image: difedegames-v3-web:pilot
+    build: {context: ./web, dockerfile: ../web.Dockerfile}
+    entrypoint: ["nginx"]
+    command: ["-g", "daemon off;"]
+    user: "101:101"
+    ports: ["127.0.0.1:5003:8080"]
+    volumes:
+      - ./pilot-nginx.conf:/etc/nginx/nginx.conf:ro,Z
+    networks: [edge]
+    depends_on:
+      api: {condition: service_healthy}
+    read_only: true
+    tmpfs: ["/tmp:size=8m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 100
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    logging: *logging
+
+networks:
+  edge: {driver: bridge}
+  data: {internal: true}
+
+volumes:
+  pgdata:
