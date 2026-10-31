@@ -244,11 +244,13 @@ def run_cases(engine):
     def guest_only():
         code, guest, _ = a.call('POST', '/api/people', {'name': 'Acceptance Additional Guest', 'group_id': 1})
         require(code == 200, 'create synthetic guest')
-        payload = {'slug': 'gin-rummy', 'group_id': 1, 'player_ids': [6, guest['id']], 'viewer_group_ids': [1]}
+        code, second_guest, _ = a.call('POST', '/api/people', {'name': 'Acceptance Second Guest', 'group_id': 1})
+        require(code == 200, 'create second synthetic guest')
+        payload = {'slug': 'gin-rummy', 'group_id': 1, 'player_ids': [guest['id'], second_guest['id']], 'viewer_group_ids': [1]}
         require(a.call('POST', '/api/games', payload)[0] == 422, 'guest-only table requires scorekeeper')
         code, game, _ = a.call('POST', '/api/games', {**payload, 'scorekeeper_ids': [1]})
         require(code == 200 and game['permissions']['can_score'], 'explicit nonplaying keeper enables guest table')
-        require(save(a, game, pid=6)['scores'][0]['value'] == 0, 'nonplaying keeper can score guest')
+        require(save(a, game, pid=guest['id'])['scores'][0]['value'] == 0, 'nonplaying keeper can score guest')
     check('Guest-only table requires explicit nonplaying scorekeeper', guest_only)
 
     def stream_revocation():
