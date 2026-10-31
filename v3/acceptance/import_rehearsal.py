@@ -8,6 +8,7 @@ import tempfile
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 
 from common import reset_schema
 
@@ -56,6 +57,17 @@ def main():
         checks['nonempty_target_reimport_refused'] = repeated.returncode != 0
         with target.connect() as normalized:
             checks['single_import_marker'] = normalized.scalar(text('SELECT count(*) FROM legacy_imports')) == 1
+        for table in ('legacy_records', 'legacy_imports'):
+            with target.connect() as normalized:
+                blocked = False
+                require_row = normalized.scalar(text(f'SELECT count(*) FROM {table}')) > 0
+                try:
+                    normalized.execute(text(f'DELETE FROM {table} WHERE ctid IN (SELECT ctid FROM {table} LIMIT 1)'))
+                except DBAPIError as error:
+                    blocked = getattr(error.orig, 'sqlstate', None) == 'P0001'
+                finally:
+                    normalized.rollback()
+                checks[f'{table}_immutable_under_runtime_owner'] = require_row and blocked
         report = {'database': 'difedegames_v3_test', 'source': parsed.database,
                   'source_tables': len(counts), 'source_rows': sum(counts.values()),
                   'normalized_counts': importer['normalized'], 'checks': checks,

@@ -19,6 +19,7 @@ import uuid
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import DBAPIError
 
 from common import reset_schema
 from difede_api.models import Group, GroupAdmin, Membership, Person, User
@@ -240,6 +241,16 @@ def run_cases(engine):
         require(guest.call('POST', f'/api/invites/{token}/accept', {})[0] == 404, 'invitation single use')
     check('HTTP explicit guest claim without identity merge', invitations)
 
+    def guest_only():
+        code, guest, _ = a.call('POST', '/api/people', {'name': 'Acceptance Additional Guest', 'group_id': 1})
+        require(code == 200, 'create synthetic guest')
+        payload = {'slug': 'gin-rummy', 'group_id': 1, 'player_ids': [6, guest['id']], 'viewer_group_ids': [1]}
+        require(a.call('POST', '/api/games', payload)[0] == 422, 'guest-only table requires scorekeeper')
+        code, game, _ = a.call('POST', '/api/games', {**payload, 'scorekeeper_ids': [1]})
+        require(code == 200 and game['permissions']['can_score'], 'explicit nonplaying keeper enables guest table')
+        require(save(a, game, pid=6)['scores'][0]['value'] == 0, 'nonplaying keeper can score guest')
+    check('Guest-only table requires explicit nonplaying scorekeeper', guest_only)
+
     def stream_revocation():
         stream_client = Client(2)
         game = new_game(a)
@@ -290,6 +301,20 @@ def run_cases(engine):
                     code, completed, _ = action(a, game, 'finish', winner_id=1)
                     require(code == 200 and not completed['scores'], 'winner-only has no fake points')
             check(f'PostgreSQL game policy {definition["slug"]}/{mode}', game_mode)
+
+    def immutable_audit():
+        for table in ('audit_events', 'game_events', 'operations'):
+            with engine.connect() as connection:
+                require(connection.scalar(text(f'SELECT count(*) FROM {table}')) > 0, 'immutable table has actual accepted events')
+                blocked = False
+                try:
+                    connection.execute(text(f'DELETE FROM {table} WHERE ctid IN (SELECT ctid FROM {table} LIMIT 1)'))
+                except DBAPIError as error:
+                    blocked = getattr(error.orig, 'sqlstate', None) == 'P0001'
+                finally:
+                    connection.rollback()
+                require(blocked, 'runtime owner cannot delete immutable history')
+    check('PostgreSQL audit/events/operations immutable triggers', immutable_audit)
 
 
 def main():
