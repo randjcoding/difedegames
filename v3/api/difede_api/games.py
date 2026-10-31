@@ -7,9 +7,9 @@ from sqlalchemy import exists, or_, select, func
 
 from .catalog import CATALOG
 from .db import utcnow
-from .models import Audit, Game, GameEvent, GroupAdmin, Membership, Operation, Person, Round, Score, Scorekeeper, Seat, User, ViewerGroup
+from .models import Audit, Game, GameEvent, Group, GroupAdmin, Membership, Operation, Person, Round, Score, Scorekeeper, Seat, User, ViewerGroup
 from .schemas import PegDetails, PenaltyDetails
-from .security import is_admin, is_member, user_groups
+from .security import is_admin, is_member, is_superadmin, user_groups
 
 
 class GameError(Exception):
@@ -28,7 +28,7 @@ def seats(db, game_id):
 
 def permissions(db, user, game):
     score = bool(user.person_id and db.get(Seat, (game.id, user.person_id))) or bool(db.get(Scorekeeper, (game.id, user.id)))
-    manage = game.organizer_id == user.id or (game.group_id is not None and is_admin(db, user, game.group_id))
+    manage = is_superadmin(user) or game.organizer_id == user.id or (game.group_id is not None and is_admin(db, user, game.group_id))
     return {'can_score': score, 'can_manage': manage}
 
 
@@ -43,6 +43,8 @@ def can_view(db, user, game):
 
 
 def visible_games_query(db, user):
+    if is_superadmin(user):
+        return select(Game).where(Game.deleted.is_(False))
     memberships = user_groups(db, user)
     groups = [g['id'] for g in memberships]
     admin_groups = [g['id'] for g in memberships if g['role'] == 'admin']
@@ -94,9 +96,9 @@ def summaries(db, games, user):
             revision=game.revision, mode=game.mode, scoring_direction=game.scoring_direction, target_score=game.target_score,
             group_id=game.group_id, viewer_group_ids=viewers[game.id],
             players=[dict(id=s.person_id, name=names[s.person_id], **({'color': s.color} if s.color else {})) for s in roster],
-            rounds=[], scores=[], standings=standings,
+            rounds=[], scores=[], standings=standings, result_source=result_source(game),
             permissions={'can_score': game.id in keeper_games or any(s.person_id == user.person_id for s in roster),
-                         'can_manage': game.organizer_id == user.id or game.group_id in admin_groups},
+                         'can_manage': is_superadmin(user) or game.organizer_id == user.id or game.group_id in admin_groups},
             created_at=iso(game.created_at), finished_at=iso(game.finished_at), imported=game.imported,
             **imported_result(game),
             rule_note=CATALOG.get(game.slug, {}).get('rule_note', 'Legacy history')))
@@ -148,6 +150,14 @@ def imported_result(game):
         for row in game.legacy.get('original_results', [])]}}
 
 
+def result_source(game):
+    if not game.result:
+        return None
+    if game.result.get('corrected') or game.result.get('policy') == 'v3-corrected-1':
+        return 'v3-correction'
+    return 'v2-original' if game.result.get('policy') == 'v2-original' else 'v3-completion'
+
+
 def serialize(db, game, user):
     roster = seats(db, game.id)
     policy = CATALOG.get(game.slug)
@@ -168,6 +178,7 @@ def serialize(db, game, user):
             'standings': standings, 'permissions': permissions(db, user, game),
             'created_at': iso(game.created_at), 'finished_at': iso(game.finished_at),
             'imported': game.imported,
+            'result_source': result_source(game),
             **imported_result(game),
             'rule_note': ('Imported snapshot: original results are retained. Reopening applies V3 pilot scoring. '
                           if game.imported else '') + (policy['rule_note'] if policy else 'Legacy variant retained as imported history.')}
@@ -192,7 +203,13 @@ def create_game(db, user, data):
     selected_groups = set(data.viewer_group_ids) | {data.group_id}
     if any(not is_member(db, user, g) for g in selected_groups):
         raise GameError('You must belong to each selected group.', 403)
+    locked_groups = list(db.scalars(select(Group).where(Group.id.in_(selected_groups)).order_by(Group.id)
+        .with_for_update().execution_options(populate_existing=True)))
+    if len(locked_groups) != len(selected_groups) or any(g.archived for g in locked_groups):
+        raise GameError('A selected group is unavailable or archived.')
     requester_groups = {g['id'] for g in user_groups(db, user)}
+    # Lifecycle changes lock the same people so an archive cannot race a new seat.
+    list(db.scalars(select(Person).where(Person.id.in_(data.player_ids)).order_by(Person.id).with_for_update()))
     available_people = set(db.scalars(select(Membership.person_id).where(
         Membership.group_id.in_(requester_groups), Membership.status == 'active')))
     for pid in data.player_ids:
@@ -376,6 +393,8 @@ def command(db, user, game_id, action, data, round_number=None):
             raise GameError('Only an existing UNO Flip round has a side.')
         row.side = data.side
     elif action == 'finish':
+        if game.rules_version == 'v2-original':
+            game.rules_version = 'v3-pilot-1'
         finish(db, game, data)
     elif action == 'reopen':
         if game.status == 'active':

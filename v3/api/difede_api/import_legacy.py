@@ -23,7 +23,7 @@ from sqlalchemy.engine import make_url
 from .catalog import CATALOG
 from .db import Base, make_engine, make_sessions, utcnow
 from .games import active_standings
-from .models import (Game, GameEvent, Group, GroupAdmin, ImportRun, LegacyRecord, Membership,
+from .models import (Game, GameEvent, GameLayout, Group, GroupAdmin, ImportRun, LegacyRecord, Membership,
                      Person, Round, Score, Seat, User, ViewerGroup)
 
 
@@ -115,6 +115,7 @@ def import_rows(db, source, source_name):
                       created_by=row.get('created_by_user_id', row.get('user_id')),
                       archived=bool(row.get('archived_at')), purged=bool(row.get('purged_at')),
                       privacy={key: row.get(key) for key in ('is_discoverable', 'show_full_last_name', 'is_minor', 'email_verified')},
+                      details={key: row.get(key) for key in ('first_name', 'last_name', 'email')},
                       legacy=json_value(row)))
     db.flush()
     for row in accounts.values():
@@ -123,10 +124,14 @@ def import_rows(db, source, source_name):
                     password_hash=row['password_hash'], person_id=row.get('player_id'),
                     active=bool(row.get('is_active')) and not bool(row.get('archived_at')),
                     verified=bool(row.get('is_verified')), approved=bool(row.get('is_approved')),
+                    site_role='super_admin' if row.get('role') == 'super_admin' and row.get('is_verified')
+                        and row.get('is_approved') and row.get('is_active') and not row.get('archived_at') else 'member',
+                    details={key: row.get(key) for key in ('address', 'city', 'state', 'zipcode', 'phone_number')},
                     legacy=json_value(row)))
     db.flush()
     for row in families.values():
-        db.add(Group(id=row['id'], name=row['name'], archived=bool(row.get('archived_at')), legacy=json_value(row)))
+        db.add(Group(id=row['id'], name=row['name'], archived=bool(row.get('archived_at')), legacy=json_value(row),
+                     settings={key: row.get(key, True) for key in ('is_discoverable', 'show_roster')}))
     db.flush()
     for row in source.get('player_family_memberships', []):
         db.add(Membership(id=row['id'], person_id=row['player_id'], group_id=row['family_id'],
@@ -138,6 +143,20 @@ def import_rows(db, source, source_name):
         lead = row.get('lead_user_id')
         if lead in accounts:
             db.add(GroupAdmin(group_id=row['id'], user_id=lead))
+    db.flush()
+    for row in source.get('game_layouts', []):
+        definition = definitions[row['game_id']]
+        slug = definition.get('slug') or f'legacy-{row["game_id"]}'
+        direction = row.get('scoring_direction')
+        mode = 'winner' if direction == 'manual' else 'single' if direction == 'single_round' or slug == 'trouble' else 'rounds'
+        players = row.get('player_ids') or []
+        if isinstance(players, str):
+            players = json.loads(players)
+        db.add(GameLayout(id=row['id'], group_id=row['family_id'], slug=slug, name=row['name'], player_ids=players,
+            mode=mode, scoring_direction='high' if direction == 'high_wins' or mode == 'single' else 'low' if direction == 'low_wins' else None,
+            target_score=row.get('target_score'), title=None, is_default=bool(row.get('is_default')),
+            created_by=row.get('created_by_user_id') if row.get('created_by_user_id') in accounts else None,
+            created_at=source_time(row.get('created_at')) or utcnow(), updated_at=source_time(row.get('updated_at')) or utcnow(), legacy=json_value(row)))
     db.flush()
     stats = defaultdict(list)
     for row in source['game_stats']:
@@ -219,7 +238,7 @@ def import_rows(db, source, source_name):
         db.add(GameEvent(game_id=game.id, revision=1, action='legacy_imported', payload={'source_name': source_name}))
     db.flush()
     report['normalized'] = {model.__tablename__: db.scalar(select(func.count()).select_from(model))
-                            for model in (Person, User, Group, Membership, Game, Seat, Score, LegacyRecord)}
+                            for model in (Person, User, Group, Membership, Game, Seat, Score, GameLayout, LegacyRecord)}
     report['warnings'] = {'legacy_fallback_cells': fallback, 'scores_missing_source_seat': missing_seats,
                           'winners_missing_source_seat': missing_winners,
                           'accounts_without_person': sum(not r.get('player_id') for r in accounts.values()),

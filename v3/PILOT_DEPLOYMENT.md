@@ -82,7 +82,7 @@ docker compose --project-name difedegames-v3 -f v3/pilot.compose.yaml up -d --no
 After backend/import acceptance, run migrations once on the fresh target:
 
 ```sh
-docker compose --project-name difedegames-v3 -f v3/pilot.compose.yaml run --rm --no-deps api alembic upgrade head < /dev/null
+docker compose --project-name difedegames-v3 -f v3/pilot.compose.yaml run --rm --no-deps migrator < /dev/null
 ```
 
 Run the one-time importer as a named container so its sanitized report can be
@@ -128,3 +128,23 @@ Leave the V3 database and its volume intact. No `down -v`, volume removal, V2
 commands, or automatic production restoration. Before a later migration, take a
 fresh logical V3 backup plus private configuration backup and verify a disposable
 restore; preserving the old V2 snapshot is not a backup of new V3 pilot scores.
+
+## Password-recovery SMTP configuration for the parity release
+
+An authorized private mapping is prepared at
+`/home/joe/.config/difedegames-v3/smtp.env`, owner Joe, mode 600. It uses the same
+existing Gmail provider credentials as V2, with Gmail's supported port 587 and
+verified STARTTLS instead of the legacy application's implicit TLS on port 465.
+The keys are `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `SMTP_USERNAME`,
+`SMTP_PASSWORD`, and `SMTP_STARTTLS`; values remain outside Git and logs.
+Only the serving `api` service loads this file at the approved final cutover.
+The separate `migrator`, importer, and acceptance containers never receive SMTP
+credentials. Do not run test password-reset messages against real recipients.
+
+Once the parity API is deployed with this configuration, production password
+recovery can send single-use reset links; administrative reset links remain an
+alternative. Configuration work verified only EHLO/STARTTLS/EHLO/QUIT with
+certificate verification (TLS 1.3). No authentication or email transmission was
+performed, so actual delivery is not claimed as tested. Gmail's port guidance:
+https://support.google.com/mail/answer/7104828?hl=en . The private configuration
+archive in each scheduled V3 backup includes `smtp.env` automatically.

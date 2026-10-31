@@ -78,9 +78,14 @@ def check_csrf(request, sess):
 
 
 def user_groups(db, user):
+    if is_superadmin(user):
+        return [{'id': g.id, 'name': g.name, 'role': 'admin'} for g in db.scalars(
+            select(Group).where(Group.archived.is_(False)).order_by(Group.name))]
     ids = set(db.scalars(select(Membership.group_id).where(
         Membership.person_id == user.person_id, Membership.status == 'active')).all()) if user.person_id else set()
-    admin_ids = set(db.scalars(select(GroupAdmin.group_id).where(GroupAdmin.user_id == user.id)).all())
+    admin_ids = set(db.scalars(select(GroupAdmin.group_id).join(Membership,
+        (Membership.group_id == GroupAdmin.group_id) & (Membership.person_id == user.person_id)
+        & (Membership.status == 'active')).where(GroupAdmin.user_id == user.id)).all()) if user.person_id else set()
     ids |= admin_ids
     groups = db.scalars(select(Group).where(Group.id.in_(ids), Group.archived.is_(False)).order_by(Group.name)).all()
     return [{'id': g.id, 'name': g.name, 'role': 'admin' if g.id in admin_ids else 'member'} for g in groups]
@@ -91,9 +96,21 @@ def is_member(db, user, group_id):
 
 
 def is_admin(db, user, group_id):
-    return any(g['id'] == group_id and g['role'] == 'admin' for g in user_groups(db, user))
+    return is_superadmin(user) or any(g['id'] == group_id and g['role'] == 'admin' for g in user_groups(db, user))
+
+
+def is_superadmin(user):
+    return bool(user and user.site_role == 'super_admin' and user.active and user.verified and user.approved)
+
+
+def preference_values(user):
+    return {'style': 'classic', 'palette': 'midnight-blue', 'favorite_game_slugs': [],
+            'favorite_person_ids': [], **(user.preferences or {})}
 
 
 def me_payload(db, user, sess):
-    return {'user': {'id': user.id, 'email': user.email, 'name': user.name, 'person_id': user.person_id},
-            'groups': user_groups(db, user), 'csrf_token': sess.csrf_token}
+    person = db.get(Person, user.person_id) if user.person_id else None
+    return {'user': {'id': user.id, 'email': user.email, 'name': user.name, 'person_id': user.person_id,
+                     'display_name': person.name if person else user.name,
+                     'site_role': user.site_role, 'is_owner': user.is_owner},
+            'groups': user_groups(db, user), 'csrf_token': sess.csrf_token, 'preferences': preference_values(user)}

@@ -1,15 +1,204 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from './api';
-import { parseScore, ScoreQueue } from './score-queue';
-import type { Game } from './types';
-const fixture = (): Game => ({ id: 1, slug: 'five-crowns', title: 'Five Crowns', status: 'active', revision: 0, mode: 'rounds', scoring_direction: 'low', target_score: null, group_id: 1, viewer_group_ids: [], players: [{ id: 1, name: 'Alex' }, { id: 2, name: 'Sam' }], rounds: [{ number: 3, label: '3' }], scores: [], standings: [], permissions: { can_score: true, can_manage: true }, created_at: '2026-10-31T00:00:00Z', imported: false });
-function setup(post = vi.fn()) { let game = fixture(); const data = new Map<string, string>(); const storage = { getItem: (k: string) => data.get(k) || null, setItem: (k: string, v: string) => { data.set(k, v); } }; const queue = new ScoreQueue(storage, 'test', () => game, post, g => { game = g; }, vi.fn(), true); return { queue, storage, post, setGame: (g: Game) => { game = g; }, game: () => game }; }
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "./api";
+import { parseScore, ScoreQueue } from "./score-queue";
+import type { Game } from "./types";
+const fixture = (): Game => ({
+  id: 1,
+  slug: "five-crowns",
+  title: "Five Crowns",
+  status: "active",
+  revision: 0,
+  mode: "rounds",
+  scoring_direction: "low",
+  target_score: null,
+  group_id: 1,
+  viewer_group_ids: [],
+  players: [
+    { id: 1, name: "Alex" },
+    { id: 2, name: "Sam" },
+  ],
+  rounds: [{ number: 3, label: "3" }],
+  scores: [],
+  standings: [],
+  permissions: { can_score: true, can_manage: true },
+  created_at: "2026-10-31T00:00:00Z",
+  imported: false,
+});
+function setup(post = vi.fn()) {
+  let game = fixture();
+  const data = new Map<string, string>();
+  const storage = {
+    getItem: (k: string) => data.get(k) || null,
+    setItem: (k: string, v: string) => {
+      data.set(k, v);
+    },
+  };
+  const queue = new ScoreQueue(
+    storage,
+    "test",
+    () => game,
+    post,
+    (g) => {
+      game = g;
+    },
+    vi.fn(),
+    true,
+  );
+  return {
+    queue,
+    storage,
+    post,
+    setGame: (g: Game) => {
+      game = g;
+    },
+    game: () => game,
+  };
+}
 afterEach(() => vi.useRealTimers());
-describe('acknowledged versioned score drafts', () => {
-  it('keeps blank distinct from zero and validates whole signed values', () => { expect(parseScore('', true)).toBeNull(); expect(parseScore('0', false)).toBe(0); expect(parseScore('-8', true)).toBe(-8); expect(() => parseScore('1.5', true)).toThrow(); expect(() => parseScore('-8', false)).toThrow(); });
-  it('does not show saved or discard a draft before server acknowledgement', async () => { vi.useFakeTimers(); let resolve!: (g: Game) => void; const { queue, game } = setup(vi.fn(() => new Promise<Game>(r => { resolve = r; }))); queue.edit(1, 3, '0'); const saving = queue.save('1:3'); expect(queue.drafts['1:3'].status).toBe('saving'); resolve({ ...game(), revision: 1, scores: [{ player_id: 1, round_number: 3, value: 0, version: 1 }] }); expect(await saving).toBe(true); expect(queue.drafts['1:3']).toBeUndefined(); queue.dispose(); });
-  it('retains a failed draft across reload and retries the identical operation id', async () => { vi.useFakeTimers(); const failed = setup(vi.fn().mockRejectedValueOnce(new Error('Offline')).mockResolvedValue({ ...fixture(), revision: 1, scores: [{ player_id: 1, round_number: 3, value: 25, version: 1 }] })); failed.queue.edit(1, 3, '25'); const operation = failed.queue.drafts['1:3'].operation; expect(await failed.queue.flush()).toBe(false); expect(failed.queue.drafts['1:3'].raw).toBe('25'); const recovered = new ScoreQueue(failed.storage, 'test', failed.game, failed.post, () => {}, () => {}, true); expect(recovered.drafts['1:3'].operation).toBe(operation); await recovered.flush(); expect(failed.post.mock.calls[1][0].operation_id).toBe(operation); failed.queue.dispose(); recovered.dispose(); });
-  it('serializes two local changes using the acknowledged version and latest value', async () => { vi.useFakeTimers(); let resolve!: (g: Game) => void; const post = vi.fn().mockImplementationOnce(() => new Promise<Game>(r => { resolve = r; })).mockResolvedValueOnce({ ...fixture(), revision: 2, scores: [{ player_id: 1, round_number: 3, value: 25, version: 2 }] }); const { queue, game } = setup(post); queue.edit(1, 3, '2'); const saving = queue.save('1:3'); queue.edit(1, 3, '25'); resolve({ ...game(), revision: 1, scores: [{ player_id: 1, round_number: 3, value: 2, version: 1 }] }); await saving; expect(post.mock.calls[1][0]).toMatchObject({ score: 25, expected_version: 1 }); expect(queue.drafts).toEqual({}); queue.dispose(); });
-  it('preserves stale drafts on conflict until deliberate server-version review', async () => { vi.useFakeTimers(); const { queue, post, setGame } = setup(vi.fn().mockRejectedValueOnce(new ApiError(409, { detail: 'Score changed' })).mockResolvedValue({ ...fixture(), revision: 3, scores: [{ player_id: 1, round_number: 3, value: 10, version: 3 }] })); queue.edit(1, 3, '10'); await queue.save('1:3'); expect(queue.drafts['1:3'].status).toBe('conflict'); expect(await queue.flush()).toBe(false); expect(post).toHaveBeenCalledTimes(1); setGame({ ...fixture(), revision: 2, scores: [{ player_id: 1, round_number: 3, value: 20, version: 2 }] }); queue.keepDraft('1:3'); await queue.flush(); expect(post.mock.calls[1][0]).toMatchObject({ score: 10, expected_version: 2 }); queue.dispose(); });
-  it('allows returning to a previously saved value after a remote correction', async () => { vi.useFakeTimers(); const { queue, setGame, post } = setup(vi.fn().mockResolvedValue({ ...fixture(), revision: 3, scores: [{ player_id: 1, round_number: 3, value: 10, version: 3 }] })); setGame({ ...fixture(), revision: 2, scores: [{ player_id: 1, round_number: 3, value: 20, version: 2 }] }); queue.edit(1, 3, '10'); await queue.flush(); expect(post).toHaveBeenCalledWith(expect.objectContaining({ score: 10, expected_version: 2 })); queue.dispose(); });
+describe("acknowledged versioned score drafts", () => {
+  it("keeps blank distinct from zero and validates whole signed values", () => {
+    expect(parseScore("", true)).toBeNull();
+    expect(parseScore("0", false)).toBe(0);
+    expect(parseScore("-8", true)).toBe(-8);
+    expect(() => parseScore("1.5", true)).toThrow();
+    expect(() => parseScore("-8", false)).toThrow();
+  });
+  it("does not show saved or discard a draft before server acknowledgement", async () => {
+    vi.useFakeTimers();
+    let resolve!: (g: Game) => void;
+    const { queue, game } = setup(
+      vi.fn(
+        () =>
+          new Promise<Game>((r) => {
+            resolve = r;
+          }),
+      ),
+    );
+    queue.edit(1, 3, "0");
+    const saving = queue.save("1:3");
+    expect(queue.drafts["1:3"].status).toBe("saving");
+    resolve({
+      ...game(),
+      revision: 1,
+      scores: [{ player_id: 1, round_number: 3, value: 0, version: 1 }],
+    });
+    expect(await saving).toBe(true);
+    expect(queue.drafts["1:3"]).toBeUndefined();
+    queue.dispose();
+  });
+  it("retains a failed draft across reload and retries the identical operation id", async () => {
+    vi.useFakeTimers();
+    const failed = setup(
+      vi
+        .fn()
+        .mockRejectedValueOnce(new Error("Offline"))
+        .mockResolvedValue({
+          ...fixture(),
+          revision: 1,
+          scores: [{ player_id: 1, round_number: 3, value: 25, version: 1 }],
+        }),
+    );
+    failed.queue.edit(1, 3, "25");
+    const operation = failed.queue.drafts["1:3"].operation;
+    expect(await failed.queue.flush()).toBe(false);
+    expect(failed.queue.drafts["1:3"].raw).toBe("25");
+    const recovered = new ScoreQueue(
+      failed.storage,
+      "test",
+      failed.game,
+      failed.post,
+      () => {},
+      () => {},
+      true,
+    );
+    expect(recovered.drafts["1:3"].operation).toBe(operation);
+    await recovered.flush();
+    expect(failed.post.mock.calls[1][0].operation_id).toBe(operation);
+    failed.queue.dispose();
+    recovered.dispose();
+  });
+  it("serializes two local changes using the acknowledged version and latest value", async () => {
+    vi.useFakeTimers();
+    let resolve!: (g: Game) => void;
+    const post = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Game>((r) => {
+            resolve = r;
+          }),
+      )
+      .mockResolvedValueOnce({
+        ...fixture(),
+        revision: 2,
+        scores: [{ player_id: 1, round_number: 3, value: 25, version: 2 }],
+      });
+    const { queue, game } = setup(post);
+    queue.edit(1, 3, "2");
+    const saving = queue.save("1:3");
+    queue.edit(1, 3, "25");
+    resolve({
+      ...game(),
+      revision: 1,
+      scores: [{ player_id: 1, round_number: 3, value: 2, version: 1 }],
+    });
+    await saving;
+    expect(post.mock.calls[1][0]).toMatchObject({
+      score: 25,
+      expected_version: 1,
+    });
+    expect(queue.drafts).toEqual({});
+    queue.dispose();
+  });
+  it("preserves stale drafts on conflict until deliberate server-version review", async () => {
+    vi.useFakeTimers();
+    const { queue, post, setGame } = setup(
+      vi
+        .fn()
+        .mockRejectedValueOnce(new ApiError(409, { detail: "Score changed" }))
+        .mockResolvedValue({
+          ...fixture(),
+          revision: 3,
+          scores: [{ player_id: 1, round_number: 3, value: 10, version: 3 }],
+        }),
+    );
+    queue.edit(1, 3, "10");
+    await queue.save("1:3");
+    expect(queue.drafts["1:3"].status).toBe("conflict");
+    expect(await queue.flush()).toBe(false);
+    expect(post).toHaveBeenCalledTimes(1);
+    setGame({
+      ...fixture(),
+      revision: 2,
+      scores: [{ player_id: 1, round_number: 3, value: 20, version: 2 }],
+    });
+    queue.keepDraft("1:3");
+    await queue.flush();
+    expect(post.mock.calls[1][0]).toMatchObject({
+      score: 10,
+      expected_version: 2,
+    });
+    queue.dispose();
+  });
+  it("allows returning to a previously saved value after a remote correction", async () => {
+    vi.useFakeTimers();
+    const { queue, setGame, post } = setup(
+      vi.fn().mockResolvedValue({
+        ...fixture(),
+        revision: 3,
+        scores: [{ player_id: 1, round_number: 3, value: 10, version: 3 }],
+      }),
+    );
+    setGame({
+      ...fixture(),
+      revision: 2,
+      scores: [{ player_id: 1, round_number: 3, value: 20, version: 2 }],
+    });
+    queue.edit(1, 3, "10");
+    await queue.flush();
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ score: 10, expected_version: 2 }),
+    );
+    queue.dispose();
+  });
 });

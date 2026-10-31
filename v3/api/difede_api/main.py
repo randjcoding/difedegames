@@ -1,6 +1,5 @@
 import asyncio
-from contextlib import contextmanager
-from datetime import timedelta
+from datetime import date, datetime, timedelta, timezone
 import json
 import os
 import secrets
@@ -14,28 +13,23 @@ from starlette.concurrency import run_in_threadpool
 
 from .catalog import CATALOG
 from .db import make_engine, make_sessions, utcnow
+from .dependencies import authenticated
+from . import management, group_management, analytics, discovery
 from .games import GameError, accessible_game, can_view, command, create_game, iso, serialize, summaries, visible_games_query
 from .models import Audit, Game, Group, GroupAdmin, Invite, LoginThrottle, Membership, Person, User, WebSession
 from .schemas import (FinishCommand, GameCreate, GroupCreate, InviteAccept, InviteCreate, Login,
                       PersonCreate, RevisionCommand, RoundCommand, RoundPatch, ScoreCommand)
 from .security import (COOKIE_NAME, aware, check_csrf, check_origin, digest, hash_password,
                        is_admin, is_member, issue_session, me_payload, session_user,
-                       user_groups, verify_password)
-
-
-@contextmanager
-def authenticated(request, mutation=False):
-    with request.app.state.sessions.begin() as db:
-        user, sess = session_user(db, request.cookies.get(COOKIE_NAME))
-        if mutation:
-            check_csrf(request, sess)
-        yield db, user, sess
+                       user_groups, verify_password, is_superadmin)
 
 
 def people_payload(db, user):
     group_ids = {g['id'] for g in user_groups(db, user)}
     visible_ids = set(db.scalars(select(Membership.person_id).where(
         Membership.group_id.in_(group_ids), Membership.status == 'active')))
+    if is_superadmin(user):
+        visible_ids = set(db.scalars(select(Person.id)))
     if user.person_id:
         visible_ids.add(user.person_id)
     output = []
@@ -78,6 +72,10 @@ def create_app(engine=None):
     app = FastAPI(title='DiFede Games V3 pilot', docs_url=None, redoc_url=None)
     app.state.engine = engine or make_engine()
     app.state.sessions = make_sessions(app.state.engine)
+    app.include_router(management.router)
+    app.include_router(group_management.router)
+    app.include_router(analytics.router)
+    app.include_router(discovery.router)
 
     @app.middleware('http')
     async def security_headers(request, call_next):
@@ -202,6 +200,7 @@ def create_app(engine=None):
     @app.post('/api/groups/{group_id}/invites')
     def create_invite(group_id: int, data: InviteCreate, request: Request):
         with authenticated(request, True) as (db, user, _):
+            management.group_row(db, group_id)
             if not is_admin(db, user, group_id):
                 raise HTTPException(403, 'Only a group admin may invite people.')
             if data.person_id is not None:
@@ -295,6 +294,8 @@ def create_app(engine=None):
     @app.get('/api/games')
     def list_games(request: Request, status: str | None = None, slug: str | None = None,
                    q: str | None = Query(default=None, max_length=160),
+                   group_id: int | None = None, person_id: int | None = None,
+                   from_date: date | None = None, to_date: date | None = None,
                    limit: int = Query(default=50, ge=1, le=100), offset: int = Query(default=0, ge=0)):
         with authenticated(request) as (db, user, _):
             query = visible_games_query(db, user)
@@ -304,6 +305,17 @@ def create_app(engine=None):
                 query = query.where(Game.slug == slug)
             if q and q.strip():
                 query = query.where(Game.title.icontains(q.strip(), autoescape=True))
+            if group_id is not None:
+                query = query.where(Game.group_id == group_id)
+            if person_id is not None:
+                from .models import Seat
+                query = query.where(Game.id.in_(select(Seat.game_id).where(Seat.person_id == person_id)))
+            if from_date:
+                query = query.where(func.coalesce(Game.finished_at, Game.created_at) >= datetime.combine(from_date, datetime.min.time(), timezone.utc))
+            if to_date:
+                query = query.where(func.coalesce(Game.finished_at, Game.created_at) < datetime.combine(to_date + timedelta(days=1), datetime.min.time(), timezone.utc))
+            if from_date and to_date and from_date > to_date:
+                raise HTTPException(422, 'The start date must not follow the end date.')
             total = db.scalar(select(func.count()).select_from(query.subquery()))
             rows = list(db.scalars(query.order_by(Game.created_at.desc(), Game.id.desc()).limit(limit).offset(offset)))
             return {'games': summaries(db, rows, user), 'total': total}

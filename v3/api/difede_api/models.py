@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, false, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base, utcnow
@@ -15,6 +15,7 @@ class Person(Base):
     purged: Mapped[bool] = mapped_column(Boolean, default=False)
     privacy: Mapped[dict] = mapped_column(JSON, default=dict)
     legacy: Mapped[dict] = mapped_column(JSON, default=dict)
+    details: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
 
 
 class User(Base):
@@ -28,6 +29,10 @@ class User(Base):
     verified: Mapped[bool] = mapped_column(Boolean, default=True)
     approved: Mapped[bool] = mapped_column(Boolean, default=True)
     legacy: Mapped[dict] = mapped_column(JSON, default=dict)
+    site_role: Mapped[str] = mapped_column(String(16), default='member', server_default='member')
+    is_owner: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    preferences: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
+    details: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
 
 
 class Group(Base):
@@ -36,6 +41,7 @@ class Group(Base):
     name: Mapped[str] = mapped_column(String(120))
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     legacy: Mapped[dict] = mapped_column(JSON, default=dict)
+    settings: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
 
 
 class Membership(Base):
@@ -183,3 +189,34 @@ class LegacyRecord(Base):
     source_table: Mapped[str] = mapped_column(String(100), primary_key=True)
     source_key: Mapped[str] = mapped_column(String(160), primary_key=True)
     payload: Mapped[dict] = mapped_column(JSON)
+
+
+class ActionToken(Base):
+    __tablename__ = 'account_action_tokens'
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(30))
+    user_id: Mapped[int] = mapped_column(ForeignKey('accounts.id'))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GameLayout(Base):
+    __tablename__ = 'saved_game_layouts'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey('groups.id'))
+    slug: Mapped[str] = mapped_column(String(60))
+    name: Mapped[str] = mapped_column(String(80))
+    player_ids: Mapped[list] = mapped_column(JSON)
+    mode: Mapped[str] = mapped_column(String(16), default='rounds')
+    scoring_direction: Mapped[str | None] = mapped_column(String(8))
+    target_score: Mapped[int | None] = mapped_column(Integer)
+    title: Mapped[str | None] = mapped_column(String(160))
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    created_by: Mapped[int | None] = mapped_column(ForeignKey('accounts.id'))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    legacy: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (UniqueConstraint('group_id', 'slug', 'name'),
+        Index('one_default_saved_layout', 'group_id', 'slug', unique=True,
+            postgresql_where=text('is_default = true'), sqlite_where=text('is_default = 1')))

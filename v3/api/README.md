@@ -89,7 +89,39 @@ authorized snapshot; clients keep draft/base versions for conflict reconciliatio
 URL bearer token is needed. Dashboard/history cards bulk-load summaries without round/cell data;
 `GET /api/games` accepts `status`, `slug`, `q`, `limit` (1–100), and `offset`, returning `games,total`.
 
-The pilot intentionally does not activate old invitation/transfer workflows, implement account
-password recovery, or provide group/identity merge administration. Those records remain preserved
-for an explicit later workflow. Physical phone acceptance and deployment backup exercises remain
-separate release gates.
+## Additive management upgrade
+
+Existing V3 databases use `alembic upgrade head`; never rerun the strict-empty legacy importer.
+Migration 0003 adds account site roles, owner capability, account preferences/private profile
+copies, person details, group privacy settings and hashed action tokens. It backfills privileges
+only from matching immutable imported user records. Migration 0004 adds saved game setups and
+copies preserved legacy layouts by original ID and player order. Neither migration rewrites
+existing score cells, game results, account/person links or immutable imported records.
+
+After reviewing the migrated role counts, an operator may run
+`python -m difede_api.bootstrap_owner` with `OWNER_EMAIL` supplied from private operator
+configuration. The matched account must already be an active approved verified legacy superadmin.
+Runtime authorization uses the persisted capability, never an email allowlist. No email or
+password is printed by the bootstrap. Rollback retains the additive database schema and uses
+previous API/web images; destructive migration downgrade is disabled. New column defaults remain
+in the database so previous images can still create rows.
+
+Management, profile, preferences/favorites, directory and saved-setup routes are documented in
+`v3/PARITY_API.md`. Site admins can inspect all people/groups/games. Group leads manage their own
+memberships and manageable sole-group guests; another group's canonical identity/account stays
+under that person's/site-admin control. Leadership transfers, deactivation and membership removal
+protect the last active group lead and site owner. Historical corrections require a reason and
+saved revision, keep completed-game dates stable, and retain original imported results separately.
+
+Password changes and successful reset consumption revoke actual V3 sessions. Manual administrator
+reset links always work without email delivery. User-requested reset delivery is optional and only
+activated when `SMTP_HOST` and `SMTP_FROM` are configured; `SMTP_PORT` defaults to 587,
+`SMTP_STARTTLS=true` uses verified TLS, and `SMTP_USERNAME`/`SMTP_PASSWORD` stay in private runtime
+configuration. Without transport, requests return an honest generic contact-admin response and do
+not invalidate existing manual reset links. No successful-delivery claim is fabricated.
+
+Advanced identity merges/releases, active crew/alliance management, public registration and
+verification/resend, feedback threads, notifications, complete legacy rules content and pause
+workflows remain outside this bounded management phase. Their original records remain preserved.
+Anonymizing an active profile retains sensitive immutable provenance and is not a GDPR erasure
+guarantee. Physical phone acceptance and deployment backup exercises remain separate release gates.

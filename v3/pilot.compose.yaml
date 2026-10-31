@@ -29,6 +29,7 @@ services:
     build: {context: ./api}
     env_file:
       - /home/joe/.config/difedegames-v3/runtime.env
+      - /home/joe/.config/difedegames-v3/smtp.env
     networks: [edge, data]
     depends_on:
       db: {condition: service_healthy}
@@ -44,6 +45,21 @@ services:
       timeout: 5s
       retries: 4
       start_period: 10s
+    logging: *logging
+
+  migrator:
+    profiles: [tools]
+    image: difedegames-v3-api:pilot
+    env_file:
+      - /home/joe/.config/difedegames-v3/runtime.env
+    networks: [data]
+    entrypoint: ["alembic"]
+    command: ["upgrade", "head"]
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 100
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
     logging: *logging
 
   importer:
