@@ -1,5 +1,5 @@
 """Independent reconciliation of the retained snapshot into exact test DB only."""
-from collections import defaultdict
+from collections import Counter, defaultdict
 import json
 import os
 from pathlib import Path
@@ -48,6 +48,20 @@ def main():
             checks['legacy_board_seat_order_preserved'] = all(target_seats[gid][:len(pids)] == pids for gid, pids in legacy_seats.items())
             hashes = dict(legacy.execute(text('SELECT id,password_hash FROM users')).all())
             checks['password_hashes_preserved_without_display'] = hashes == dict(normalized.execute(text('SELECT id,password_hash FROM accounts')).all())
+            source_results = Counter(tuple(row) for row in legacy.execute(text('SELECT game_id,winner_id,winning_score,is_tie FROM game_stats')))
+            preserved_results = Counter((gid, row.get('winner_id'), row.get('winning_score'), row.get('is_tie'))
+                for gid, provenance in normalized.execute(text('SELECT id,legacy FROM game_sessions'))
+                for row in provenance.get('original_results', []))
+            checks['original_winner_score_and_tie_records_preserved'] = source_results == preserved_results
+            result_summary = dict(legacy.execute(text('''WITH cells AS (
+              SELECT active_game_id,player_id,round_number,score FROM game_scores
+              UNION ALL SELECT f.active_game_id,f.player_id,f.round_number,f.score FROM five_crowns_scores f
+              WHERE NOT EXISTS (SELECT 1 FROM game_scores u WHERE u.active_game_id=f.active_game_id
+                AND u.player_id=f.player_id AND u.round_number=f.round_number)
+            ), totals AS (SELECT active_game_id,player_id,sum(score) AS total FROM cells GROUP BY active_game_id,player_id)
+            SELECT count(*) AS original_result_rows,
+              count(*) FILTER (WHERE s.winner_id IS NOT NULL AND s.winning_score IS DISTINCT FROM t.total) AS scores_differ_from_cell_totals
+            FROM game_stats s LEFT JOIN totals t ON t.active_game_id=s.game_id AND t.player_id=s.winner_id''')).mappings().one())
             source_states = dict(legacy.execute(text('SELECT id,is_complete FROM active_games')).all())
             checks['completion_states_preserved'] = all((status == 'completed') == bool(source_states[gid]) for gid, status in normalized.execute(text('SELECT id,status FROM game_sessions')))
             checks['all_importer_reconciliations_pass'] = all(importer['checks'].values())
@@ -70,6 +84,7 @@ def main():
                 checks[f'{table}_immutable_under_runtime_owner'] = require_row and blocked
         report = {'database': 'difedegames_v3_test', 'source': parsed.database,
                   'source_tables': len(counts), 'source_rows': sum(counts.values()),
+                  'original_result_aggregate': result_summary,
                   'normalized_counts': importer['normalized'], 'checks': checks,
                   'passed': sum(checks.values()), 'total': len(checks)}
         print(json.dumps(report, indent=2))
